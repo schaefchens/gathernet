@@ -1,0 +1,15 @@
+{
+  "name": "@gathernet/e2e",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.53.2",
+    "@types/node": "^24.0.13",
+    "typescript": "^5.8.3"
+  }
+}

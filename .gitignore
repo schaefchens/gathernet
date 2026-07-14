@@ -1,0 +1,24 @@
+# deps
+node_modules/
+
+# build outputs
+dist/
+packages/mls-client/wasm/
+crates/target/
+target/
+
+# turbo
+.turbo/
+
+# env
+.env
+.env.local
+
+# test artifacts
+coverage/
+playwright-report/
+test-results/
+
+# editor/os
+.DS_Store
+*.local

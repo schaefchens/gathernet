@@ -1,0 +1,22 @@
+name: gathernet-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: gathernet
+      POSTGRES_PASSWORD: gathernet_dev
+      POSTGRES_DB: gathernet
+    ports:
+      # 55432 on the host: avoids colliding with any locally installed postgres
+      - '55432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U gathernet -d gathernet']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

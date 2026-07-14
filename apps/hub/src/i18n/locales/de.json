@@ -1,0 +1,123 @@
+{
+  "common": {
+    "appName": "Gathernet",
+    "continue": "Weiter",
+    "back": "Zurück",
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "delete": "Löschen",
+    "close": "Schließen",
+    "copy": "Kopieren",
+    "copied": "Kopiert",
+    "loading": "Lädt…",
+    "error": "Etwas ist schiefgelaufen",
+    "retry": "Erneut versuchen",
+    "connecting": "Verbindung wird wiederhergestellt…"
+  },
+  "welcome": {
+    "title": "Gathernet",
+    "tagline": "Gemeinschaft, privat.",
+    "create": "Konto erstellen",
+    "restore": "Ich habe eine Wiederherstellungsphrase",
+    "privacyNote": "Keine E-Mail. Keine Telefonnummer. Deine Wiederherstellungsphrase ist dein Schlüssel."
+  },
+  "create": {
+    "nameTitle": "Wie sollen Freunde dich nennen?",
+    "nameHint": "Dein Anzeigename ist nur für Menschen sichtbar, mit denen du dich verbindest. Du kannst ihn jederzeit ändern.",
+    "namePlaceholder": "Anzeigename",
+    "phraseTitle": "Deine Wiederherstellungsphrase",
+    "phraseWarning": "Schreibe diese 12 Wörter der Reihe nach auf Papier. Sie sind der einzige Weg, dein Konto wiederherzustellen. Wer sie besitzt, besitzt dein Konto — Gathernet kann sie nicht zurücksetzen oder wiederherstellen.",
+    "phraseWritten": "Ich habe sie aufgeschrieben",
+    "confirmTitle": "Phrase bestätigen",
+    "confirmHint": "Gib Wort {{index}} deiner Phrase ein.",
+    "confirmError": "Das Wort stimmt nicht. Prüfe dein Papier und versuche es erneut.",
+    "unlockTitle": "Entsperr-Passwort festlegen",
+    "unlockHint": "Dieses Passwort schützt deine Schlüssel nur auf diesem Gerät. Es wird nirgendwo sonst gespeichert und kann nicht zurückgesetzt werden — falls du es vergisst, stelle dein Konto mit der Wiederherstellungsphrase wieder her.",
+    "unlockPlaceholder": "Entsperr-Passwort",
+    "unlockRepeatPlaceholder": "Passwort wiederholen",
+    "unlockMismatch": "Passwörter stimmen nicht überein.",
+    "unlockTooShort": "Mindestens 8 Zeichen verwenden.",
+    "deviceNameTitle": "Dieses Gerät benennen",
+    "deviceNamePlaceholder": "z. B. Chrome auf meinem Laptop",
+    "creating": "Konto wird erstellt…",
+    "done": "Willkommen bei Gathernet"
+  },
+  "restore": {
+    "title": "Konto wiederherstellen",
+    "hint": "Gib deine 12-Wörter-Phrase ein, durch Leerzeichen getrennt.",
+    "placeholder": "worship gather bread …",
+    "invalid": "Das ist keine gültige Wiederherstellungsphrase.",
+    "notFound": "Kein Konto für diese Phrase gefunden.",
+    "deviceNameTitle": "Dieses Gerät benennen",
+    "restoring": "Wird wiederhergestellt…",
+    "rejoining": "Verschlüsselte Chats werden wieder verbunden…"
+  },
+  "unlock": {
+    "title": "Willkommen zurück",
+    "placeholder": "Entsperr-Passwort",
+    "action": "Entsperren",
+    "wrong": "Falsches Passwort.",
+    "forget": "Dieses Gerät vergessen",
+    "forgetConfirm": "Das entfernt deine Schlüssel und Nachrichten aus diesem Browser. Du brauchst deine Wiederherstellungsphrase, um wieder hineinzukommen. Fortfahren?"
+  },
+  "friends": {
+    "title": "Freunde",
+    "empty": "Noch keine Freunde. Lade jemanden ein, dem du vertraust.",
+    "add": "Freund hinzufügen",
+    "presence": {
+      "online": "Online",
+      "away": "Abwesend",
+      "offline": "Offline",
+      "invisible": "Unsichtbar"
+    },
+    "remove": "Freund entfernen",
+    "removeConfirm": "{{name}} aus deinen Freunden entfernen?",
+    "block": "Blockieren",
+    "blockConfirm": "{{name}} blockieren? Eine erneute Verbindung ist dann nicht mehr möglich.",
+    "chat": "Chat"
+  },
+  "addFriend": {
+    "title": "Freund hinzufügen",
+    "myInvite": "Meine Einladung",
+    "enterCode": "Code eingeben",
+    "scan": "Scannen",
+    "inviteHint": "Teile diesen Code oder QR-Code mit jemandem, dem du vertraust. Er funktioniert einmal und läuft in 7 Tagen ab.",
+    "newInvite": "Neuer Einladungscode",
+    "codePlaceholder": "Einladungscode des Freundes",
+    "accept": "Verbinden",
+    "accepted": "Du bist jetzt mit {{name}} befreundet",
+    "invalidCode": "Der Code ist ungültig oder wurde bereits verwendet.",
+    "selfInvite": "Das ist dein eigener Einladungscode.",
+    "alreadyFriends": "Ihr seid bereits befreundet.",
+    "scanHint": "Richte deine Kamera auf den QR-Code deines Freundes.",
+    "scanUnsupported": "Kamera-Scan wird in diesem Browser nicht unterstützt — gib stattdessen den Code ein."
+  },
+  "chat": {
+    "placeholder": "Nachricht…",
+    "send": "Senden",
+    "encrypted": "Nachrichten sind Ende-zu-Ende-verschlüsselt",
+    "noMessages": "Noch keine Nachrichten. Sag hallo!",
+    "pending": "Wird gesendet…",
+    "sent": "Gesendet",
+    "settingUp": "Verschlüsselung wird eingerichtet…",
+    "cannotSend": "Die Verschlüsselung für diesen Chat wird noch eingerichtet."
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "profile": "Profil",
+    "displayName": "Anzeigename",
+    "language": "Sprache",
+    "presenceDefault": "Standard-Präsenz",
+    "devices": "Geräte",
+    "thisDevice": "Dieses Gerät",
+    "lastSeen": "Zuletzt gesehen {{when}}",
+    "revoke": "Widerrufen",
+    "revokeConfirm": "{{name}} widerrufen? Das Gerät wird sofort abgemeldet und aus deinen verschlüsselten Chats entfernt.",
+    "revoked": "Widerrufen",
+    "addDevice": "Um ein Gerät hinzuzufügen, öffne Gathernet dort und wähle „Ich habe eine Wiederherstellungsphrase“."
+  },
+  "pwa": {
+    "updateAvailable": "Eine neue Version von Gathernet ist verfügbar.",
+    "reload": "Aktualisieren"
+  }
+}

@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["mls-wasm"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

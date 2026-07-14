@@ -1,0 +1,123 @@
+{
+  "common": {
+    "appName": "Gathernet",
+    "continue": "Continue",
+    "back": "Back",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "close": "Close",
+    "copy": "Copy",
+    "copied": "Copied",
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "retry": "Try again",
+    "connecting": "Reconnecting…"
+  },
+  "welcome": {
+    "title": "Gathernet",
+    "tagline": "Fellowship, privately.",
+    "create": "Create account",
+    "restore": "I have a recovery phrase",
+    "privacyNote": "No email. No phone number. Your recovery phrase is your key."
+  },
+  "create": {
+    "nameTitle": "What should friends call you?",
+    "nameHint": "Your display name is only shown to people you connect with. You can change it anytime.",
+    "namePlaceholder": "Display name",
+    "phraseTitle": "Your recovery phrase",
+    "phraseWarning": "Write these 12 words down on paper, in order. They are the only way to recover your account. Anyone who has them has your account — Gathernet cannot reset or recover them for you.",
+    "phraseWritten": "I wrote it down",
+    "confirmTitle": "Confirm your phrase",
+    "confirmHint": "Enter word {{index}} of your phrase.",
+    "confirmError": "That word doesn't match. Check your paper and try again.",
+    "unlockTitle": "Set an unlock password",
+    "unlockHint": "This password protects your keys on this device only. It is not stored anywhere else and cannot be reset — if you forget it, restore with your recovery phrase.",
+    "unlockPlaceholder": "Unlock password",
+    "unlockRepeatPlaceholder": "Repeat password",
+    "unlockMismatch": "Passwords don't match.",
+    "unlockTooShort": "Use at least 8 characters.",
+    "deviceNameTitle": "Name this device",
+    "deviceNamePlaceholder": "e.g. Chrome on my laptop",
+    "creating": "Creating your account…",
+    "done": "Welcome to Gathernet"
+  },
+  "restore": {
+    "title": "Restore your account",
+    "hint": "Enter your 12-word recovery phrase, separated by spaces.",
+    "placeholder": "worship gather bread …",
+    "invalid": "That's not a valid recovery phrase.",
+    "notFound": "No account found for this phrase.",
+    "deviceNameTitle": "Name this device",
+    "restoring": "Restoring…",
+    "rejoining": "Rejoining your encrypted chats…"
+  },
+  "unlock": {
+    "title": "Welcome back",
+    "placeholder": "Unlock password",
+    "action": "Unlock",
+    "wrong": "Wrong password.",
+    "forget": "Forget this device",
+    "forgetConfirm": "This removes your keys and messages from this browser. You will need your recovery phrase to get back in. Continue?"
+  },
+  "friends": {
+    "title": "Friends",
+    "empty": "No friends yet. Invite someone you trust.",
+    "add": "Add friend",
+    "presence": {
+      "online": "Online",
+      "away": "Away",
+      "offline": "Offline",
+      "invisible": "Invisible"
+    },
+    "remove": "Remove friend",
+    "removeConfirm": "Remove {{name}} from your friends?",
+    "block": "Block",
+    "blockConfirm": "Block {{name}}? They won't be able to reconnect with you.",
+    "chat": "Chat"
+  },
+  "addFriend": {
+    "title": "Add a friend",
+    "myInvite": "My invite",
+    "enterCode": "Enter code",
+    "scan": "Scan",
+    "inviteHint": "Share this code or QR with someone you trust. It works once and expires in 7 days.",
+    "newInvite": "New invite code",
+    "codePlaceholder": "Friend's invite code",
+    "accept": "Connect",
+    "accepted": "You are now friends with {{name}}",
+    "invalidCode": "That code is invalid or was already used.",
+    "selfInvite": "That's your own invite code.",
+    "alreadyFriends": "You are already friends.",
+    "scanHint": "Point your camera at your friend's QR code.",
+    "scanUnsupported": "Camera scanning isn't supported in this browser — enter the code instead."
+  },
+  "chat": {
+    "placeholder": "Message…",
+    "send": "Send",
+    "encrypted": "Messages are end-to-end encrypted",
+    "noMessages": "No messages yet. Say hello!",
+    "pending": "Sending…",
+    "sent": "Sent",
+    "settingUp": "Setting up encryption…",
+    "cannotSend": "Encryption is still being set up for this chat."
+  },
+  "settings": {
+    "title": "Settings",
+    "profile": "Profile",
+    "displayName": "Display name",
+    "language": "Language",
+    "presenceDefault": "Default presence",
+    "devices": "Devices",
+    "thisDevice": "This device",
+    "lastSeen": "Last seen {{when}}",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke {{name}}? It will be signed out immediately and removed from your encrypted chats.",
+    "revoked": "Revoked",
+    "addDevice": "To add a device, open Gathernet there and choose “I have a recovery phrase”."
+  },
+  "pwa": {
+    "updateAvailable": "A new version of Gathernet is available.",
+    "reload": "Update"
+  }
+}

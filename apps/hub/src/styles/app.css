@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+/*
+ * Gathernet theme — dark-first, biblical color direction:
+ * midnight indigo surfaces, old-gold accents, parchment text.
+ */
+@theme {
+  --color-base: #0b0f1a;
+  --color-raised: #121828;
+  --color-overlay: #1a2138;
+  --color-edge: #26304b;
+
+  --color-ink: #ede6d6;
+  --color-ink-soft: #a8a395;
+  --color-ink-faint: #6e6c63;
+
+  --color-gold: #c9a227;
+  --color-gold-bright: #e0b93e;
+  --color-indigo: #4c5b9e;
+  --color-indigo-soft: #6b7bc4;
+
+  --color-olive: #7ba05b;
+  --color-amber: #c9a227;
+  --color-danger: #b4553f;
+
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Cormorant Garamond", Georgia, serif;
+
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-base text-ink font-sans antialiased;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* Recovery-phrase display: discourage screenshots-by-default styling cues */
+.phrase-word {
+  @apply bg-overlay border border-edge rounded-md px-3 py-2 font-mono text-sm;
+}
+
+input,
+textarea {
+  @apply bg-overlay border border-edge rounded-md px-3 py-2 text-ink placeholder:text-ink-faint focus:outline-none focus:border-indigo-soft w-full;
+}
+
+button {
+  @apply cursor-pointer;
+}
+
+.btn-gold,
+.btn-quiet,
+.btn-danger {
+  @apply inline-block text-center rounded-md px-4 py-2 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+.btn-gold {
+  @apply bg-gold text-base hover:bg-gold-bright;
+}
+
+.btn-quiet {
+  @apply bg-raised border border-edge text-ink hover:border-indigo-soft;
+}
+
+.btn-danger {
+  @apply bg-transparent border border-danger text-danger hover:bg-danger hover:text-ink;
+}
+
+.card {
+  @apply bg-raised border border-edge rounded-lg p-6;
+}

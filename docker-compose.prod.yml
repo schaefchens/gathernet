@@ -1,0 +1,45 @@
+# Production-shaped stack, runnable locally:
+#   docker compose -f docker-compose.prod.yml up --build
+# Hub + API on http://localhost:8080. TLS is a fronting proxy's job later.
+name: gathernet
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: gathernet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gathernet_dev}
+      POSTGRES_DB: gathernet
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U gathernet -d gathernet']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    environment:
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 4000
+      DATABASE_URL: postgres://gathernet:${POSTGRES_PASSWORD:-gathernet_dev}@postgres:5432/gathernet
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Migrations run at boot (single node); split into a one-shot job when scaling out.
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/hub/Dockerfile
+    ports:
+      - '8080:8080'
+    depends_on:
+      - server
+
+volumes:
+  pgdata:

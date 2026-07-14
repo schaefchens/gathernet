@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+**/dist
+packages/mls-client/wasm
+crates/target
+.git
+.turbo
+**/.turbo
+e2e/test-results
+e2e/playwright-report
