@@ -53,6 +53,13 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
     })
   }
 
+  // Encrypted app-storage blobs arrive as raw bytes.
+  app.addContentTypeParser(
+    'application/octet-stream',
+    { parseAs: 'buffer' },
+    (_request, body, done) => done(null, body),
+  )
+
   app.addHook('onSend', async (_request, reply) => {
     reply.header('x-content-type-options', 'nosniff')
     reply.header('x-frame-options', 'DENY')

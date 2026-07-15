@@ -1,12 +1,32 @@
-import { authorizeAppRequestSchema } from '@gathernet/shared'
+import {
+  approveGrantCodeRequestSchema,
+  authorizeAppRequestSchema,
+  createGrantCodeRequestSchema,
+  grantUserCodeSchema,
+  pollGrantCodeRequestSchema,
+} from '@gathernet/shared'
 import { and, eq } from 'drizzle-orm'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { z } from 'zod'
 import type { Db } from '../../db/index.ts'
 import { appSessions } from '../../db/schema.ts'
 import { hashPrefixedToken } from '../../lib/crypto.ts'
 import { getMe, ServiceError } from '../accounts/service.ts'
 import { getAppConfig, getPublicationCard } from '../publications/service.ts'
+import {
+  createGrantCode,
+  pollGrantCode,
+  previewGrantCode,
+  resolveGrantCode,
+} from './grant-codes.ts'
 import { grantAndMintSession, listGrants, revokeGrant } from './sessions.ts'
+import { deleteStorage, getStorage, listStorage, putStorage } from './storage.ts'
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const pollBodySchema = pollGrantCodeRequestSchema.extend({
+  waitSeconds: z.number().int().min(0).max(25).default(20),
+})
 
 export interface AppRoutesOptions {
   db: Db
@@ -112,4 +132,128 @@ export function registerAppRoutes(
     }
     return { ok: true }
   })
+
+  /* ---------- device-code grant flow ---------- */
+
+  // App-side (no auth; the browser Origin header must be registered).
+  app.post('/api/v1/app/grant-codes', async (request, reply) => {
+    const body = createGrantCodeRequestSchema.parse(request.body)
+    reply.status(201)
+    return createGrantCode(db, body.appId, body.scopes, request.headers.origin, body.ephemeralPk)
+  })
+
+  // App-side long-poll for the outcome.
+  app.post('/api/v1/app/grant-codes/poll', async (request, reply) => {
+    const body = pollBodySchema.parse(request.body)
+    const deadline = Date.now() + body.waitSeconds * 1000
+    for (;;) {
+      const result = await pollGrantCode(db, body.pollSecret)
+      if (result.status === 'granted') return result
+      if (result.status === 'denied') return reply.status(410).send({ error: 'denied' })
+      if (result.status === 'gone') return reply.status(410).send({ error: 'gone' })
+      if (Date.now() >= deadline) return reply.status(202).send({ status: 'pending' })
+      await sleep(1500)
+    }
+  })
+
+  // Hub-side: preview + approve/deny (guess surface — tightly rate limited).
+  app.get<{ Params: { userCode: string } }>(
+    '/api/v1/apps/grant-codes/:userCode',
+    {
+      preHandler: authenticate,
+      config: { rateLimit: { max: 10, timeWindow: '5 minutes' } },
+    },
+    async (request) => {
+      requireSession(request)
+      const userCode = grantUserCodeSchema.parse(request.params.userCode)
+      return previewGrantCode(db, userCode)
+    },
+  )
+
+  app.post<{ Params: { userCode: string } }>(
+    '/api/v1/apps/grant-codes/:userCode/approve',
+    {
+      preHandler: authenticate,
+      config: { rateLimit: { max: 10, timeWindow: '5 minutes' } },
+    },
+    async (request) => {
+      const session = requireSession(request)
+      const userCode = grantUserCodeSchema.parse(request.params.userCode)
+      const body = approveGrantCodeRequestSchema.parse(request.body)
+      await resolveGrantCode(db, session.accountId, userCode, 'approve', body)
+      return { ok: true }
+    },
+  )
+
+  app.post<{ Params: { userCode: string } }>(
+    '/api/v1/apps/grant-codes/:userCode/deny',
+    { preHandler: authenticate },
+    async (request) => {
+      const session = requireSession(request)
+      const userCode = grantUserCodeSchema.parse(request.params.userCode)
+      await resolveGrantCode(db, session.accountId, userCode, 'deny')
+      return { ok: true }
+    },
+  )
+
+  /* ---------- encrypted app storage ---------- */
+
+  app.get('/api/v1/app/storage', { preHandler: appAuthenticate('storage') }, async (request) => {
+    const session = requireAppSession(request)
+    return { entries: await listStorage(db, session.appId, session.accountId) }
+  })
+
+  app.get<{ Params: { key: string } }>(
+    '/api/v1/app/storage/:key',
+    { preHandler: appAuthenticate('storage') },
+    async (request, reply) => {
+      const session = requireAppSession(request)
+      const row = await getStorage(db, session.appId, session.accountId, request.params.key)
+      reply.header('etag', `"${row.version}"`)
+      reply.type('application/octet-stream')
+      return reply.send(row.ciphertext)
+    },
+  )
+
+  app.put<{ Params: { key: string } }>(
+    '/api/v1/app/storage/:key',
+    { preHandler: appAuthenticate('storage') },
+    async (request, reply) => {
+      const session = requireAppSession(request)
+      const body = request.body
+      if (!Buffer.isBuffer(body)) throw new ServiceError(400, 'binary_body_required')
+
+      const ifMatch = request.headers['if-match']
+      const ifNoneMatch = request.headers['if-none-match']
+      const ifVersion =
+        typeof ifMatch === 'string' ? Number(ifMatch.replaceAll('"', '')) : undefined
+      if (ifMatch !== undefined && Number.isNaN(ifVersion)) {
+        throw new ServiceError(400, 'invalid_if_match')
+      }
+
+      const result = await putStorage(
+        db,
+        session.appId,
+        session.accountId,
+        request.params.key,
+        body,
+        {
+          ifVersion,
+          createOnly: ifNoneMatch === '*',
+        },
+      )
+      reply.header('etag', `"${result.version}"`)
+      return { version: result.version }
+    },
+  )
+
+  app.delete<{ Params: { key: string } }>(
+    '/api/v1/app/storage/:key',
+    { preHandler: appAuthenticate('storage') },
+    async (request) => {
+      const session = requireAppSession(request)
+      await deleteStorage(db, session.appId, session.accountId, request.params.key)
+      return { ok: true }
+    },
+  )
 }
