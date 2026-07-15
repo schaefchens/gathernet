@@ -1,0 +1,21 @@
+{
+  "name": "@gathernet/mls-sync",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Transport-agnostic MLS group sync engine, shared by the Hub (DM chat) and SDKs (rooms/channels).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@gathernet/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

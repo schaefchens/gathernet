@@ -1,3 +1,14 @@
+import {
+  b64,
+  bytesToHex,
+  ConflictError,
+  type CursorStore,
+  fromB64,
+  hexToBytes,
+  MlsSyncEngine,
+  type SnapshotStore,
+  type SyncTransport,
+} from '@gathernet/mls-sync'
 import type {
   ClaimedKeyPackage,
   GroupSummary,
@@ -34,47 +45,113 @@ export const useChat = create<ChatUiState>(() => ({ groups: {}, messages: {} }))
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
-const hexToBytes = (hex: string): Uint8Array =>
-  Uint8Array.from(hex.match(/.{2}/g) ?? [], (b) => Number.parseInt(b, 16))
-const bytesToHex = (bytes: Uint8Array): string =>
-  [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
-const b64 = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes))
-const fromB64 = (text: string): Uint8Array => Uint8Array.from(atob(text), (c) => c.charCodeAt(0))
+/* ---------- MlsSyncEngine ports, wired to the Hub's storage/network ---------- */
+
+const snapshots: SnapshotStore = {
+  get: (groupId) => groupStore.get(groupId),
+  put: (groupId, snapshot) => groupStore.put(groupId, snapshot),
+  delete: (groupId) => groupStore.delete(groupId),
+  keys: async () => (await groupStore.keys()).map(String),
+}
 
 const cursorKey = (groupId: string) => `gn.cursor.${groupId}`
-const getCursor = (groupId: string): number =>
-  Number(localStorage.getItem(cursorKey(groupId)) ?? '0')
-const setCursor = (groupId: string, seq: number): void =>
-  localStorage.setItem(cursorKey(groupId), String(Math.max(seq, getCursor(groupId))))
+const cursors: CursorStore = {
+  get: (groupId) => Number(localStorage.getItem(cursorKey(groupId)) ?? '0'),
+  set: (groupId, seq) => localStorage.setItem(cursorKey(groupId), String(seq)),
+}
+
+const transport: SyncTransport = {
+  async fetchMessages(groupId, afterSeq) {
+    const { messages } = await api<{ messages: MailboxMessage[] }>(
+      'GET',
+      `/api/v1/mls/groups/${groupId}/messages?after=${afterSeq}`,
+    )
+    return messages
+  },
+  async postCommit(groupId, body) {
+    try {
+      await api('POST', `/api/v1/mls/groups/${groupId}/commits`, body)
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const current = (err.body as { currentEpoch?: unknown } | null)?.currentEpoch
+        throw new ConflictError(typeof current === 'number' ? current : undefined)
+      }
+      throw err
+    }
+  },
+  async fetchGroupInfo(groupId) {
+    const { groups } = await api<{ groups: GroupSummary[] }>('GET', '/api/v1/mls/groups')
+    const group = groups.find((g) => g.groupId === groupId)
+    return group ? { groupInfo: group.groupInfo, epoch: group.currentEpoch } : null
+  },
+  async sendCiphertext(groupId, epoch, ciphertextB64) {
+    return (await wsClient.send('chat.send', {
+      groupId,
+      epoch,
+      ciphertext: ciphertextB64,
+    })) as { seq: number }
+  },
+  async ackSeq(groupId, seq) {
+    try {
+      await wsClient.send('chat.ack', { groupId, seq })
+    } catch {
+      // offline — server will re-deliver; cursor makes reprocessing a no-op
+    }
+  },
+  async ackWelcome(welcomeId) {
+    try {
+      await wsClient.send('welcome.ack', { welcomeId })
+    } catch {
+      // offline — the welcome stays queued server-side; harmless duplicate later
+    }
+  },
+}
 
 /**
- * Owns the MlsDevice and all MLS orchestration. Invariant everywhere:
- * persist the returned snapshot BEFORE releasing ciphertext to the network
- * and BEFORE acking a processed message — an old snapshot replayed after
- * either would reuse ratchet keys.
+ * Hub adapter around the transport-agnostic MlsSyncEngine (which owns the
+ * persist-snapshot-before-transmit/ack invariants and per-group queues).
+ * This store keeps the DM-specific parts: ws wiring, group bootstrap,
+ * key-package maintenance, and the {t, ts} JSON message payload format.
  */
 class ChatStore {
   private crypto: HubCrypto | null = null
   private device: MlsDeviceHandle | null = null
   private record: DeviceRecord | null = null
+  private engine: MlsSyncEngine | null = null
   private unsubscribes: (() => void)[] = []
-  private queues = new Map<string, Promise<void>>()
 
   async init(record: DeviceRecord): Promise<void> {
     this.crypto = await loadCrypto()
     this.record = record
-    this.device = this.crypto.createDevice(record.credential, record.deviceSecret)
+    const device = this.crypto.createDevice(record.credential, record.deviceSecret)
+    this.device = device
+    this.engine = new MlsSyncEngine({
+      device,
+      deviceId: record.deviceId,
+      snapshots,
+      cursors,
+      transport,
+      onApplication: async (message) => {
+        const body = JSON.parse(decoder.decode(message.plaintext)) as { t: string; ts: number }
+        const stored: StoredMessage = {
+          groupId: message.groupId,
+          seq: message.seq,
+          senderAccountId: message.senderAccountId ?? 'unknown',
+          text: body.t,
+          sentAt: body.ts,
+          outgoing: false,
+        }
+        await messageStore.put(stored)
+        appendMessage(stored)
+      },
+    })
 
     // Restore MLS group state and pending key-package secrets.
-    for (const key of await groupStore.keys()) {
-      const groupId = String(key)
-      const snapshot = await groupStore.get(groupId)
-      if (snapshot) this.device.loadGroup(hexToBytes(groupId), snapshot)
-    }
+    await this.engine.loadPersistedGroups()
     for (const key of await kpStore.keys()) {
       const ref = String(key)
       const privateState = await kpStore.get(ref)
-      if (privateState) this.device.importKeyPackagePrivate(hexToBytes(ref), privateState)
+      if (privateState) device.importKeyPackagePrivate(hexToBytes(ref), privateState)
     }
 
     // Load decrypted history into UI state.
@@ -86,23 +163,21 @@ class ChatStore {
     useChat.setState({ messages })
 
     this.unsubscribes.push(
-      // NOTE: syncAll is never itself enqueued — it enqueues (and awaits)
-      // per-group leaf work, so putting it on a group queue would deadlock.
+      // NOTE: syncAll is never itself put on a group queue — it awaits
+      // per-group engine entry points, so enqueueing it would deadlock.
       wsClient.on('group.created', () => {
         this.syncAll().catch((err) => console.error('syncAll failed', err))
       }),
       wsClient.on('welcome', (m) => {
-        void this.enqueue(m.payload.groupId, () =>
-          this.handleWelcome({
-            welcomeId: m.payload.welcomeId,
-            groupId: m.payload.groupId,
-            payload: m.payload.payload,
-          }),
-        )
+        void this.handleWelcome({
+          welcomeId: m.payload.welcomeId,
+          groupId: m.payload.groupId,
+          payload: m.payload.payload,
+        })
       }),
       wsClient.on('chat.message', (m) => {
-        void this.enqueue(m.payload.groupId, () =>
-          this.processMailboxMessage({
+        this.engine
+          ?.processMailboxMessage({
             groupId: m.payload.groupId,
             seq: m.payload.seq,
             kind: m.payload.kind,
@@ -110,8 +185,8 @@ class ChatStore {
             senderDevice: m.payload.senderDevice,
             payload: m.payload.payload,
             sentAt: m.payload.sentAt,
-          }),
-        )
+          })
+          .catch((err) => console.error('chat work failed', m.payload.groupId, err))
       }),
       wsClient.on('hello.ok', (m) => {
         this.maintainKeyPackages(m.payload.kpRemaining).catch((err) =>
@@ -135,25 +210,17 @@ class ChatStore {
   reset(): void {
     for (const unsubscribe of this.unsubscribes) unsubscribe()
     this.unsubscribes = []
+    this.engine = null
     this.device = null
     this.crypto = null
     this.record = null
-    this.queues.clear()
     useChat.setState({ groups: {}, messages: {} })
   }
 
-  /** Serialize all MLS work per group. */
-  private enqueue(groupId: string, work: () => Promise<void>): Promise<void> {
-    const prev = this.queues.get(groupId) ?? Promise.resolve()
-    const next = prev.then(work).catch((err) => {
-      console.error('chat work failed', groupId, err)
-    })
-    this.queues.set(groupId, next)
-    return next
-  }
-
   async syncAll(): Promise<void> {
-    if (!this.device) return
+    const engine = this.engine
+    const record = this.record
+    if (!engine || !record) return
     const { groups } = await api<{ groups: GroupSummary[] }>('GET', '/api/v1/mls/groups')
 
     const byFriend: Record<string, ChatGroup> = {}
@@ -161,7 +228,7 @@ class ChatStore {
       byFriend[group.friendAccountId] = {
         groupId: group.groupId,
         friendAccountId: group.friendAccountId,
-        ready: group.isMember && (await groupStore.get(group.groupId)) !== null,
+        ready: group.isMember && engine.hasGroup(group.groupId),
       }
     }
     useChat.setState({ groups: byFriend })
@@ -169,44 +236,61 @@ class ChatStore {
     // Pending welcomes first — they make us a member.
     const { welcomes } = await api<{ welcomes: PendingWelcome[] }>('GET', '/api/v1/mls/welcomes')
     for (const welcome of welcomes) {
-      await this.enqueue(welcome.groupId, () => this.handleWelcome(welcome))
+      await this.handleWelcome(welcome)
     }
 
     for (const group of groups) {
-      await this.enqueue(group.groupId, async () => {
-        const hasLocal = (await groupStore.get(group.groupId)) !== null
-        if (group.isMember && hasLocal) {
-          await this.catchUp(group.groupId)
+      try {
+        if (group.isMember && engine.hasGroup(group.groupId)) {
+          await engine.catchUp(group.groupId)
         } else if (!group.isMember && group.creator && group.currentEpoch === 0) {
           await this.bootstrapAsCreator(group)
-        } else if (!group.isMember && group.groupInfo && !hasLocal) {
+        } else if (!group.isMember && group.groupInfo && !engine.hasGroup(group.groupId)) {
           // Restored device: join every existing group via external commit.
-          await this.externalJoin(group)
+          const joined = await engine.externalJoinWithRetry(
+            group.groupId,
+            { groupInfo: group.groupInfo, epoch: group.currentEpoch },
+            record.deviceId,
+          )
+          if (joined) this.refreshReadiness()
         }
-      })
+      } catch (err) {
+        console.error('chat work failed', group.groupId, err)
+      }
     }
     this.refreshReadiness()
   }
 
+  private async handleWelcome(welcome: PendingWelcome): Promise<void> {
+    const engine = this.engine
+    if (!engine) return
+    try {
+      const joined = await engine.handleWelcome(welcome)
+      if (joined) this.refreshReadiness()
+    } catch (err) {
+      console.error('chat work failed', welcome.groupId, err)
+    }
+  }
+
   private refreshReadiness(): void {
-    void (async () => {
-      const groups = { ...useChat.getState().groups }
-      for (const friendId of Object.keys(groups)) {
-        const group = groups[friendId]
-        if (group && !group.ready) {
-          groups[friendId] = { ...group, ready: (await groupStore.get(group.groupId)) !== null }
-        }
+    const engine = this.engine
+    if (!engine) return
+    const groups = { ...useChat.getState().groups }
+    for (const friendId of Object.keys(groups)) {
+      const group = groups[friendId]
+      if (group && !group.ready) {
+        groups[friendId] = { ...group, ready: engine.hasGroup(group.groupId) }
       }
-      useChat.setState({ groups })
-    })()
+    }
+    useChat.setState({ groups })
   }
 
   /** The invite accepter's device builds the MLS group and adds everyone. */
   private async bootstrapAsCreator(group: GroupSummary): Promise<void> {
-    const device = this.device
+    const engine = this.engine
     const record = this.record
-    if (!device || !record) return
-    if ((await groupStore.get(group.groupId)) !== null) return
+    if (!engine || !record) return
+    if (engine.hasGroup(group.groupId)) return
 
     const claim = await api<{ keyPackages: ClaimedKeyPackage[] }>(
       'POST',
@@ -221,207 +305,35 @@ class ChatStore {
       return
     }
 
-    const groupIdBytes = hexToBytes(group.groupId)
-    device.createGroup(groupIdBytes)
-    const result = device.addMembers(
-      groupIdBytes,
-      others.map((kp) => fromB64(kp.data)),
+    const outcome = await engine.createGroupWithMembers(
+      group.groupId,
+      others.map((kp) => ({ deviceId: kp.deviceId, keyPackage: fromB64(kp.data) })),
     )
-
-    // Persist BEFORE the commit leaves this device.
-    await groupStore.put(group.groupId, result.snapshot)
-    try {
-      await api('POST', `/api/v1/mls/groups/${group.groupId}/commits`, {
-        epoch: 0,
-        commit: b64(result.commit),
-        groupInfo: b64(result.groupInfo),
-        welcomes: others.map((kp, i) => ({
-          deviceId: kp.deviceId,
-          payload: b64(result.welcomes[i] ?? result.welcomes[0] ?? result.commit),
-        })),
-        memberChanges: { adds: others.map((kp) => kp.deviceId), removes: [] },
-      })
-      setCursor(group.groupId, 1)
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        // Another of our devices won the race — drop our local attempt and
-        // wait for its Welcome.
-        await groupStore.delete(group.groupId)
-        return
-      }
-      throw err
-    }
-    this.refreshReadiness()
-  }
-
-  private async externalJoin(group: GroupSummary): Promise<void> {
-    const device = this.device
-    const record = this.record
-    if (!device || !record || !group.groupInfo) return
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const info =
-        attempt === 0
-          ? { groupInfo: group.groupInfo, epoch: group.currentEpoch }
-          : await this.refetchGroupInfo(group.groupId)
-      if (!info?.groupInfo) return
-
-      const result = device.externalJoin(fromB64(info.groupInfo))
-      await groupStore.put(group.groupId, result.snapshot)
-      try {
-        await api('POST', `/api/v1/mls/groups/${group.groupId}/commits`, {
-          epoch: info.epoch,
-          commit: b64(result.commit),
-          groupInfo: b64(device.currentGroupInfo(hexToBytes(group.groupId))),
-          welcomes: [],
-          memberChanges: { adds: [record.deviceId], removes: [] },
-        })
-        setCursor(group.groupId, 0)
-        await this.catchUp(group.groupId)
-        this.refreshReadiness()
-        return
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 409) {
-          await groupStore.delete(group.groupId)
-          continue
-        }
-        throw err
-      }
-    }
-  }
-
-  private async refetchGroupInfo(
-    groupId: string,
-  ): Promise<{ groupInfo: string | null; epoch: number } | null> {
-    const { groups } = await api<{ groups: GroupSummary[] }>('GET', '/api/v1/mls/groups')
-    const group = groups.find((g) => g.groupId === groupId)
-    return group ? { groupInfo: group.groupInfo, epoch: group.currentEpoch } : null
-  }
-
-  private async handleWelcome(welcome: PendingWelcome): Promise<void> {
-    const device = this.device
-    if (!device) return
-    if ((await groupStore.get(welcome.groupId)) !== null) {
-      // Already joined (e.g. via external commit) — just discard.
-      await this.ackWelcome(welcome.welcomeId)
-      return
-    }
-    try {
-      const result = device.joinFromWelcome(fromB64(welcome.payload))
-      const groupId = bytesToHex(result.groupId)
-      await groupStore.put(groupId, result.snapshot)
-      setCursor(groupId, 0)
-      await this.ackWelcome(welcome.welcomeId)
-      await this.catchUp(groupId)
-      this.refreshReadiness()
-    } catch (err) {
-      console.error('welcome processing failed', err)
-      await this.ackWelcome(welcome.welcomeId)
-    }
-  }
-
-  private async ackWelcome(welcomeId: number): Promise<void> {
-    try {
-      await wsClient.send('welcome.ack', { welcomeId })
-    } catch {
-      // offline — the welcome stays queued server-side; harmless duplicate later
-    }
-  }
-
-  private async catchUp(groupId: string): Promise<void> {
-    const after = getCursor(groupId)
-    const { messages } = await api<{ messages: MailboxMessage[] }>(
-      'GET',
-      `/api/v1/mls/groups/${groupId}/messages?after=${after}`,
-    )
-    for (const message of messages) {
-      await this.processMailboxMessage(message)
-    }
-  }
-
-  private async processMailboxMessage(message: MailboxMessage): Promise<void> {
-    const device = this.device
-    const record = this.record
-    if (!device || !record) return
-    if (message.seq <= getCursor(message.groupId)) return
-    if (message.senderDevice === record.deviceId) {
-      setCursor(message.groupId, message.seq)
-      return
-    }
-    const snapshot = await groupStore.get(message.groupId)
-    if (!snapshot) return // not a member yet; welcome will arrive
-
-    let processed: ReturnType<MlsDeviceHandle['processIncoming']>
-    try {
-      processed = device.processIncoming(hexToBytes(message.groupId), fromB64(message.payload))
-    } catch (err) {
-      // Can't decrypt (e.g. message predates our join) — skip past it.
-      console.warn('processIncoming failed', message.groupId, message.seq, err)
-      setCursor(message.groupId, message.seq)
-      await this.ackSeq(message.groupId, message.seq)
-      return
-    }
-
-    // Persist BEFORE ack — never re-request a message we already ratcheted past.
-    await groupStore.put(message.groupId, processed.snapshot)
-    setCursor(message.groupId, message.seq)
-
-    if (processed.kind === 'application' && processed.plaintext) {
-      try {
-        const body = JSON.parse(decoder.decode(processed.plaintext)) as { t: string; ts: number }
-        const stored: StoredMessage = {
-          groupId: message.groupId,
-          seq: message.seq,
-          senderAccountId: processed.senderAccountId ?? 'unknown',
-          text: body.t,
-          sentAt: body.ts,
-          outgoing: false,
-        }
-        await messageStore.put(stored)
-        appendMessage(stored)
-      } catch (err) {
-        console.warn('bad message payload', err)
-      }
-    }
-    await this.ackSeq(message.groupId, message.seq)
-  }
-
-  private async ackSeq(groupId: string, seq: number): Promise<void> {
-    try {
-      await wsClient.send('chat.ack', { groupId, seq })
-    } catch {
-      // offline — server will re-deliver; cursor makes reprocessing a no-op
-    }
+    // 'conflict': another of our devices won the race — wait for its Welcome.
+    if (outcome === 'created') this.refreshReadiness()
   }
 
   async send(groupId: string, text: string): Promise<void> {
-    const device = this.device
+    const engine = this.engine
     const record = this.record
-    if (!device || !record) throw new Error('locked')
+    if (!engine || !record) throw new Error('locked')
 
-    await this.enqueue(groupId, async () => {
+    try {
       const plaintext = encoder.encode(JSON.stringify({ t: text, ts: Date.now() }))
-      const result = device.encrypt(hexToBytes(groupId), plaintext)
-      // Persist BEFORE the ciphertext leaves this device.
-      await groupStore.put(groupId, result.snapshot)
-      const ack = (await wsClient.send('chat.send', {
-        groupId,
-        epoch: device.currentEpoch(hexToBytes(groupId)),
-        ciphertext: b64(result.ciphertext),
-      })) as { seq: number }
-
+      const { seq } = await engine.sendApplication(groupId, plaintext)
       const stored: StoredMessage = {
         groupId,
-        seq: ack.seq,
+        seq,
         senderAccountId: record.accountId,
         text,
         sentAt: Date.now(),
         outgoing: true,
       }
-      setCursor(groupId, ack.seq)
       await messageStore.put(stored)
       appendMessage(stored)
-    })
+    } catch (err) {
+      console.error('chat work failed', groupId, err)
+    }
   }
 
   /**
@@ -429,33 +341,13 @@ class ChatStore {
    * every shared MLS group so future epochs exclude it.
    */
   async removeDeviceFromGroups(deviceId: string): Promise<void> {
-    const device = this.device
-    if (!device) return
+    const engine = this.engine
+    if (!engine) return
     for (const key of await groupStore.keys()) {
       const groupId = String(key)
-      await this.enqueue(groupId, async () => {
-        const groupIdBytes = hexToBytes(groupId)
-        if (!device.members(groupIdBytes).some((m) => m.deviceId === deviceId)) return
-        const epoch = device.currentEpoch(groupIdBytes)
-        const result = device.removeMembers(groupIdBytes, [deviceId])
-        await groupStore.put(groupId, result.snapshot)
-        try {
-          await api('POST', `/api/v1/mls/groups/${groupId}/commits`, {
-            epoch,
-            commit: b64(result.commit),
-            groupInfo: b64(result.groupInfo),
-            welcomes: [],
-            memberChanges: { adds: [], removes: [deviceId] },
-          })
-        } catch (err) {
-          if (err instanceof ApiError && err.status === 409) {
-            // Epoch raced — reload from mailbox and let syncAll retry later.
-            await this.catchUp(groupId)
-            return
-          }
-          throw err
-        }
-      })
+      await engine
+        .removeAccountDevices(groupId, [deviceId])
+        .catch((err) => console.error('chat work failed', groupId, err))
     }
   }
 

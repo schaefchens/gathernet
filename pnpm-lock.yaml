@@ -23,6 +23,9 @@ importers:
       '@gathernet/mls-client':
         specifier: workspace:*
         version: link:../../packages/mls-client
+      '@gathernet/mls-sync':
+        specifier: workspace:*
+        version: link:../../packages/mls-sync
       '@gathernet/shared':
         specifier: workspace:*
         version: link:../../packages/shared
