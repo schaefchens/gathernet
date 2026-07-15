@@ -25,17 +25,34 @@ export function safeEqual(a: Buffer, b: Buffer): boolean {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-/** Opaque bearer token: `gn.` + base64url(32 random bytes). */
-export function newSessionToken(): { token: string; tokenHash: Buffer } {
+const TOKEN_BODY_RE = /^[A-Za-z0-9_-]{43}$/
+
+/**
+ * Opaque bearer tokens: `<prefix>.` + base64url(32 random bytes).
+ * `gn` = device session, `gna` = app session.
+ */
+export function newPrefixedToken(prefix: 'gn' | 'gna'): { token: string; tokenHash: Buffer } {
   const secret = randomBytes(32)
-  return { token: `gn.${secret.toString('base64url')}`, tokenHash: sha256(secret) }
+  return { token: `${prefix}.${secret.toString('base64url')}`, tokenHash: sha256(secret) }
+}
+
+/** Strict: exact prefix, exact base64url body length, round-trip check. */
+export function hashPrefixedToken(token: string, prefix: 'gn' | 'gna'): Buffer | null {
+  const full = `${prefix}.`
+  if (!token.startsWith(full)) return null
+  const body = token.slice(full.length)
+  if (!TOKEN_BODY_RE.test(body)) return null
+  const secret = Buffer.from(body, 'base64url')
+  if (secret.length !== 32) return null
+  return sha256(secret)
+}
+
+export function newSessionToken(): { token: string; tokenHash: Buffer } {
+  return newPrefixedToken('gn')
 }
 
 export function hashToken(token: string): Buffer | null {
-  if (!token.startsWith('gn.')) return null
-  const secret = Buffer.from(token.slice(3), 'base64url')
-  if (secret.length !== 32) return null
-  return sha256(secret)
+  return hashPrefixedToken(token, 'gn')
 }
 
 export function newChallenge(): Buffer {

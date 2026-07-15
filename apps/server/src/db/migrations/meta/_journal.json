@@ -22,6 +22,13 @@
       "when": 1784003575532,
       "tag": "0002_sticky_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784135978521,
+      "tag": "0003_equal_morgan_stark",
+      "breakpoints": true
     }
   ]
 }

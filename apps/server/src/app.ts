@@ -1,3 +1,4 @@
+import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
 import type { AccountId, DeviceId } from '@gathernet/shared'
 import Fastify, { type FastifyInstance } from 'fastify'
@@ -5,6 +6,8 @@ import type { Config } from './config.ts'
 import type { Db } from './db/index.ts'
 import { registerAccountRoutes } from './modules/accounts/routes.ts'
 import { ServiceError } from './modules/accounts/service.ts'
+import { allowedAppOrigins } from './modules/apps/origins.ts'
+import { registerAppRoutes } from './modules/apps/routes.ts'
 import { verifySessionToken } from './modules/auth/sessions.ts'
 import { registerDeliveryRoutes } from './modules/delivery/routes.ts'
 import {
@@ -17,6 +20,8 @@ import {
 } from './modules/delivery/service.ts'
 import { registerFriendRoutes } from './modules/friends/routes.ts'
 import { PresenceService } from './modules/presence/service.ts'
+import { registerPublicationRoutes } from './modules/publications/routes.ts'
+import { makeAppAuthenticate } from './plugins/app-auth.ts'
 import { makeAuthenticate } from './plugins/auth.ts'
 import { registerWsGateway, type WsAuthenticator } from './ws/gateway.ts'
 import { ConnectionRegistry } from './ws/registry.ts'
@@ -54,8 +59,24 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
     reply.header('referrer-policy', 'no-referrer')
   })
 
+  // Cross-origin access for SDK apps on registered origins only. The Hub is
+  // same-origin (dev proxy / same host in prod) and never needs CORS.
+  await app.register(cors, {
+    origin: async (origin: string | undefined) => {
+      if (!origin) return false
+      const allowed = await allowedAppOrigins(db)
+      return allowed.has(origin)
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['authorization', 'content-type', 'if-match', 'if-none-match'],
+    exposedHeaders: ['etag'],
+    credentials: false,
+  })
+
   const registry = new ConnectionRegistry()
   const authenticate = makeAuthenticate(db)
+  const appAuthenticate = (scope?: 'identity' | 'storage' | 'rooms') =>
+    makeAppAuthenticate(db, scope)
 
   const authenticator: WsAuthenticator = options.authenticator ?? {
     async verifyToken(token) {
@@ -92,6 +113,8 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
     },
   })
   registerDeliveryRoutes(app, { db, registry, authenticate })
+  registerPublicationRoutes(app, { db, authenticate })
+  registerAppRoutes(app, { db, authenticate, appAuthenticate })
 
   await registerWsGateway(app, {
     authenticator,

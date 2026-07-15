@@ -9,9 +9,11 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "seed:apps": "tsx src/db/seed-apps.ts"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
     "@fastify/rate-limit": "^11.1.0",
     "@fastify/websocket": "^11.0.2",
     "@gathernet/shared": "workspace:*",

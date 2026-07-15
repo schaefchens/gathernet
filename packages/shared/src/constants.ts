@@ -20,3 +20,24 @@ export const KEY_PACKAGE_TTL_DAYS = 90
 
 /** Ciphertext mailbox retention when devices never ack. */
 export const MAILBOX_RETENTION_DAYS = 30
+
+/** App platform scopes (grants = consent + scoped key material). */
+export const APP_SCOPES = ['identity', 'storage', 'rooms', 'friends:invite'] as const
+export type AppScope = (typeof APP_SCOPES)[number]
+
+/** Device-flow grant codes. */
+export const GRANT_CODE_TTL_MS = 5 * 60 * 1000
+export const GRANT_QR_PREFIX = 'gathernet:grant:'
+
+/** App token: `gna.` + base64url(32 bytes); device token: `gn.` + base64url(32 bytes). */
+export const APP_SESSION_TTL_DAYS = 14
+
+/** Encrypted app storage quotas (ciphertext). */
+export const APP_STORAGE_MAX_KEYS = 100
+export const APP_STORAGE_MAX_VALUE_BYTES = 64 * 1024
+
+/** Rooms. */
+export const ROOM_CODE_ALPHABET = '23456789ACDEFGHJKMNPQRTVWXYZ'
+export const ROOM_MAX_DEVICES = 16
+export const ROOM_INACTIVE_EXPIRE_DAYS = 14
+export const ROOM_JOIN_REQUEST_TTL_MS = 5 * 60 * 1000
