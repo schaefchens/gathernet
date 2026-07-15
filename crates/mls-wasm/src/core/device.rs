@@ -410,6 +410,23 @@ impl CoreDevice {
         Ok(ProcessedResult { snapshot, ..result })
     }
 
+    /// RFC 9420 exporter: derive a secret for use outside of MLS, bound to the
+    /// group's current epoch. Each (epoch, label, context) combination yields a
+    /// unique, independent secret; all members at the same epoch derive the
+    /// same bytes. NON-MUTATING: reads the group from storage without writing
+    /// back, so no snapshot is produced.
+    pub fn export_secret(
+        &self,
+        group_id: &[u8],
+        label: &str,
+        context: &[u8],
+        len: u32,
+    ) -> Result<Vec<u8>, CoreError> {
+        let group = self.load(group_id)?;
+        let secret = group.export_secret(label.as_bytes(), context, len as usize)?;
+        Ok(secret.as_bytes().to_vec())
+    }
+
     pub fn current_group_info(&self, group_id: &[u8]) -> Result<Vec<u8>, CoreError> {
         let group = self.load(group_id)?;
         Ok(group

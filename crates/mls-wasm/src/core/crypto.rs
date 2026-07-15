@@ -19,6 +19,10 @@ pub const IDENTITY_HKDF_INFO: &[u8] = b"gathernet/v1/identity/ed25519";
 pub const IDENTITY_HKDF_SALT: &[u8] = b"gathernet";
 /// Domain separation prefix for device certificate signatures.
 pub const DEVICE_CERT_SIG_DOMAIN: &[u8] = b"gathernet-device-cert-v1";
+/// HKDF salt for the storage-root derivation (distinct from the identity salt).
+pub const STORAGE_HKDF_SALT: &[u8] = b"gathernet-storage-v1";
+/// HKDF info string for the storage-root derivation.
+pub const STORAGE_HKDF_INFO: &[u8] = b"gathernet/v1/storage/v1";
 
 pub fn random_bytes(len: usize) -> Result<Vec<u8>, CoreError> {
     let mut out = vec![0u8; len];
@@ -37,6 +41,23 @@ pub fn generate_mnemonic() -> Result<String, CoreError> {
 /// Check whether `phrase` is a valid BIP39 English mnemonic.
 pub fn validate_mnemonic(phrase: &str) -> bool {
     Mnemonic::parse(phrase).is_ok()
+}
+
+/// Derive the 32-byte storage-root key from a BIP39 mnemonic:
+/// BIP39 seed (empty passphrase) -> HKDF-SHA256(seed,
+/// salt="gathernet-storage-v1", info="gathernet/v1/storage/v1").
+/// Domain-separated from the identity derivation (different salt AND info).
+pub fn derive_storage_root(phrase: &str) -> Result<[u8; 32], CoreError> {
+    let mnemonic = Mnemonic::parse(phrase).map_err(|e| CoreError::Mnemonic(e.to_string()))?;
+    let mut seed = mnemonic.to_seed("");
+    let hk = Hkdf::<Sha256>::new(Some(STORAGE_HKDF_SALT), &seed);
+    let mut okm = [0u8; 32];
+    let expanded = hk
+        .expand(STORAGE_HKDF_INFO, &mut okm)
+        .map_err(|e| CoreError::Key(e.to_string()));
+    seed.zeroize();
+    expanded?;
+    Ok(okm)
 }
 
 /// Account identity keypair, deterministically derived from a BIP39 mnemonic.

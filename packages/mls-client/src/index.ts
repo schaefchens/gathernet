@@ -152,6 +152,16 @@ export function validateMnemonic(phrase: string): boolean {
   return mod().validate_mnemonic(phrase)
 }
 
+/**
+ * Derive the 32-byte storage-root key from a BIP39 mnemonic
+ * (HKDF-SHA256, salt "gathernet-storage-v1", info "gathernet/v1/storage/v1").
+ * Domain-separated from the identity key derivation. Throws on an invalid
+ * mnemonic.
+ */
+export function deriveStorageRoot(phrase: string): Uint8Array {
+  return mod().derive_storage_root(phrase)
+}
+
 /** Account identity keypair, deterministically derived from a BIP39 mnemonic. */
 export class IdentityKeypair {
   private constructor(private readonly inner: WasmIdentityKeypair) {}
@@ -351,6 +361,20 @@ export class MlsDevice {
    */
   processIncoming(groupId: Uint8Array, message: Uint8Array): ProcessedMessage {
     return this.inner.process_incoming(groupId, message) as ProcessedMessage
+  }
+
+  /**
+   * RFC 9420 exporter: derive a secret for use outside of MLS, bound to the
+   * group's current epoch. All members at the same epoch derive the same bytes
+   * for the same (label, context, length). Non-mutating: no snapshot.
+   */
+  exportSecret(
+    groupId: Uint8Array,
+    label: string,
+    context: Uint8Array,
+    length: number,
+  ): Uint8Array {
+    return this.inner.export_secret(groupId, label, context, length)
   }
 
   /** Serialized GroupInfo MlsMessage (ratchet tree included) for external joins. */

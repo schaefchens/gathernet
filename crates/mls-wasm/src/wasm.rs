@@ -53,6 +53,16 @@ pub fn validate_mnemonic(phrase: &str) -> bool {
     crypto::validate_mnemonic(phrase)
 }
 
+/// Derive the 32-byte storage-root key from a BIP39 mnemonic
+/// (HKDF-SHA256, salt "gathernet-storage-v1", info "gathernet/v1/storage/v1";
+/// domain-separated from the identity key derivation).
+#[wasm_bindgen]
+pub fn derive_storage_root(phrase: &str) -> Result<Vec<u8>, JsError> {
+    crypto::derive_storage_root(phrase)
+        .map(|root| root.to_vec())
+        .map_err(js_err)
+}
+
 /// Account identity keypair derived deterministically from a BIP39 mnemonic.
 #[wasm_bindgen]
 pub struct IdentityKeypair(crypto::IdentityKeypair);
@@ -335,6 +345,20 @@ impl MlsDevice {
     pub fn process_incoming(&self, group_id: &[u8], message: &[u8]) -> Result<JsValue, JsError> {
         let result = self.0.process_incoming(group_id, message).map_err(js_err)?;
         Ok(processed_to_js(&result))
+    }
+
+    /// RFC 9420 exporter: derive a secret for use outside of MLS, bound to the
+    /// group's current epoch. NON-MUTATING: no snapshot is produced.
+    pub fn export_secret(
+        &self,
+        group_id: &[u8],
+        label: &str,
+        context: &[u8],
+        len: u32,
+    ) -> Result<Vec<u8>, JsError> {
+        self.0
+            .export_secret(group_id, label, context, len)
+            .map_err(js_err)
     }
 
     /// Serialized GroupInfo MlsMessage (ratchet tree included) for external joins.

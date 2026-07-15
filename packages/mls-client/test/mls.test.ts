@@ -5,6 +5,7 @@ import {
   argon2idHash,
   DeviceKeypair,
   decodeDeviceCert,
+  deriveStorageRoot,
   ed25519Sign,
   ed25519Verify,
   encodeDeviceCert,
@@ -23,8 +24,16 @@ const PHRASE_A =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const PHRASE_B = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
 
+/** Cross-check vector: hex of derive_storage_root(PHRASE_A), pinned by the
+ * Rust test `storage_root_derivation_and_domain_separation`. */
+const STORAGE_ROOT_VECTOR_A = '652fd378df74398c8270228badf21255994a026410550e29e1a114dc180dded6'
+
 const utf8 = (s: string) => new TextEncoder().encode(s)
 const text = (b: Uint8Array | undefined) => new TextDecoder().decode(b)
+const hex = (b: Uint8Array) =>
+  Array.from(b)
+    .map((x) => x.toString(16).padStart(2, '0'))
+    .join('')
 
 interface TestDevice {
   device: MlsDevice
@@ -70,6 +79,18 @@ describe('crypto helpers', () => {
     expect(sig).toHaveLength(64)
     expect(ed25519Verify(a1.publicKey(), utf8('hello'), sig)).toBe(true)
     expect(ed25519Verify(a1.publicKey(), utf8('tampered'), sig)).toBe(false)
+  })
+
+  it('derives the storage root deterministically and domain-separated', () => {
+    const root = deriveStorageRoot(PHRASE_A)
+    expect(root).toHaveLength(32)
+    // Cross-check vector pinned by the Rust test suite.
+    expect(hex(root)).toBe(STORAGE_ROOT_VECTOR_A)
+    expect(hex(deriveStorageRoot(PHRASE_A))).toBe(STORAGE_ROOT_VECTOR_A)
+    expect(hex(deriveStorageRoot(PHRASE_B))).not.toBe(STORAGE_ROOT_VECTOR_A)
+    // Domain separation: not the identity public key either.
+    expect(hex(root)).not.toBe(hex(IdentityKeypair.fromMnemonic(PHRASE_A).publicKey()))
+    expect(() => deriveStorageRoot('definitely not a mnemonic')).toThrow()
   })
 
   it('signs with raw device seeds', () => {
@@ -255,5 +276,45 @@ describe('MLS multi-device scenario', () => {
     expect(text(reloaded.processIncoming(groupId, msg6.ciphertext).plaintext)).toBe(
       'to reloaded alice',
     )
+  })
+
+  it('exports epoch-bound secrets shared by members', () => {
+    const alice = IdentityKeypair.fromMnemonic(PHRASE_A)
+    const a1 = makeDevice(alice, 'a1')
+    const a2 = makeDevice(alice, 'a2')
+    const a3 = makeDevice(alice, 'a3')
+    const groupId = utf8('exporter-test-group')
+
+    a1.device.createGroup(groupId)
+    const kp2 = a2.device.generateKeyPackage(false)
+    const add = a1.device.addMembers(groupId, [kp2.message])
+    a2.device.joinFromWelcome(add.welcomes[0] as Uint8Array)
+
+    // Same epoch, same (label, context, length): equal bytes on both members.
+    const s1 = a1.device.exportSecret(groupId, 'gathernet/test', utf8('ctx'), 32)
+    const s2 = a2.device.exportSecret(groupId, 'gathernet/test', utf8('ctx'), 32)
+    expect(s1).toHaveLength(32)
+    expect(hex(s1)).toBe(hex(s2))
+
+    // Non-mutating: epoch unchanged, re-derivation matches.
+    expect(a1.device.currentEpoch(groupId)).toBe(1)
+    expect(hex(a1.device.exportSecret(groupId, 'gathernet/test', utf8('ctx'), 32))).toBe(hex(s1))
+
+    // Different label/context diverge; other lengths work.
+    expect(hex(a1.device.exportSecret(groupId, 'gathernet/other', utf8('ctx'), 32))).not.toBe(
+      hex(s1),
+    )
+    expect(hex(a1.device.exportSecret(groupId, 'gathernet/test', utf8('other'), 32))).not.toBe(
+      hex(s1),
+    )
+    expect(a1.device.exportSecret(groupId, 'gathernet/test', utf8('ctx'), 64)).toHaveLength(64)
+
+    // After a commit (epoch change) the exported secret differs.
+    const kp3 = a3.device.generateKeyPackage(false)
+    const add2 = a1.device.addMembers(groupId, [kp3.message])
+    expect(a2.device.processIncoming(groupId, add2.commit).epoch).toBe(2)
+    const s1e2 = a1.device.exportSecret(groupId, 'gathernet/test', utf8('ctx'), 32)
+    expect(hex(s1e2)).toBe(hex(a2.device.exportSecret(groupId, 'gathernet/test', utf8('ctx'), 32)))
+    expect(hex(s1e2)).not.toBe(hex(s1))
   })
 })

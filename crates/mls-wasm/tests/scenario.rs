@@ -5,8 +5,9 @@ use mls_wasm::core::cert::{
     decode_device_cert, encode_device_cert, make_credential, parse_and_verify_credential,
 };
 use mls_wasm::core::crypto::{
-    argon2id_hash, ed25519_sign, ed25519_verify, generate_mnemonic, open_sealed, seal,
-    validate_mnemonic, DeviceKeypair, IdentityKeypair,
+    argon2id_hash, derive_storage_root, ed25519_sign, ed25519_verify, generate_mnemonic,
+    open_sealed, seal, validate_mnemonic, DeviceKeypair, IdentityKeypair, IDENTITY_HKDF_INFO,
+    IDENTITY_HKDF_SALT,
 };
 use mls_wasm::core::device::CoreDevice;
 
@@ -295,4 +296,126 @@ fn full_multi_device_scenario() {
         .process_incoming(group_id, &msg6.ciphertext)
         .unwrap();
     assert_eq!(got.plaintext.as_deref(), Some(b"to reloaded alice".as_slice()));
+}
+
+/// Cross-check vector for `deriveStorageRoot` in @gathernet/mls-client tests:
+/// hex of derive_storage_root(PHRASE_A).
+const STORAGE_ROOT_VECTOR_A: &str =
+    "652fd378df74398c8270228badf21255994a026410550e29e1a114dc180dded6";
+
+#[test]
+fn storage_root_derivation_and_domain_separation() {
+    let root = derive_storage_root(PHRASE_A).unwrap();
+    assert_eq!(root.len(), 32);
+    assert_eq!(root, derive_storage_root(PHRASE_A).unwrap());
+    assert_ne!(root, derive_storage_root(PHRASE_B).unwrap());
+    assert!(derive_storage_root("not a valid mnemonic").is_err());
+
+    // TS cross-check vector (printed so it can be regenerated if needed).
+    println!("storage root (PHRASE_A) = {}", hex::encode(root));
+    assert_eq!(hex::encode(root), STORAGE_ROOT_VECTOR_A);
+
+    // Domain separation from the identity derivation. First pin the identity
+    // path's parameters, then replicate it independently: the replicated seed
+    // must (a) yield exactly IdentityKeypair::from_mnemonic's public key and
+    // (b) differ from the storage root.
+    assert_eq!(IDENTITY_HKDF_SALT, b"gathernet".as_slice());
+    assert_eq!(IDENTITY_HKDF_INFO, b"gathernet/v1/identity/ed25519".as_slice());
+    let seed = bip39::Mnemonic::parse(PHRASE_A).unwrap().to_seed("");
+    let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(IDENTITY_HKDF_SALT), &seed);
+    let mut identity_seed = [0u8; 32];
+    hk.expand(IDENTITY_HKDF_INFO, &mut identity_seed).unwrap();
+    assert_ne!(identity_seed, root);
+
+    let identity_pk = ed25519_dalek::SigningKey::from_bytes(&identity_seed)
+        .verifying_key()
+        .to_bytes();
+    assert_eq!(
+        identity_pk.to_vec(),
+        IdentityKeypair::from_mnemonic(PHRASE_A).unwrap().public_key()
+    );
+}
+
+#[test]
+fn exporter_secrets_agree_per_epoch_and_diverge_across_epochs() {
+    let alice = IdentityKeypair::from_mnemonic(PHRASE_A).unwrap();
+    let a1 = make_device(&alice, "a1");
+    let a2 = make_device(&alice, "a2");
+    let a3 = make_device(&alice, "a3");
+    let group_id = b"exporter-test-group";
+
+    a1.core.create_group(group_id).unwrap();
+    let kp2 = a2.core.generate_key_package(false).unwrap();
+    let add = a1.core.add_members(group_id, &[kp2.message]).unwrap();
+    a2.core.join_from_welcome(&add.welcomes[0]).unwrap();
+    assert_eq!(a1.core.current_epoch(group_id).unwrap(), 1);
+
+    // Same epoch, same (label, context, len): both members derive equal bytes.
+    let s1 = a1.core.export_secret(group_id, "gathernet/test", b"ctx", 32).unwrap();
+    let s2 = a2.core.export_secret(group_id, "gathernet/test", b"ctx", 32).unwrap();
+    assert_eq!(s1.len(), 32);
+    assert_eq!(s1, s2);
+
+    // Non-mutating: epoch unchanged, re-derivation still matches.
+    assert_eq!(a1.core.current_epoch(group_id).unwrap(), 1);
+    assert_eq!(
+        a1.core.export_secret(group_id, "gathernet/test", b"ctx", 32).unwrap(),
+        s1
+    );
+
+    // Different label / context diverge; other lengths work.
+    assert_ne!(
+        a1.core.export_secret(group_id, "gathernet/other", b"ctx", 32).unwrap(),
+        s1
+    );
+    assert_ne!(
+        a1.core.export_secret(group_id, "gathernet/test", b"other", 32).unwrap(),
+        s1
+    );
+    assert_eq!(
+        a1.core.export_secret(group_id, "gathernet/test", b"ctx", 64).unwrap().len(),
+        64
+    );
+
+    // After a commit (epoch change) the exported secret differs.
+    let kp3 = a3.core.generate_key_package(false).unwrap();
+    let add2 = a1.core.add_members(group_id, &[kp3.message]).unwrap();
+    let p = a2.core.process_incoming(group_id, &add2.commit).unwrap();
+    assert_eq!(p.epoch, 2);
+    let s1_e2 = a1.core.export_secret(group_id, "gathernet/test", b"ctx", 32).unwrap();
+    let s2_e2 = a2.core.export_secret(group_id, "gathernet/test", b"ctx", 32).unwrap();
+    assert_eq!(s1_e2, s2_e2);
+    assert_ne!(s1_e2, s1);
+}
+
+#[test]
+fn epoch0_group_info_supports_external_join() {
+    let alice = IdentityKeypair::from_mnemonic(PHRASE_A).unwrap();
+    let d1 = make_device(&alice, "d1");
+    let d2 = make_device(&alice, "d2");
+    let group_id = b"epoch0-external-join";
+
+    // GroupInfo allowing external commit right after create_group: epoch 0,
+    // no members added yet.
+    d1.core.create_group(group_id).unwrap();
+    assert_eq!(d1.core.current_epoch(group_id).unwrap(), 0);
+    let info = d1.core.current_group_info(group_id).unwrap();
+    assert!(!info.is_empty());
+
+    // A second device external-joins from the epoch-0 GroupInfo (0-RTT).
+    let ext = d2.core.external_join(&info).unwrap();
+    assert_eq!(ext.group_id, group_id);
+    assert_eq!(ext.epoch, 1);
+
+    let p = d1.core.process_incoming(group_id, &ext.commit).unwrap();
+    assert_eq!(p.kind.as_str(), "commit");
+    assert_eq!(p.epoch, 1);
+
+    // Both directions can message afterwards.
+    let m = d2.core.encrypt(group_id, b"external hello").unwrap();
+    let got = d1.core.process_incoming(group_id, &m.ciphertext).unwrap();
+    assert_eq!(got.plaintext.as_deref(), Some(b"external hello".as_slice()));
+    let m2 = d1.core.encrypt(group_id, b"welcome").unwrap();
+    let got2 = d2.core.process_incoming(group_id, &m2.ciphertext).unwrap();
+    assert_eq!(got2.plaintext.as_deref(), Some(b"welcome".as_slice()));
 }

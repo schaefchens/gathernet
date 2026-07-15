@@ -46,6 +46,14 @@ zeroize = { version = "1", features = ["zeroize_derive"] }
 thiserror = "2"
 hex = "0.4"
 
+[dev-dependencies]
+# Used by tests/scenario.rs to replicate the HKDF derivations independently.
+bip39 = { version = "2.2", default-features = false, features = ["std"] }
+hkdf = { version = "0.12", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+hex = "0.4"
+
 # mls-rs pulls both getrandom 0.2 and 0.3; enable the wasm backends for both
 # (0.3's "wasm_js" additionally needs --cfg getrandom_backend="wasm_js", set in ../.cargo/config.toml).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
