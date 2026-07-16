@@ -20,6 +20,7 @@ beforeAll(async () => {
       async verifyToken(token: string) {
         if (token !== 'dev-token') return null
         return {
+          kind: 'user' as const,
           accountId: '1'.repeat(32) as AccountId,
           deviceId: '0'.repeat(32) as DeviceId,
         }

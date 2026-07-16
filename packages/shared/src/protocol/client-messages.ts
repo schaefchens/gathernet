@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { groupIdSchema } from '../ids.ts'
+import { ROOM_EPHEMERAL_MAX_BYTES } from '../constants.ts'
+import { deviceIdSchema, groupIdSchema } from '../ids.ts'
 
 /**
  * Client → server WS messages. Every message carries a client-generated
@@ -13,6 +14,12 @@ export const helloMessage = z.object({
   payload: z.object({
     token: z.string().min(1),
     protocolVersion: z.number().int().positive(),
+    /**
+     * App sessions (`gna.` tokens) only: bind this socket to a registered
+     * app device (rooms MLS leaf). Omitted → the newest registered device.
+     * Ignored for user sessions — their device comes from the token.
+     */
+    deviceId: deviceIdSchema.optional(),
   }),
 })
 
@@ -52,12 +59,28 @@ export const welcomeAckMessage = z.object({
   }),
 })
 
+/** Fire-and-forget room fan-out (cursor/pointer/typing …) — never persisted. */
+export const roomEphemeralClientMessage = z.object({
+  type: z.literal('room.ephemeral'),
+  id: z.string().min(1),
+  payload: z.object({
+    groupId: groupIdSchema,
+    epoch: z.number().int().nonnegative(),
+    /** base64, ≤ ROOM_EPHEMERAL_MAX_BYTES decoded — opaque to the server */
+    payload: z
+      .base64()
+      .min(1)
+      .max(Math.ceil(ROOM_EPHEMERAL_MAX_BYTES / 3) * 4),
+  }),
+})
+
 export const clientMessageSchema = z.discriminatedUnion('type', [
   helloMessage,
   presenceSetMessage,
   chatSendMessage,
   chatAckMessage,
   welcomeAckMessage,
+  roomEphemeralClientMessage,
 ])
 
 export type ClientMessage = z.infer<typeof clientMessageSchema>

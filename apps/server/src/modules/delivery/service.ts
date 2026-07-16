@@ -10,16 +10,19 @@ import type {
   PostCommitRequest,
   UploadKeyPackagesRequest,
 } from '@gathernet/shared'
-import { KEY_PACKAGE_TTL_DAYS, MAILBOX_RETENTION_DAYS } from '@gathernet/shared'
+import { KEY_PACKAGE_TTL_DAYS, MAILBOX_RETENTION_DAYS, ROOM_MAX_DEVICES } from '@gathernet/shared'
 import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import {
+  appDevices,
   devices,
   groupMembers,
   groups,
   keyPackages,
   mlsCursors,
   mlsMessages,
+  roomMembers,
+  rooms,
   welcomes,
 } from '../../db/schema.ts'
 import type { ConnectionRegistry } from '../../ws/registry.ts'
@@ -46,6 +49,7 @@ export async function createDmGroup(
       : { accountA: accepterAccountId, accountB: inviterAccountId }
   await db.insert(groups).values({
     groupId,
+    kind: 'dm',
     ...pair,
     // The accepter's online device creates the MLS group — fixed rule, no races.
     creatorAccountId: accepterAccountId,
@@ -194,15 +198,19 @@ export async function listGroups(
         isNull(groupMembers.removedEpoch),
       ),
     )
-    .where(or(eq(groups.accountA, accountId), eq(groups.accountB, accountId)))
+    .where(
+      and(
+        eq(groups.kind, 'dm'),
+        or(eq(groups.accountA, accountId), eq(groups.accountB, accountId)),
+      ),
+    )
     .orderBy(asc(groups.createdAt))
 
   return rows.map((r) => ({
     groupId: r.groups.groupId as GroupId,
     kind: 'dm' as const,
-    friendAccountId: (r.groups.accountA === accountId
-      ? r.groups.accountB
-      : r.groups.accountA) as AccountId,
+    friendAccountId: ((r.groups.accountA === accountId ? r.groups.accountB : r.groups.accountA) ??
+      '') as AccountId,
     creator: r.groups.creatorAccountId === accountId,
     currentEpoch: r.groups.currentEpoch,
     groupInfo: r.groups.groupInfo?.toString('base64') ?? null,
@@ -235,22 +243,41 @@ export async function postCommit(
     const group = locked.rows[0] as
       | {
           group_id: string
-          account_a: string
-          account_b: string
+          kind: string
+          account_a: string | null
+          account_b: string | null
           current_epoch: number
           last_seq: number
         }
       | undefined
-    if (!group || (group.account_a !== accountId && group.account_b !== accountId)) {
+    if (!group) throw new ServiceError(404, 'group_not_found')
+    const isRoom = group.kind === 'room'
+
+    // Sender authorization by group kind. Rooms: any account with an ACTIVE
+    // room_members row (external joiners included — the join endpoint inserts
+    // the row before their commit). DMs: one of the two pair accounts.
+    let roomHostAccountId: string | null = null
+    let roomPubId: string | null = null
+    /** room member status per account, for adds/removes validation */
+    const roomStatus = new Map<string, string>()
+    if (isRoom) {
+      const memberRows = await tx.select().from(roomMembers).where(eq(roomMembers.roomId, groupId))
+      for (const m of memberRows) roomStatus.set(m.accountId, m.status)
+      if (roomStatus.get(accountId) !== 'active') {
+        throw new ServiceError(404, 'group_not_found')
+      }
+      const roomRow = await tx.query.rooms.findFirst({ where: eq(rooms.roomId, groupId) })
+      roomHostAccountId = roomRow?.hostAccountId ?? null
+      roomPubId = roomRow?.pubId ?? null
+    } else if (group.account_a !== accountId && group.account_b !== accountId) {
       throw new ServiceError(404, 'group_not_found')
     }
+
     if (body.epoch !== group.current_epoch) {
       throw new EpochConflictError(group.current_epoch)
     }
     const newEpoch = group.current_epoch + 1
     const seq = group.last_seq + 1
-
-    const pairAccounts = [group.account_a, group.account_b]
 
     // Current membership before this commit.
     const membersBefore = await tx
@@ -258,33 +285,74 @@ export async function postCommit(
       .from(groupMembers)
       .where(and(eq(groupMembers.groupId, groupId), isNull(groupMembers.removedEpoch)))
     const memberDevices = new Set(membersBefore.map((m) => m.deviceId))
+    const accountOfLeaf = new Map(membersBefore.map((m) => [m.deviceId, m.accountId]))
 
     // Sender must be a current member, be joining via this commit (external
-    // join), or be making the group's very first commit as the creator side.
+    // join), or — dm only — be making the group's very first commit as the
+    // creator side. Rooms bootstrap through the group-info publish instead.
     const senderIsMember = memberDevices.has(deviceId)
     const senderJoins = (body.memberChanges.adds as string[]).includes(deviceId)
-    const firstCommit = membersBefore.length === 0
+    const firstCommit = !isRoom && membersBefore.length === 0
     if (!senderIsMember && !senderJoins && !firstCommit) {
       throw new ServiceError(403, 'not_a_member')
     }
 
-    // Validate adds/welcome recipients belong to the two accounts and are active.
+    // Every added/welcomed device must belong to an authorized account:
+    // dm → the two pair accounts (real devices only); room → any account
+    // with an active room_members row (real devices OR this app's devices).
     const referenced = [
       ...new Set([...body.memberChanges.adds, ...body.welcomes.map((w) => w.deviceId)]),
     ]
+    const deviceOwner = new Map<string, string>()
     if (referenced.length > 0) {
-      const rows = await tx
-        .select({ deviceId: devices.deviceId })
+      const realRows = await tx
+        .select({ deviceId: devices.deviceId, accountId: devices.accountId })
         .from(devices)
-        .where(
-          and(
-            inArray(devices.deviceId, referenced),
-            inArray(devices.accountId, pairAccounts),
-            eq(devices.status, 'active'),
-          ),
-        )
-      if (rows.length !== referenced.length) {
-        throw new ServiceError(400, 'invalid_member_change')
+        .where(and(inArray(devices.deviceId, referenced), eq(devices.status, 'active')))
+      for (const r of realRows) deviceOwner.set(r.deviceId, r.accountId)
+      if (isRoom) {
+        const appRows = await tx
+          .select({ deviceId: appDevices.deviceId, accountId: appDevices.accountId })
+          .from(appDevices)
+          .where(
+            and(inArray(appDevices.deviceId, referenced), eq(appDevices.pubId, roomPubId ?? '')),
+          )
+        for (const r of appRows) deviceOwner.set(r.deviceId, r.accountId)
+      }
+      for (const ref of referenced) {
+        const owner = deviceOwner.get(ref)
+        const authorized = isRoom
+          ? owner !== undefined && roomStatus.get(owner) === 'active'
+          : owner === group.account_a || owner === group.account_b
+        if (!authorized) throw new ServiceError(400, 'invalid_member_change')
+      }
+    }
+
+    // Rooms: removals come from the host, or only affect devices whose
+    // accounts already left / were kicked (cleanup by any member).
+    if (isRoom && body.memberChanges.removes.length > 0) {
+      const committerIsHost = accountId === roomHostAccountId
+      if (!committerIsHost) {
+        for (const removeId of body.memberChanges.removes) {
+          const owner = accountOfLeaf.get(removeId)
+          const ownerStatus = owner ? roomStatus.get(owner) : undefined
+          if (ownerStatus !== 'left' && ownerStatus !== 'kicked') {
+            throw new ServiceError(403, 'remove_not_allowed')
+          }
+        }
+      }
+    }
+
+    const adds = new Set<string>(body.memberChanges.adds)
+    if ((firstCommit || senderJoins) && !adds.has(deviceId)) adds.add(deviceId)
+
+    // Rooms: hard cap on active MLS leaves.
+    if (isRoom) {
+      const leavesAfter = new Set(memberDevices)
+      for (const removeId of body.memberChanges.removes) leavesAfter.delete(removeId)
+      for (const addId of adds) leavesAfter.add(addId)
+      if (leavesAfter.size > ROOM_MAX_DEVICES) {
+        throw new ServiceError(409, 'device_limit')
       }
     }
 
@@ -297,6 +365,9 @@ export async function postCommit(
         groupInfoEpoch: newEpoch,
       })
       .where(eq(groups.groupId, groupId))
+    if (isRoom) {
+      await tx.update(rooms).set({ lastActivityAt: new Date() }).where(eq(rooms.roomId, groupId))
+    }
 
     await tx.insert(mlsMessages).values({
       groupId,
@@ -308,13 +379,18 @@ export async function postCommit(
     })
 
     const accountOfDevice = async (id: string): Promise<string> => {
+      const known = deviceOwner.get(id)
+      if (known) return known
       const row = await tx.query.devices.findFirst({ where: eq(devices.deviceId, id) })
-      if (!row) throw new ServiceError(400, 'invalid_member_change')
-      return row.accountId
+      if (row) return row.accountId
+      if (isRoom) {
+        const appRow = await tx.query.appDevices.findFirst({
+          where: eq(appDevices.deviceId, id),
+        })
+        if (appRow) return appRow.accountId
+      }
+      throw new ServiceError(400, 'invalid_member_change')
     }
-
-    const adds = new Set<string>(body.memberChanges.adds)
-    if ((firstCommit || senderJoins) && !adds.has(deviceId)) adds.add(deviceId)
     for (const addId of adds) {
       await tx
         .insert(groupMembers)
@@ -393,9 +469,11 @@ export async function postMessage(
 ): Promise<MessageFanout> {
   return db.transaction(async (tx) => {
     const locked = await tx.execute(
-      sql`SELECT current_epoch, last_seq FROM groups WHERE group_id = ${groupId} FOR UPDATE`,
+      sql`SELECT kind, current_epoch, last_seq FROM groups WHERE group_id = ${groupId} FOR UPDATE`,
     )
-    const group = locked.rows[0] as { current_epoch: number; last_seq: number } | undefined
+    const group = locked.rows[0] as
+      | { kind: string; current_epoch: number; last_seq: number }
+      | undefined
     if (!group) throw new ServiceError(404, 'group_not_found')
 
     const members = await tx
@@ -412,6 +490,9 @@ export async function postMessage(
 
     const seq = group.last_seq + 1
     await tx.update(groups).set({ lastSeq: seq }).where(eq(groups.groupId, groupId))
+    if (group.kind === 'room') {
+      await tx.update(rooms).set({ lastActivityAt: new Date() }).where(eq(rooms.roomId, groupId))
+    }
     await tx.insert(mlsMessages).values({
       groupId,
       seq,
@@ -438,7 +519,17 @@ export async function listMessages(
   afterSeq: number,
 ): Promise<MailboxMessage[]> {
   const group = await db.query.groups.findFirst({ where: eq(groups.groupId, groupId) })
-  if (!group || (group.accountA !== accountId && group.accountB !== accountId)) {
+  if (!group) throw new ServiceError(404, 'group_not_found')
+  if (group.kind === 'room') {
+    const membership = await db.query.roomMembers.findFirst({
+      where: and(
+        eq(roomMembers.roomId, groupId),
+        eq(roomMembers.accountId, accountId),
+        eq(roomMembers.status, 'active'),
+      ),
+    })
+    if (!membership) throw new ServiceError(404, 'group_not_found')
+  } else if (group.accountA !== accountId && group.accountB !== accountId) {
     throw new ServiceError(404, 'group_not_found')
   }
   const rows = await db

@@ -173,6 +173,9 @@ export const useSession = create<SessionState>((set, _get) => ({
         deviceId: session.deviceId,
         displayName,
       })
+      // The phrase is only in memory during enrollment — derive the storage
+      // root now so app grants can hand out per-app keys later.
+      await secureStore.putStorageRoot(crypto.deriveStorageRoot(phrase))
       const record: DeviceRecord = {
         deviceSecret: enrollment.deviceSecret,
         credential: enrollment.credential,
@@ -200,6 +203,9 @@ export const useSession = create<SessionState>((set, _get) => ({
         deviceId: session.deviceId,
         displayName: session.displayName,
       })
+      // Same as createAccount: persist the storage root while the phrase is
+      // still available.
+      await secureStore.putStorageRoot(crypto.deriveStorageRoot(phrase))
       const record: DeviceRecord = {
         deviceSecret: enrollment.deviceSecret,
         credential: enrollment.credential,

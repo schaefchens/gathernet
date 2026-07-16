@@ -1,8 +1,9 @@
-import type { DeviceInfo, MeResponse } from '@gathernet/shared'
+import type { DeviceInfo, GrantSummary, MeResponse } from '@gathernet/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { AppIcon, SCOPE_CHIP_KEYS } from '../features/apps/ConsentCard.tsx'
 import { setLanguage } from '../i18n/index.ts'
 import { api } from '../lib/api.ts'
 import { chatStore } from '../stores/chat.ts'
@@ -36,6 +37,14 @@ function SettingsScreen() {
       // Post-compromise security: evict the revoked leaf from all MLS groups.
       void chatStore.removeDeviceFromGroups(deviceId)
     },
+  })
+  const grants = useQuery({
+    queryKey: ['app-grants'],
+    queryFn: () => api<{ grants: GrantSummary[] }>('GET', '/api/v1/apps/grants'),
+  })
+  const revokeGrant = useMutation({
+    mutationFn: (appId: string) => api('DELETE', `/api/v1/apps/grants/${appId}`),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['app-grants'] }),
   })
 
   const [name, setName] = useState<string | null>(null)
@@ -135,6 +144,53 @@ function SettingsScreen() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section className="card space-y-3">
+        <h2 className="font-medium text-ink-soft">{t('apps.connectedApps')}</h2>
+        {grants.data && grants.data.grants.length === 0 && (
+          <p className="text-xs text-ink-faint">{t('apps.noGrants')}</p>
+        )}
+        <ul className="space-y-2">
+          {grants.data?.grants.map((grant) => (
+            <li
+              key={grant.appId}
+              className="flex items-center gap-3 bg-overlay rounded-md px-3 py-2"
+            >
+              <AppIcon name={grant.name} iconUrl={grant.iconUrl} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm truncate">{grant.name}</p>
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  {grant.scopes.map((scope) => (
+                    <span
+                      key={scope}
+                      className="text-[10px] uppercase tracking-wide bg-raised border border-edge rounded px-1.5 py-0.5 text-ink-soft"
+                    >
+                      {t(SCOPE_CHIP_KEYS[scope])}
+                    </span>
+                  ))}
+                </div>
+                <p className="text-xs text-ink-faint mt-0.5">
+                  {t('apps.lastUsed', { when: new Date(grant.lastUsedAt).toLocaleDateString() })}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-danger text-xs px-2 py-1"
+                onClick={() => {
+                  if (confirm(t('apps.revokeConfirm', { name: grant.name }))) {
+                    revokeGrant.mutate(grant.appId)
+                  }
+                }}
+              >
+                {t('apps.revoke')}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <Link to="/apps/connect" className="block text-sm text-gold hover:underline">
+          {t('apps.connectWithCode')}
+        </Link>
       </section>
 
       <button type="button" className="btn-quiet w-full" onClick={lock}>

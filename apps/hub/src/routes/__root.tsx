@@ -1,4 +1,4 @@
-import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
+import { createRootRoute, Link, Outlet, useRouterState } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { WelcomeFlow } from '../features/onboarding/WelcomeFlow.tsx'
@@ -13,6 +13,18 @@ export const Route = createRootRoute({ component: RootComponent })
 function RootComponent() {
   const phase = useSession((s) => s.phase)
   const { t } = useTranslation()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+
+  // The /authorize popup drives the session phases itself (minimal chrome,
+  // no AppShell) — always render the route there instead of gating on phase.
+  if (pathname.startsWith('/authorize')) {
+    return (
+      <>
+        <Outlet />
+        <UpdatePrompt />
+      </>
+    )
+  }
 
   if (phase === 'loading') {
     return (

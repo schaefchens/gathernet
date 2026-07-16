@@ -116,6 +116,56 @@
     "revoked": "Revoked",
     "addDevice": "To add a device, open Gathernet there and choose “I have a recovery phrase”."
   },
+  "qr": {
+    "unsupported": "Camera scanning isn't supported in this browser — enter the code instead."
+  },
+  "apps": {
+    "consentTitle": "{{name}} wants to connect",
+    "requestedAccess": "This app is asking to:",
+    "approve": "Approve",
+    "deny": "Deny",
+    "scopes": {
+      "identity": "Will see your display name and an app-specific user ID. Won't see your account key, your friends, or your messages.",
+      "storage": "Can save its own data to your account. The app receives a key that can only read its own saves — never your messages or other apps' data.",
+      "rooms": "Can open real-time rooms with the people you play or work with. Won't see who your friends are.",
+      "friendsInvite": "Can ask you to send a friend invite. Won't add anyone without your confirmation."
+    },
+    "chips": {
+      "identity": "Identity",
+      "storage": "Storage",
+      "rooms": "Rooms",
+      "friendsInvite": "Invites"
+    },
+    "openerMissing": "This page must be opened by an app requesting access.",
+    "invalidRequest": "This access request is invalid or incomplete.",
+    "authorizeFailed": "The app could not be authorized. Close this window and try again from the app.",
+    "approved": "Access granted — you can return to the app.",
+    "denied": "Access denied — you can close this window.",
+    "rememberedConsent": "You already approved this app — finishing up…",
+    "backfillTitle": "Unlock app storage",
+    "backfillHint": "This app wants to save data under your account. To create its storage key on this device, enter your 12-word recovery phrase once. The phrase never leaves this device.",
+    "backfillPlaceholder": "worship gather bread …",
+    "backfillConfirm": "Unlock storage",
+    "backfillSkip": "Skip — continue without storage",
+    "backfillMismatch": "That phrase doesn't match this account.",
+    "connectTitle": "Connect an app",
+    "connectHint": "Enter the code the app shows you, or scan its QR code.",
+    "enterCode": "Enter code",
+    "scan": "Scan",
+    "codePlaceholder": "e.g. 7F3K-9PQ2",
+    "codeInvalid": "That code is invalid or has expired.",
+    "lookUp": "Look up code",
+    "checkingCode": "Checking…",
+    "scanHint": "Point your camera at the QR code the app shows.",
+    "connectSuccess": "Connected! You can return to the app.",
+    "connectDenied": "Request denied. The app was not connected.",
+    "connectedApps": "Connected apps",
+    "noGrants": "No connected apps yet.",
+    "connectWithCode": "Connect an app with a code",
+    "lastUsed": "Last used {{when}}",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke access for {{name}}? The app will be signed out of your account."
+  },
   "pwa": {
     "updateAvailable": "A new version of Gathernet is available.",
     "reload": "Update"

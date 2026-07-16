@@ -130,6 +130,18 @@ export const secureStore = {
   putDevice(record: DeviceRecord): Promise<unknown> {
     return tx('secure', 'readwrite', (s) => s.put(sealJson(record, 'secure:device'), 'device'))
   },
+  /** Mnemonic-derived storage root for per-app key derivation (app grants). */
+  async getStorageRoot(): Promise<Uint8Array | null> {
+    const sealed = await tx<Uint8Array | undefined>('secure', 'readonly', (s) =>
+      s.get('storage-root'),
+    )
+    return sealed ? requireBox().open(sealed, 'secure:storage-root') : null
+  },
+  putStorageRoot(root: Uint8Array): Promise<unknown> {
+    return tx('secure', 'readwrite', (s) =>
+      s.put(requireBox().seal(root, 'secure:storage-root'), 'storage-root'),
+    )
+  },
 }
 
 /** Per-group MLS snapshots. */

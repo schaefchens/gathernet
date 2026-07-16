@@ -116,6 +116,56 @@
     "revoked": "Widerrufen",
     "addDevice": "Um ein Gerät hinzuzufügen, öffne Gathernet dort und wähle „Ich habe eine Wiederherstellungsphrase“."
   },
+  "qr": {
+    "unsupported": "Kamera-Scan wird in diesem Browser nicht unterstützt — gib stattdessen den Code ein."
+  },
+  "apps": {
+    "consentTitle": "{{name}} möchte sich verbinden",
+    "requestedAccess": "Diese App bittet um Folgendes:",
+    "approve": "Erlauben",
+    "deny": "Ablehnen",
+    "scopes": {
+      "identity": "Sieht deinen Anzeigenamen und eine app-eigene Nutzer-ID. Sieht weder deinen Kontoschlüssel noch deine Freunde oder Nachrichten.",
+      "storage": "Kann eigene Daten in deinem Konto speichern. Die App erhält einen Schlüssel, der nur ihre eigenen Speicherstände lesen kann — niemals deine Nachrichten oder Daten anderer Apps.",
+      "rooms": "Kann Echtzeit-Räume mit den Menschen öffnen, mit denen du spielst oder arbeitest. Sieht nicht, wer deine Freunde sind.",
+      "friendsInvite": "Kann dich bitten, eine Freundschaftseinladung zu senden. Fügt niemanden ohne deine Bestätigung hinzu."
+    },
+    "chips": {
+      "identity": "Identität",
+      "storage": "Speicher",
+      "rooms": "Räume",
+      "friendsInvite": "Einladungen"
+    },
+    "openerMissing": "Diese Seite muss von einer App geöffnet werden, die Zugriff anfragt.",
+    "invalidRequest": "Diese Zugriffsanfrage ist ungültig oder unvollständig.",
+    "authorizeFailed": "Die App konnte nicht autorisiert werden. Schließe dieses Fenster und versuche es erneut aus der App.",
+    "approved": "Zugriff gewährt — du kannst zur App zurückkehren.",
+    "denied": "Zugriff abgelehnt — du kannst dieses Fenster schließen.",
+    "rememberedConsent": "Du hast diese App bereits erlaubt — wird abgeschlossen…",
+    "backfillTitle": "App-Speicher freischalten",
+    "backfillHint": "Diese App möchte Daten unter deinem Konto speichern. Um ihren Speicherschlüssel auf diesem Gerät zu erzeugen, gib einmalig deine 12-Wörter-Wiederherstellungsphrase ein. Die Phrase verlässt dieses Gerät nicht.",
+    "backfillPlaceholder": "worship gather bread …",
+    "backfillConfirm": "Speicher freischalten",
+    "backfillSkip": "Überspringen — ohne Speicher fortfahren",
+    "backfillMismatch": "Diese Phrase gehört nicht zu diesem Konto.",
+    "connectTitle": "App verbinden",
+    "connectHint": "Gib den Code ein, den die App anzeigt, oder scanne ihren QR-Code.",
+    "enterCode": "Code eingeben",
+    "scan": "Scannen",
+    "codePlaceholder": "z. B. 7F3K-9PQ2",
+    "codeInvalid": "Der Code ist ungültig oder abgelaufen.",
+    "lookUp": "Code prüfen",
+    "checkingCode": "Wird geprüft…",
+    "scanHint": "Richte deine Kamera auf den QR-Code der App.",
+    "connectSuccess": "Verbunden! Du kannst zur App zurückkehren.",
+    "connectDenied": "Anfrage abgelehnt. Die App wurde nicht verbunden.",
+    "connectedApps": "Verbundene Apps",
+    "noGrants": "Noch keine verbundenen Apps.",
+    "connectWithCode": "App mit einem Code verbinden",
+    "lastUsed": "Zuletzt verwendet {{when}}",
+    "revoke": "Widerrufen",
+    "revokeConfirm": "Zugriff für {{name}} widerrufen? Die App wird von deinem Konto abgemeldet."
+  },
   "pwa": {
     "updateAvailable": "Eine neue Version von Gathernet ist verfügbar.",
     "reload": "Aktualisieren"

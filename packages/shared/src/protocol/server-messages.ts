@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { accountIdSchema, deviceIdSchema, groupIdSchema } from '../ids.ts'
+import { accountIdSchema, appUserIdSchema, deviceIdSchema, groupIdSchema } from '../ids.ts'
 
 /** Server → client WS messages. */
 
@@ -128,6 +128,96 @@ export const sessionRevokedMessage = z.object({
   payload: z.object({}),
 })
 
+/* ---------- rooms (roomId == MLS groupId) ---------- */
+
+/** Live relay of a room.ephemeral client frame — never persisted. */
+export const roomEphemeralMessage = z.object({
+  type: z.literal('room.ephemeral'),
+  payload: z.object({
+    groupId: groupIdSchema,
+    epoch: z.number().int().nonnegative(),
+    /** may be a real device id or an app device id — same hex32 shape */
+    senderDevice: deviceIdSchema,
+    payload: z.string(),
+  }),
+})
+
+export const roomMemberJoinedMessage = z.object({
+  type: z.literal('room.member_joined'),
+  payload: z.object({
+    roomId: groupIdSchema,
+    appUserId: appUserIdSchema,
+    displayName: z.string(),
+  }),
+})
+
+export const roomMemberLeftMessage = z.object({
+  type: z.literal('room.member_left'),
+  payload: z.object({
+    roomId: groupIdSchema,
+    appUserId: appUserIdSchema,
+  }),
+})
+
+export const roomMemberKickedMessage = z.object({
+  type: z.literal('room.member_kicked'),
+  payload: z.object({
+    roomId: groupIdSchema,
+    appUserId: appUserIdSchema,
+  }),
+})
+
+export const roomHostChangedMessage = z.object({
+  type: z.literal('room.host_changed'),
+  payload: z.object({
+    roomId: groupIdSchema,
+    hostAppUserId: appUserIdSchema,
+  }),
+})
+
+export const roomJoinRequestMessage = z.object({
+  type: z.literal('room.join_request'),
+  payload: z.object({
+    roomId: groupIdSchema,
+    requestId: z.string(),
+    appUserId: appUserIdSchema,
+    displayName: z.string(),
+  }),
+})
+
+export const roomJoinApprovedMessage = z.object({
+  type: z.literal('room.join_approved'),
+  payload: z.object({
+    roomId: groupIdSchema,
+    /** latest GroupInfo for the external join */
+    groupInfo: z.base64().nullable(),
+    epoch: z.number().int().nonnegative(),
+  }),
+})
+
+export const roomJoinDeclinedMessage = z.object({
+  type: z.literal('room.join_declined'),
+  payload: z.object({
+    roomId: groupIdSchema,
+  }),
+})
+
+export const roomPhaseMessage = z.object({
+  type: z.literal('room.phase'),
+  payload: z.object({
+    roomId: groupIdSchema,
+    phase: z.enum(['open', 'in_progress']),
+  }),
+})
+
+export const roomClosedMessage = z.object({
+  type: z.literal('room.closed'),
+  payload: z.object({
+    roomId: groupIdSchema,
+    reason: z.string(),
+  }),
+})
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   helloOkMessage,
   helloErrorMessage,
@@ -142,6 +232,16 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   groupCreatedMessage,
   deviceRevokedMessage,
   sessionRevokedMessage,
+  roomEphemeralMessage,
+  roomMemberJoinedMessage,
+  roomMemberLeftMessage,
+  roomMemberKickedMessage,
+  roomHostChangedMessage,
+  roomJoinRequestMessage,
+  roomJoinApprovedMessage,
+  roomJoinDeclinedMessage,
+  roomPhaseMessage,
+  roomClosedMessage,
 ])
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>

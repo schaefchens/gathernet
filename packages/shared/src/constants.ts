@@ -39,5 +39,11 @@ export const APP_STORAGE_MAX_VALUE_BYTES = 64 * 1024
 /** Rooms. */
 export const ROOM_CODE_ALPHABET = '23456789ACDEFGHJKMNPQRTVWXYZ'
 export const ROOM_MAX_DEVICES = 16
+export const ROOM_MAX_MEMBERS = 16
 export const ROOM_INACTIVE_EXPIRE_DAYS = 14
+export const ROOM_CLOSED_RETENTION_DAYS = 30
 export const ROOM_JOIN_REQUEST_TTL_MS = 5 * 60 * 1000
+/** Ephemeral room fan-out (relayed live, never persisted). */
+export const ROOM_EPHEMERAL_MAX_BYTES = 4096
+export const ROOM_EPHEMERAL_RATE_PER_SEC = 20
+export const ROOM_EPHEMERAL_BURST = 40

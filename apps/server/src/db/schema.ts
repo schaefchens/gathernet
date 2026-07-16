@@ -145,12 +145,9 @@ export const groups = pgTable('groups', {
   /** hex(16 random bytes) */
   groupId: text('group_id').primaryKey(),
   kind: text('kind').notNull().default('dm'),
-  accountA: text('account_a')
-    .notNull()
-    .references(() => accounts.accountId),
-  accountB: text('account_b')
-    .notNull()
-    .references(() => accounts.accountId),
+  /** dm pair (accountA < accountB); NULL for kind 'room' — membership lives in room_members */
+  accountA: text('account_a').references(() => accounts.accountId),
+  accountB: text('account_b').references(() => accounts.accountId),
   /** the side whose device must build the MLS group (the invite accepter) */
   creatorAccountId: text('creator_account_id').notNull(),
   /** epoch that the next commit must be built at */
@@ -168,9 +165,13 @@ export const groupMembers = pgTable(
     groupId: text('group_id')
       .notNull()
       .references(() => groups.groupId),
-    deviceId: text('device_id')
-      .notNull()
-      .references(() => devices.deviceId),
+    /**
+     * Deliberately NOT an FK: dm/channel leaves are `devices` rows, room
+     * leaves may be `app_devices` rows. The delivery service validates the
+     * owner table per group kind (migration 0004 dropped the original FK to
+     * `devices`; the index and composite PK remain).
+     */
+    deviceId: text('device_id').notNull(),
     accountId: text('account_id').notNull(),
     addedEpoch: integer('added_epoch').notNull(),
     removedEpoch: integer('removed_epoch'),
@@ -363,6 +364,39 @@ export const appStorage = pgTable(
 )
 
 /* ============================== M2: rooms ============================== */
+
+/**
+ * SDK-registered room devices for app sessions (account-scoped `gna.` tokens
+ * have no real device). The SDK generates the Ed25519 keypair itself and
+ * builds a SELF-SIGNED DeviceCert-shaped MLS credential: accountPk field ==
+ * devicePk, cert signature by the device key. The MLS IdentityProvider (see
+ * crates/mls-wasm/src/core/identity.rs) only checks internal consistency —
+ * sig verifies under the embedded accountPk and the leaf signature key equals
+ * the certified devicePk — so self-signed app-device credentials interoperate
+ * with real DeviceCert credentials in the same group with zero crates changes
+ * (verified against packages/mls-client). The real credential chain (account
+ * identity key signing) is the M3 sub-credential problem; server-side rooms
+ * authorization does not rely on the credential, only on room_members rows.
+ *
+ * deviceId = hex(first 16 bytes of SHA-256(devicePk)) — same rule as devices.
+ */
+export const appDevices = pgTable(
+  'app_devices',
+  {
+    deviceId: text('device_id').primaryKey(),
+    pubId: text('pub_id')
+      .notNull()
+      .references(() => publications.pubId),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => accounts.accountId),
+    appUserId: text('app_user_id').notNull(),
+    devicePk: bytea('device_pk').notNull().unique(),
+    name: text('name').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('app_devices_account_idx').on(t.pubId, t.accountId)],
+)
 
 export const roomVisibilityEnum = pgEnum('room_visibility', ['public', 'private'])
 export const roomPhaseEnum = pgEnum('room_phase', ['open', 'in_progress', 'closed'])

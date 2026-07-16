@@ -89,6 +89,8 @@ export interface HubCrypto {
   generateMnemonic(): string
   validateMnemonic(phrase: string): boolean
   identityFromMnemonic(phrase: string): IdentityHandle
+  /** 32-byte storage-root key, domain-separated from the identity derivation. */
+  deriveStorageRoot(phrase: string): Uint8Array
   generateDeviceKeypair(): DeviceKeys
   deviceKeypairFromSecret(secret: Uint8Array): DeviceKeys
   ed25519Sign(secret: Uint8Array, message: Uint8Array): Uint8Array
@@ -118,6 +120,7 @@ async function loadImpl(): Promise<HubCrypto> {
   return {
     generateMnemonic: mls.generateMnemonic,
     validateMnemonic: mls.validateMnemonic,
+    deriveStorageRoot: mls.deriveStorageRoot,
     identityFromMnemonic(phrase) {
       const keypair = mls.IdentityKeypair.fromMnemonic(phrase)
       return {

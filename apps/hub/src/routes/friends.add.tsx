@@ -4,6 +4,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { QrScanner } from '../components/QrScanner.tsx'
 import { ApiError, api } from '../lib/api.ts'
 
 export const Route = createFileRoute('/friends/add')({ component: AddFriendScreen })
@@ -192,60 +193,7 @@ function EnterCodeTab() {
 
 function ScanTab() {
   const { t } = useTranslation()
-  const videoRef = useRef<HTMLVideoElement>(null)
   const { accept, error, accepted } = useAcceptCode()
-  const [unsupported, setUnsupported] = useState(false)
-
-  useEffect(() => {
-    if (!('BarcodeDetector' in globalThis)) {
-      setUnsupported(true)
-      return
-    }
-    let stream: MediaStream | null = null
-    let stopped = false
-    const Detector = (
-      globalThis as unknown as {
-        BarcodeDetector: new (options: {
-          formats: string[]
-        }) => {
-          detect(source: HTMLVideoElement): Promise<{ rawValue: string }[]>
-        }
-      }
-    ).BarcodeDetector
-    const detector = new Detector({ formats: ['qr_code'] })
-
-    void (async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-        if (videoRef.current && !stopped) {
-          videoRef.current.srcObject = stream
-          await videoRef.current.play()
-          const poll = async () => {
-            if (stopped || !videoRef.current) return
-            try {
-              const codes = await detector.detect(videoRef.current)
-              const match = codes.find((c) => c.rawValue.startsWith('gathernet:invite:'))
-              if (match) {
-                void accept(match.rawValue.replace('gathernet:invite:', ''))
-                return
-              }
-            } catch {
-              // frame not ready — keep polling
-            }
-            setTimeout(poll, 300)
-          }
-          void poll()
-        }
-      } catch {
-        setUnsupported(true)
-      }
-    })()
-
-    return () => {
-      stopped = true
-      for (const track of stream?.getTracks() ?? []) track.stop()
-    }
-  }, [accept])
 
   if (accepted) {
     return (
@@ -254,15 +202,11 @@ function ScanTab() {
       </div>
     )
   }
-  if (unsupported) {
-    return <div className="card text-center text-ink-soft">{t('addFriend.scanUnsupported')}</div>
-  }
 
   return (
     <div className="card space-y-3 text-center">
       <p className="text-sm text-ink-soft">{t('addFriend.scanHint')}</p>
-      {/* biome-ignore lint/a11y/useMediaCaption: live camera preview has no audio */}
-      <video ref={videoRef} className="w-full rounded-md bg-overlay aspect-square object-cover" />
+      <QrScanner prefixes={['gathernet:invite:']} onCode={(payload) => void accept(payload)} />
       {error && <p className="text-sm text-danger">{error}</p>}
     </div>
   )

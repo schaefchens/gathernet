@@ -1,5 +1,13 @@
 import fastifyWebsocket from '@fastify/websocket'
-import type { AccountId, ClientMessage, DeviceId, ServerMessage } from '@gathernet/shared'
+import type {
+  AccountId,
+  AppId,
+  AppScope,
+  AppUserId,
+  ClientMessage,
+  DeviceId,
+  ServerMessage,
+} from '@gathernet/shared'
 import {
   HELLO_TIMEOUT_MS,
   PROTOCOL_VERSION,
@@ -9,17 +17,38 @@ import {
 import type { FastifyInstance } from 'fastify'
 import type { WebSocket } from 'ws'
 
-export interface WsIdentity {
+export type WsSessionKind = 'user' | 'app'
+
+/** Hub device session (`gn.` token). */
+export interface WsUserIdentity {
+  kind: 'user'
   accountId: AccountId
   deviceId: DeviceId
 }
 
-/** Resolves a session token to an identity; stage 3 wires this to real sessions. */
-export interface WsAuthenticator {
-  verifyToken(token: string): Promise<WsIdentity | null>
+/**
+ * App session (`gna.` token, scope 'rooms'). Account-scoped tokens carry no
+ * device, so the socket binds to a registered app_devices row — either the
+ * one named in the hello payload or the account's newest one.
+ */
+export interface WsAppIdentity {
+  kind: 'app'
+  accountId: AccountId
+  /** the app_devices id this socket speaks MLS as */
+  deviceId: DeviceId
+  appId: AppId
+  appUserId: AppUserId
+  scopes: AppScope[]
 }
 
-export interface WsSession extends WsIdentity {
+export type WsIdentity = WsUserIdentity | WsAppIdentity
+
+/** Resolves a hello token (`gn.` or `gna.`) to an identity. */
+export interface WsAuthenticator {
+  verifyToken(token: string, hello?: { deviceId?: string }): Promise<WsIdentity | null>
+}
+
+export type WsSession = WsIdentity & {
   socket: WebSocket
   send(message: ServerMessage): void
 }
@@ -28,6 +57,12 @@ export type WsMessageHandler = (
   session: WsSession,
   message: Extract<ClientMessage, { type: string }>,
 ) => Promise<void>
+
+/** Handler plus the session kinds allowed to invoke it. */
+export interface WsHandlerEntry {
+  kinds: readonly WsSessionKind[]
+  handler: WsMessageHandler
+}
 
 export interface HelloInfo {
   kpRemaining: number
@@ -39,8 +74,8 @@ export interface WsGatewayOptions {
   /** Called once a socket completes the hello handshake. */
   onSessionOpen?: (session: WsSession) => void
   onSessionClose?: (session: WsSession) => void
-  /** Per-type handlers for post-hello messages. */
-  handlers?: Partial<Record<ClientMessage['type'], WsMessageHandler>>
+  /** Per-type handlers for post-hello messages, gated by session kind. */
+  handlers?: Partial<Record<ClientMessage['type'], WsHandlerEntry>>
   /** Fills key-package + mailbox counts in hello.ok (stage 6). */
   helloInfo?: (identity: WsIdentity) => Promise<HelloInfo>
 }
@@ -103,8 +138,15 @@ export async function registerWsGateway(
       if (message.type === 'hello') {
         if (session) {
           // Token refresh mid-connection: re-verify, keep the session.
-          const identity = await options.authenticator.verifyToken(message.payload.token)
-          if (!identity || identity.deviceId !== session.deviceId) {
+          const identity = await options.authenticator.verifyToken(
+            message.payload.token,
+            message.payload.deviceId ? { deviceId: message.payload.deviceId } : {},
+          )
+          if (
+            !identity ||
+            identity.kind !== session.kind ||
+            identity.deviceId !== session.deviceId
+          ) {
             sendMessage(socket, {
               type: 'hello.error',
               replyTo: message.id,
@@ -125,7 +167,10 @@ export async function registerWsGateway(
           socket.close(4400, 'protocol version')
           return
         }
-        const identity = await options.authenticator.verifyToken(message.payload.token)
+        const identity = await options.authenticator.verifyToken(
+          message.payload.token,
+          message.payload.deviceId ? { deviceId: message.payload.deviceId } : {},
+        )
         if (!identity) {
           sendMessage(socket, {
             type: 'hello.error',
@@ -155,8 +200,10 @@ export async function registerWsGateway(
         return
       }
 
-      const handler = options.handlers?.[message.type]
-      if (!handler) {
+      const entry = options.handlers?.[message.type]
+      // A message type not allowed for this session kind behaves exactly
+      // like an unimplemented type.
+      if (!entry || !entry.kinds.includes(session.kind)) {
         sendMessage(socket, {
           type: 'error',
           replyTo: message.id,
@@ -165,7 +212,7 @@ export async function registerWsGateway(
         return
       }
       try {
-        await handler(session, message)
+        await entry.handler(session, message)
       } catch (err) {
         request.log.error({ err, type: message.type }, 'ws handler failed')
         sendMessage(socket, {
