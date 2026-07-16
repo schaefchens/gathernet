@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gathernet Demo App</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { font-family: system-ui, sans-serif; background: #14161f; color: #e8e4d8; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+      h1 { color: #d4b545; font-size: 1.5rem; }
+      section { background: #1c2030; border: 1px solid #2e3450; border-radius: 10px; padding: 1rem 1.25rem; margin: 1rem 0; }
+      button { background: #d4b545; color: #14161f; border: 0; border-radius: 6px; padding: 0.5rem 1rem; font-weight: 600; cursor: pointer; margin-right: 0.5rem; }
+      button.quiet { background: transparent; border: 1px solid #2e3450; color: #e8e4d8; }
+      input, textarea { background: #14161f; border: 1px solid #2e3450; border-radius: 6px; color: inherit; padding: 0.5rem; width: 100%; box-sizing: border-box; }
+      .row { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+      .muted { color: #8a8674; font-size: 0.85rem; }
+      code { background: #14161f; padding: 0.1rem 0.4rem; border-radius: 4px; }
+      #qr { background: #e8e4d8; border-radius: 8px; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>⚙ Gathernet Demo App</h1>
+    <p class="muted">
+      A third-party app on its own origin, using only <code>@gathernet/sdk</code>.
+    </p>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

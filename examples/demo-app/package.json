@@ -1,0 +1,20 @@
+{
+  "name": "@gathernet/demo-app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@gathernet/sdk": "workspace:*",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.4"
+  }
+}
