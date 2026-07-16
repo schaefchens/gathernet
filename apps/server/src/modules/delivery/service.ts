@@ -15,6 +15,8 @@ import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import {
   appDevices,
+  communityChannels,
+  communityMembers,
   devices,
   groupMembers,
   groups,
@@ -34,6 +36,21 @@ export class EpochConflictError extends ServiceError {
   constructor(readonly currentEpoch: number) {
     super(409, 'epoch_conflict')
   }
+}
+
+/**
+ * Whether a community member row grants access to a channel at the given
+ * level. 'members' channels admit any active member; 'leaders' channels admit
+ * only active owners/leaders. This is the ADR-0001 "leaders channel" guard —
+ * enforced on GroupInfo release AND commit authorization (defense in depth).
+ */
+export function satisfiesChannelAccess(
+  member: { role: string; status: string } | undefined,
+  access: string,
+): boolean {
+  if (member?.status !== 'active') return false
+  if (access === 'leaders') return member.role === 'owner' || member.role === 'leader'
+  return true
 }
 
 export async function createDmGroup(
@@ -252,14 +269,21 @@ export async function postCommit(
       | undefined
     if (!group) throw new ServiceError(404, 'group_not_found')
     const isRoom = group.kind === 'room'
+    const isChannel = group.kind === 'channel'
 
     // Sender authorization by group kind. Rooms: any account with an ACTIVE
     // room_members row (external joiners included — the join endpoint inserts
-    // the row before their commit). DMs: one of the two pair accounts.
+    // the row before their commit). Channels: any account whose community
+    // membership satisfies the channel access level (leaders-only channels
+    // reject plain members even if they somehow hold the GroupInfo). DMs: one
+    // of the two pair accounts.
     let roomHostAccountId: string | null = null
     let roomPubId: string | null = null
     /** room member status per account, for adds/removes validation */
     const roomStatus = new Map<string, string>()
+    let channelAccess: string | null = null
+    /** community membership (role+status) per account, for channel validation */
+    const channelMembers = new Map<string, { role: string; status: string }>()
     if (isRoom) {
       const memberRows = await tx.select().from(roomMembers).where(eq(roomMembers.roomId, groupId))
       for (const m of memberRows) roomStatus.set(m.accountId, m.status)
@@ -269,6 +293,22 @@ export async function postCommit(
       const roomRow = await tx.query.rooms.findFirst({ where: eq(rooms.roomId, groupId) })
       roomHostAccountId = roomRow?.hostAccountId ?? null
       roomPubId = roomRow?.pubId ?? null
+    } else if (isChannel) {
+      const channel = await tx.query.communityChannels.findFirst({
+        where: eq(communityChannels.channelId, groupId),
+      })
+      if (!channel) throw new ServiceError(404, 'group_not_found')
+      channelAccess = channel.access
+      const memberRows = await tx
+        .select()
+        .from(communityMembers)
+        .where(eq(communityMembers.communityId, channel.communityId))
+      for (const m of memberRows)
+        channelMembers.set(m.accountId, { role: m.role, status: m.status })
+      // Don't leak channel existence to unauthorized callers.
+      if (!satisfiesChannelAccess(channelMembers.get(accountId), channelAccess)) {
+        throw new ServiceError(404, 'group_not_found')
+      }
     } else if (group.account_a !== accountId && group.account_b !== accountId) {
       throw new ServiceError(404, 'group_not_found')
     }
@@ -289,17 +329,20 @@ export async function postCommit(
 
     // Sender must be a current member, be joining via this commit (external
     // join), or — dm only — be making the group's very first commit as the
-    // creator side. Rooms bootstrap through the group-info publish instead.
+    // creator side. Rooms and channels bootstrap through the group-info
+    // publish instead.
     const senderIsMember = memberDevices.has(deviceId)
     const senderJoins = (body.memberChanges.adds as string[]).includes(deviceId)
-    const firstCommit = !isRoom && membersBefore.length === 0
+    const firstCommit = group.kind === 'dm' && membersBefore.length === 0
     if (!senderIsMember && !senderJoins && !firstCommit) {
       throw new ServiceError(403, 'not_a_member')
     }
 
     // Every added/welcomed device must belong to an authorized account:
     // dm → the two pair accounts (real devices only); room → any account
-    // with an active room_members row (real devices OR this app's devices).
+    // with an active room_members row (real devices OR this app's devices);
+    // channel → any account (real devices only) whose community membership
+    // satisfies the channel access level.
     const referenced = [
       ...new Set([...body.memberChanges.adds, ...body.welcomes.map((w) => w.deviceId)]),
     ]
@@ -321,9 +364,13 @@ export async function postCommit(
       }
       for (const ref of referenced) {
         const owner = deviceOwner.get(ref)
-        const authorized = isRoom
-          ? owner !== undefined && roomStatus.get(owner) === 'active'
-          : owner === group.account_a || owner === group.account_b
+        let authorized: boolean
+        if (isRoom) authorized = owner !== undefined && roomStatus.get(owner) === 'active'
+        else if (isChannel)
+          authorized =
+            owner !== undefined &&
+            satisfiesChannelAccess(channelMembers.get(owner), channelAccess ?? 'members')
+        else authorized = owner === group.account_a || owner === group.account_b
         if (!authorized) throw new ServiceError(400, 'invalid_member_change')
       }
     }
@@ -337,6 +384,25 @@ export async function postCommit(
           const owner = accountOfLeaf.get(removeId)
           const ownerStatus = owner ? roomStatus.get(owner) : undefined
           if (ownerStatus !== 'left' && ownerStatus !== 'kicked') {
+            throw new ServiceError(403, 'remove_not_allowed')
+          }
+        }
+      }
+    }
+
+    // Channels: leaders/owner may remove anyone; a plain member may only
+    // remove leaves whose owner no longer satisfies access (cleanup after a
+    // member was removed/demoted at the community level).
+    if (isChannel && body.memberChanges.removes.length > 0) {
+      const committer = channelMembers.get(accountId)
+      const committerIsLeader = committer?.role === 'owner' || committer?.role === 'leader'
+      if (!committerIsLeader) {
+        for (const removeId of body.memberChanges.removes) {
+          const owner = accountOfLeaf.get(removeId)
+          if (
+            owner &&
+            satisfiesChannelAccess(channelMembers.get(owner), channelAccess ?? 'members')
+          ) {
             throw new ServiceError(403, 'remove_not_allowed')
           }
         }
@@ -480,8 +546,27 @@ export async function postMessage(
       .select()
       .from(groupMembers)
       .where(and(eq(groupMembers.groupId, groupId), isNull(groupMembers.removedEpoch)))
-    if (!members.some((m) => m.deviceId === deviceId)) {
+    const senderRow = members.find((m) => m.deviceId === deviceId)
+    if (!senderRow) {
       throw new ServiceError(403, 'not_a_member')
+    }
+    // Channels: defense in depth — a leaf whose owner was removed/demoted (but
+    // not yet cryptographically removed) must not be able to send.
+    if (group.kind === 'channel') {
+      const channel = await tx.query.communityChannels.findFirst({
+        where: eq(communityChannels.channelId, groupId),
+      })
+      const membership = channel
+        ? await tx.query.communityMembers.findFirst({
+            where: and(
+              eq(communityMembers.communityId, channel.communityId),
+              eq(communityMembers.accountId, senderRow.accountId),
+            ),
+          })
+        : undefined
+      if (!channel || !satisfiesChannelAccess(membership ?? undefined, channel.access)) {
+        throw new ServiceError(403, 'not_a_member')
+      }
     }
     // Accept the current epoch and one behind (commit racing a message).
     if (epoch !== group.current_epoch && epoch !== group.current_epoch - 1) {
@@ -529,6 +614,21 @@ export async function listMessages(
       ),
     })
     if (!membership) throw new ServiceError(404, 'group_not_found')
+  } else if (group.kind === 'channel') {
+    const channel = await db.query.communityChannels.findFirst({
+      where: eq(communityChannels.channelId, groupId),
+    })
+    const membership = channel
+      ? await db.query.communityMembers.findFirst({
+          where: and(
+            eq(communityMembers.communityId, channel.communityId),
+            eq(communityMembers.accountId, accountId),
+          ),
+        })
+      : undefined
+    if (!channel || !satisfiesChannelAccess(membership ?? undefined, channel.access)) {
+      throw new ServiceError(404, 'group_not_found')
+    }
   } else if (group.accountA !== accountId && group.accountB !== accountId) {
     throw new ServiceError(404, 'group_not_found')
   }

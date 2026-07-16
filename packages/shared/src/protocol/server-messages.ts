@@ -1,5 +1,12 @@
 import { z } from 'zod'
-import { accountIdSchema, appUserIdSchema, deviceIdSchema, groupIdSchema } from '../ids.ts'
+import { channelAccessSchema, communityRoleSchema } from '../api/communities.ts'
+import {
+  accountIdSchema,
+  appUserIdSchema,
+  communityIdSchema,
+  deviceIdSchema,
+  groupIdSchema,
+} from '../ids.ts'
 
 /** Server → client WS messages. */
 
@@ -218,6 +225,60 @@ export const roomClosedMessage = z.object({
   }),
 })
 
+/* ---------- communities (channelId == MLS groupId) ---------- */
+
+export const communityMemberJoinedMessage = z.object({
+  type: z.literal('community.member_joined'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    accountId: accountIdSchema,
+    displayName: z.string(),
+  }),
+})
+
+export const communityMemberLeftMessage = z.object({
+  type: z.literal('community.member_left'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    accountId: accountIdSchema,
+  }),
+})
+
+export const communityMemberRemovedMessage = z.object({
+  type: z.literal('community.member_removed'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    accountId: accountIdSchema,
+  }),
+})
+
+export const communityRoleChangedMessage = z.object({
+  type: z.literal('community.role_changed'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    accountId: accountIdSchema,
+    role: communityRoleSchema,
+  }),
+})
+
+export const communityChannelCreatedMessage = z.object({
+  type: z.literal('community.channel_created'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+    name: z.string(),
+    access: channelAccessSchema,
+  }),
+})
+
+export const communityChannelDeletedMessage = z.object({
+  type: z.literal('community.channel_deleted'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+  }),
+})
+
 export const serverMessageSchema = z.discriminatedUnion('type', [
   helloOkMessage,
   helloErrorMessage,
@@ -242,6 +303,12 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   roomJoinDeclinedMessage,
   roomPhaseMessage,
   roomClosedMessage,
+  communityMemberJoinedMessage,
+  communityMemberLeftMessage,
+  communityMemberRemovedMessage,
+  communityRoleChangedMessage,
+  communityChannelCreatedMessage,
+  communityChannelDeletedMessage,
 ])
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>

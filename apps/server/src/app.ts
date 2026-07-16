@@ -10,6 +10,7 @@ import { allowedAppOrigins } from './modules/apps/origins.ts'
 import { registerAppRoutes } from './modules/apps/routes.ts'
 import { verifyAppSessionToken } from './modules/apps/sessions.ts'
 import { verifySessionToken } from './modules/auth/sessions.ts'
+import { registerCommunityRoutes } from './modules/communities/routes.ts'
 import { registerDeliveryRoutes } from './modules/delivery/routes.ts'
 import {
   ackCursor,
@@ -151,6 +152,7 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
   registerPublicationRoutes(app, { db, authenticate })
   registerAppRoutes(app, { db, authenticate, appAuthenticate })
   registerRoomRoutes(app, { db, registry, appAuthenticate })
+  registerCommunityRoutes(app, { db, registry, authenticate })
 
   const chatSendHandler: WsMessageHandler = async (session, message) => {
     if (message.type !== 'chat.send') return
