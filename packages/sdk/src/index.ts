@@ -19,9 +19,21 @@ import {
   type StoredSession,
   storeSession,
 } from './internal.ts'
+import { RoomsClient } from './rooms/client.ts'
+import type { MlsModule } from './rooms/mls.ts'
 import { openBlob, sealBlob } from './storage-crypto.ts'
 
 export { GathernetError } from './errors.ts'
+export type {
+  ChatMessage,
+  CreateRoomOptions,
+  EphemeralMessage,
+  IntentMessage,
+  PublicRoom,
+  Room,
+  RoomMember,
+  RoomsClient,
+} from './rooms/client.ts'
 
 export type Scope = 'identity' | 'storage' | 'rooms'
 
@@ -62,6 +74,7 @@ export class Gathernet {
   private readonly config: SdkConfig
   private readonly http: HttpClient
   private readonly authListeners = new Set<(user: AppUser | null) => void>()
+  private roomsClient: RoomsClient | null = null
 
   private constructor(config: SdkConfig) {
     this.config = config
@@ -254,6 +267,34 @@ export class Gathernet {
       await this.http.request('POST', '/api/v1/app/logout').catch(() => undefined)
     }
     this.setSession(null)
+  }
+
+  /* -------------------------- E2EE rooms --------------------------- */
+
+  /**
+   * Lazy rooms accessor. First use dynamically imports @gathernet/mls-client,
+   * initializes the wasm module, and opens the rooms WebSocket. Requires the
+   * 'rooms' scope. Room MLS state is in-memory only (not persisted across
+   * reloads in M2).
+   */
+  get rooms(): RoomsClient {
+    if (!this.roomsClient) {
+      this.roomsClient = new RoomsClient({
+        http: this.http,
+        serverUrl: this.config.serverUrl,
+        getToken: () => this.session?.token ?? null,
+        self: () => ({
+          appUserId: this.session?.appUserId ?? '',
+          displayName: this.session?.displayName ?? '',
+        }),
+        initMls: async (): Promise<MlsModule> => {
+          const mls = await import('@gathernet/mls-client')
+          await mls.initMls()
+          return mls
+        },
+      })
+    }
+    return this.roomsClient
   }
 
   /* ---------------- encrypted cloud saves ---------------- */

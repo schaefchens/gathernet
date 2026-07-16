@@ -4,13 +4,16 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
   },
   "scripts": {
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@gathernet/mls-client": "workspace:*",
+    "@gathernet/mls-sync": "workspace:*",
     "@gathernet/shared": "workspace:*"
   },
   "devDependencies": {

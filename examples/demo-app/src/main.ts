@@ -48,7 +48,7 @@ function loginView(): HTMLElement {
   view.querySelector('#login')?.addEventListener('click', async () => {
     errorOut.textContent = ''
     try {
-      await gn.login({ scopes: ['identity', 'storage'] })
+      await gn.login({ scopes: ['identity', 'storage', 'rooms'] })
       render()
     } catch (err) {
       errorOut.textContent =
@@ -63,7 +63,7 @@ function loginView(): HTMLElement {
   view.querySelector('#login-code')?.addEventListener('click', async () => {
     errorOut.textContent = ''
     try {
-      const flow = await gn.loginWithCode({ scopes: ['identity', 'storage'] })
+      const flow = await gn.loginWithCode({ scopes: ['identity', 'storage', 'rooms'] })
       view.querySelector('#code-area')?.classList.remove('hidden')
       const codeOut = view.querySelector('#user-code') as HTMLElement
       codeOut.textContent = `${flow.userCode.slice(0, 4)}-${flow.userCode.slice(4)}`
@@ -102,6 +102,33 @@ function loggedInView(): HTMLElement {
           <button id="conflict" class="quiet">Simulate conflict</button>
         </div>
         <p class="muted" id="save-status"></p>
+      </section>
+      <section id="rooms-section">
+        <h2>E2EE room</h2>
+        <p class="muted">Every message is MLS-encrypted; the server only relays ciphertext.</p>
+        <div id="room-lobby">
+          <div class="row">
+            <button id="room-create">Create room</button>
+          </div>
+          <div class="row">
+            <input id="room-code-in" placeholder="Room code" maxlength="4" style="text-transform:uppercase" />
+            <button id="room-join" class="quiet">Join</button>
+          </div>
+          <p class="muted" id="room-status"></p>
+        </div>
+        <div id="room-active" class="hidden">
+          <p>Room <code id="room-code"></code> · members: <span id="room-members"></span></p>
+          <div class="row">
+            <strong style="font-size:1.4rem">Shared counter: <span id="room-counter">0</span></strong>
+            <button id="room-inc">+1</button>
+          </div>
+          <div id="room-chatlog" style="max-height:140px;overflow:auto;margin:0.5rem 0;font-size:0.9rem"></div>
+          <div class="row">
+            <input id="room-chat-in" placeholder="Message…" />
+            <button id="room-chat-send" class="quiet">Send</button>
+          </div>
+          <button id="room-leave" class="quiet">Leave room</button>
+        </div>
       </section>
     </div>
   `)
@@ -161,7 +188,102 @@ function loggedInView(): HTMLElement {
   })
 
   void load()
+  wireRooms(view)
   return view
+}
+
+const COMPAT = 'demo-v1'
+
+/** Create/join an E2EE room and drive a shared counter over ordered intents. */
+function wireRooms(view: HTMLElement): void {
+  const $ = <T extends HTMLElement>(sel: string) => view.querySelector(sel) as T
+  const lobby = $('#room-lobby')
+  const active = $('#room-active')
+  const roomStatus = $('#room-status')
+  const counterEl = $('#room-counter')
+  const membersEl = $('#room-members')
+  const chatlog = $('#room-chatlog')
+
+  // biome-ignore lint/suspicious/noExplicitAny: SDK Room type is lazy-imported
+  let room: any = null
+  let counter = 0
+
+  const showActive = () => {
+    lobby.classList.add('hidden')
+    active.classList.remove('hidden')
+    $('#room-code').textContent = room.code
+    renderMembers()
+  }
+  const renderMembers = () => {
+    membersEl.textContent = room
+      .members()
+      .map((m: { displayName: string }) => m.displayName)
+      .join(', ')
+  }
+  const appendChat = (from: string, text: string) => {
+    const line = document.createElement('div')
+    line.textContent = `${from.slice(0, 8)}: ${text}`
+    chatlog.append(line)
+    chatlog.scrollTop = chatlog.scrollHeight
+  }
+  const bind = () => {
+    // Fold every 'inc' intent (in MLS seq order) into the shared counter.
+    room.onMessage((m: { payload: unknown }) => {
+      if (m.payload && (m.payload as { op?: string }).op === 'inc') {
+        counter += 1
+        counterEl.textContent = String(counter)
+      }
+    })
+    room.chat.onMessage((m: { from: string; text: string }) => appendChat(m.from, m.text))
+    room.onMembers(renderMembers)
+    room.onClosed(() => {
+      roomStatus.textContent = 'Room closed.'
+      active.classList.add('hidden')
+      lobby.classList.remove('hidden')
+      room = null
+    })
+  }
+
+  $('#room-create').addEventListener('click', async () => {
+    roomStatus.textContent = 'Creating…'
+    try {
+      room = await gn.rooms.create({ title: 'Demo Room', public: true, compatTag: COMPAT })
+      bind()
+      showActive()
+    } catch (err) {
+      roomStatus.textContent = `create failed: ${String(err)}`
+    }
+  })
+
+  $('#room-join').addEventListener('click', async () => {
+    const code = ($('#room-code-in') as HTMLInputElement).value.trim().toUpperCase()
+    if (!code) return
+    roomStatus.textContent = 'Joining…'
+    try {
+      room = await gn.rooms.joinByCode(code, { compatTag: COMPAT })
+      bind()
+      showActive()
+    } catch (err) {
+      roomStatus.textContent = `join failed: ${String(err)}`
+    }
+  })
+
+  $('#room-inc').addEventListener('click', () => room?.send({ op: 'inc' }))
+  $('#room-chat-send').addEventListener('click', async () => {
+    const input = $('#room-chat-in') as HTMLInputElement
+    if (input.value.trim() && room) {
+      await room.chat.send(input.value.trim())
+      input.value = ''
+    }
+  })
+  $('#room-leave').addEventListener('click', async () => {
+    await room?.leave()
+    active.classList.add('hidden')
+    lobby.classList.remove('hidden')
+    room = null
+    counter = 0
+    counterEl.textContent = '0'
+  })
 }
 
 gn.onAuthChange(render)
