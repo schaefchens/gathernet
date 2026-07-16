@@ -39,6 +39,7 @@ interface DeviceUser {
   accountId: string
   appUserId: string
   deviceId: string
+  appId: string
 }
 
 async function createAccount(displayName: string): Promise<string> {
@@ -112,6 +113,7 @@ async function roomUser(displayName: string): Promise<DeviceUser> {
     accountId: me.json().accountId,
     appUserId,
     deviceId: dev.json().deviceId,
+    appId,
   }
 }
 
@@ -344,6 +346,44 @@ describe('room lifecycle', () => {
     const changed = await guestWs.waitFor((m) => m.type === 'room.host_changed')
     expect(changed).toMatchObject({ payload: { roomId, hostAppUserId: guest.appUserId } })
     await guestWs.close()
+  })
+
+  it('room commit rejects a committer deviceId not owned by the caller', async () => {
+    const host = await roomUser('CommitHost')
+    const guest = await roomUser('CommitGuest')
+    const { roomId, code } = await createRoom(host)
+    await joinAndCommit(guest, roomId, code)
+
+    // Host names GUEST's device as the committer — must be refused (400).
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/app/rooms/${roomId}/commits`,
+      headers: appAuth(host),
+      payload: {
+        epoch: 2,
+        commit: fakeB64(96),
+        groupInfo: fakeB64(128),
+        welcomes: [],
+        memberChanges: { adds: [], removes: [] },
+        deviceId: guest.deviceId,
+      },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toBe('unknown_device')
+  })
+
+  it('revoking an app grant closes the live app WebSocket', async () => {
+    const user = await roomUser('RevokeMe')
+    const ws = await TestWsClient.connect(port, user.token)
+    const closed = new Promise<number>((resolve) => ws.socket.once('close', resolve))
+
+    const revoke = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/apps/grants/${user.appId}`,
+      headers: { authorization: `Bearer ${user.gnToken}` },
+    })
+    expect(revoke.statusCode).toBe(200)
+    expect(await closed).toBe(4403)
   })
 
   it('non-member cannot read room detail', async () => {

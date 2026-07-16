@@ -27,6 +27,7 @@ import {
   listPublicRooms,
   publishGroupInfo,
   registerAppDevice,
+  requireOwnAppDevice,
   resolveJoinRequest,
   setPhase,
 } from './service.ts'
@@ -90,6 +91,9 @@ export function registerRoomRoutes(
     async (request, reply) => {
       const session = requireAppSession(request)
       const body = roomCommitSchema.parse(request.body)
+      // The committer device must belong to THIS caller's (app, account) —
+      // never trust a client-supplied deviceId to name someone else's leaf.
+      await requireOwnAppDevice(db, session, body.deviceId)
       try {
         const fanout = await postCommit(
           db,

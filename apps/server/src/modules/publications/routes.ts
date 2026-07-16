@@ -1,4 +1,4 @@
-import { registerPublicationRequestSchema } from '@gathernet/shared'
+import { originSchema, registerPublicationRequestSchema, scopesSchema } from '@gathernet/shared'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { Db } from '../../db/index.ts'
@@ -16,8 +16,10 @@ const updateSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().max(500).optional(),
   iconUrl: z.url().max(300).optional(),
-  origins: z.array(z.string()).min(1).max(10).optional(),
-  allowedScopes: z.array(z.string()).min(1).max(4).optional(),
+  // Same strict validation as registration — never let PATCH smuggle a
+  // plaintext or malformed origin into the CORS allowlist / postMessage targets.
+  origins: z.array(originSchema).min(1).max(10).optional(),
+  allowedScopes: scopesSchema.optional(),
 })
 
 export interface PublicationRoutesOptions {

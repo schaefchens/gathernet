@@ -93,11 +93,14 @@ export async function pollGrantCode(db: Db, pollSecret: string): Promise<PollRes
     const account = await tx.query.accounts.findFirst({
       where: eq(accounts.accountId, row.accountId),
     })
+    // The real display name is only disclosed when 'identity' was granted —
+    // otherwise a storage/rooms-only app could correlate users by name.
+    const grantsIdentity = row.grantedScopes.includes('identity')
     return {
       status: 'granted',
       token: minted.token,
       appUserId: minted.appUserId,
-      displayName: account?.displayName ?? '',
+      displayName: grantsIdentity ? (account?.displayName ?? '') : '',
       scopes: row.grantedScopes,
       expiresAt: Date.now() + 14 * 24 * 3600 * 1000,
       sealedStorageKey: row.sealedStorageKey?.toString('base64') ?? null,

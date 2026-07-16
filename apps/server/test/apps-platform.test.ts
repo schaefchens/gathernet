@@ -124,6 +124,28 @@ describe('publications', () => {
     expect(res.statusCode).toBe(400)
   })
 
+  it('PATCH rejects non-https / malformed origins (no CORS-allowlist poisoning)', async () => {
+    const dev = await createUser('DevPatch')
+    const appId = await registerApp(dev)
+    for (const origins of [['http://evil.example'], ['null'], ['https://ok.example/path']]) {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/publications/${appId}`,
+        headers: auth(dev),
+        payload: { origins },
+      })
+      expect(res.statusCode).toBe(400)
+    }
+    // A proper https origin is still accepted.
+    const ok = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/publications/${appId}`,
+      headers: auth(dev),
+      payload: { origins: ['https://good.example'] },
+    })
+    expect(ok.statusCode).toBe(200)
+  })
+
   it('publishers only see and edit their own publications', async () => {
     const a = await createUser('DevA')
     const b = await createUser('DevB')
@@ -175,6 +197,20 @@ describe('authorize + app sessions', () => {
     const s2 = (await authorize(user, app2, ['identity'])).json()
     expect(s1a.appUserId).toBe(s1b.appUserId)
     expect(s1a.appUserId).not.toBe(s2.appUserId)
+  })
+
+  it('withholds displayName from apps not granted the identity scope', async () => {
+    const dev = await createUser('DevNamer')
+    const user = await createUser('Real Name')
+    const appId = await registerApp(dev)
+
+    // storage-only grant → no display name leaks (cross-app correlation guard)
+    const storageOnly = await authorize(user, appId, ['storage'])
+    expect(storageOnly.json().displayName).toBe('')
+
+    // identity granted → the name is disclosed, as the consent screen states
+    const withIdentity = await authorize(user, appId, ['identity'])
+    expect(withIdentity.json().displayName).toBe('Real Name')
   })
 
   it('rejects unregistered origins and disallowed scopes', async () => {

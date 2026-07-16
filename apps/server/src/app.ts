@@ -150,7 +150,7 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
   })
   registerDeliveryRoutes(app, { db, registry, authenticate })
   registerPublicationRoutes(app, { db, authenticate })
-  registerAppRoutes(app, { db, authenticate, appAuthenticate })
+  registerAppRoutes(app, { db, registry, authenticate, appAuthenticate })
   registerRoomRoutes(app, { db, registry, appAuthenticate })
   registerCommunityRoutes(app, { db, registry, authenticate })
 

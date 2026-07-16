@@ -11,6 +11,7 @@ import { z } from 'zod'
 import type { Db } from '../../db/index.ts'
 import { appSessions } from '../../db/schema.ts'
 import { hashPrefixedToken } from '../../lib/crypto.ts'
+import type { ConnectionRegistry } from '../../ws/registry.ts'
 import { getMe, ServiceError } from '../accounts/service.ts'
 import { getAppConfig, getPublicationCard } from '../publications/service.ts'
 import {
@@ -30,6 +31,8 @@ const pollBodySchema = pollGrantCodeRequestSchema.extend({
 
 export interface AppRoutesOptions {
   db: Db
+  /** live-socket registry, so grant revocation can drop app WS sessions */
+  registry: ConnectionRegistry
   /** device-session auth (Hub) */
   authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>
   /** app-session auth factory (per-scope) */
@@ -52,7 +55,7 @@ function requireAppSession(request: FastifyRequest) {
 
 export function registerAppRoutes(
   app: FastifyInstance,
-  { db, authenticate, appAuthenticate }: AppRoutesOptions,
+  { db, registry, authenticate, appAuthenticate }: AppRoutesOptions,
 ): void {
   /**
    * Popup flow: the unlocked Hub mints an app session after user consent.
@@ -80,10 +83,12 @@ export function registerAppRoutes(
         session.accountId,
         body.scopes,
       )
+      // Disclose the real display name only when 'identity' was granted —
+      // otherwise a storage/rooms-only app could deanonymize users by name.
       return {
         token: minted.token,
         appUserId: minted.appUserId,
-        displayName: me.displayName,
+        displayName: body.scopes.includes('identity') ? me.displayName : '',
         scopes: body.scopes,
         expiresAt: minted.expiresAt.getTime(),
         origin: body.origin,
@@ -102,6 +107,13 @@ export function registerAppRoutes(
     async (request) => {
       const session = requireSession(request)
       await revokeGrant(db, session.accountId, request.params.appId)
+      // Drop any live app WebSocket immediately — like device revocation does.
+      // (gna. sockets authenticate once at connect and aren't re-checked per
+      // frame, so without this a revoked app keeps relaying room ciphertext.)
+      registry.closeAppAccount(request.params.appId, session.accountId, {
+        type: 'session.revoked',
+        payload: {},
+      })
       return { ok: true }
     },
   )

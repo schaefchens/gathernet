@@ -125,7 +125,11 @@ export async function resolveAppDevice(
   return rows[0] ?? null
 }
 
-async function requireOwnAppDevice(db: Db, caller: RoomCaller, deviceId: string): Promise<void> {
+export async function requireOwnAppDevice(
+  db: Db,
+  caller: RoomCaller,
+  deviceId: string,
+): Promise<void> {
   const device = await resolveAppDevice(db, caller.appId, caller.accountId, deviceId)
   if (!device) throw new ServiceError(400, 'unknown_device')
 }

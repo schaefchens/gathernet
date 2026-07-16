@@ -5,7 +5,8 @@ import { appIdSchema, appUserIdSchema, grantUserCodeSchema } from '../ids.ts'
 export const appScopeSchema = z.enum(APP_SCOPES)
 export const scopesSchema = z.array(appScopeSchema).min(1).max(4)
 
-const originSchema = z.url().refine((v) => {
+/** Exact serialized origin, https (or localhost/127.0.0.1 for dev) only. */
+export const originSchema = z.url().refine((v) => {
   try {
     const url = new URL(v)
     return (
