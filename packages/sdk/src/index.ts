@@ -8,7 +8,7 @@
  * await gn.storage.putJSON('save', { level: 3 })
  * ```
  */
-import { eciesOpen, generateEciesKeypair } from '@gathernet/shared'
+import { eciesOpen, GRANT_QR_PREFIX, generateEciesKeypair } from '@gathernet/shared'
 import { GathernetError } from './errors.ts'
 import {
   b64,
@@ -201,6 +201,14 @@ export class Gathernet {
       json: { appId: this.config.appId, scopes, ephemeralPk: keys.publicKeyB64 },
     })
 
+    // Build the QR payload LOCALLY, embedding our ephemeral public key so it
+    // travels to the Hub out-of-band (via the human scanning the code) rather
+    // than through the untrusted server. The Hub seals the storage key to the
+    // scanned key, so a malicious server cannot substitute its own key to MITM
+    // the handoff. Manual code entry (userCode only) carries no key, so the
+    // Hub grants without a storage key on that path — use login() for storage.
+    const qrPayload = `${GRANT_QR_PREFIX}${data.userCode}:${keys.publicKeyB64}`
+
     let cancelled = false
     const waitForGrant = async (): Promise<AppUser> => {
       while (!cancelled) {
@@ -232,6 +240,7 @@ export class Gathernet {
               keys.privateKey,
               poll.hubEphemeralPk,
               poll.sealedStorageKey,
+              keys.publicKeyB64,
             )
             storageKey = b64(opened)
           }
@@ -253,7 +262,7 @@ export class Gathernet {
 
     return {
       userCode: data.userCode,
-      qrPayload: data.qrPayload,
+      qrPayload,
       expiresAt: data.expiresAt,
       waitForGrant,
       cancel: () => {

@@ -55,6 +55,12 @@ async function deriveAesKey(privateKey: WebCryptoKey, peerSpkiB64: string): Prom
 }
 
 /** Seal `plaintext` to a recipient's public key; returns the sender's ephemeral pk too. */
+/**
+ * Seal `plaintext` to a recipient public key. The recipient key is bound into
+ * the AES-GCM AAD, so a box can only be opened by a party that agrees on the
+ * exact recipient — a relaying server that swaps the recipient key cannot make
+ * the ciphertext validate against a substituted key.
+ */
 export async function eciesSeal(
   recipientSpkiB64: string,
   plaintext: Uint8Array,
@@ -62,8 +68,13 @@ export async function eciesSeal(
   const sender = await generateEciesKeypair()
   const aesKey = await deriveAesKey(sender.privateKey, recipientSpkiB64)
   const iv = crypto.getRandomValues(new Uint8Array(12))
+  const aad = new TextEncoder().encode(`gathernet/v1/ecies/${recipientSpkiB64}`)
   const ciphertext = new Uint8Array(
-    await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext as BinaryData),
+    await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv, additionalData: aad as BinaryData },
+      aesKey,
+      plaintext as BinaryData,
+    ),
   )
   const sealed = new Uint8Array(iv.length + ciphertext.length)
   sealed.set(iv)
@@ -71,17 +82,27 @@ export async function eciesSeal(
   return { sealedB64: b64(sealed), senderPkB64: sender.publicKeyB64 }
 }
 
-/** Open a sealed box with the recipient's private key + the sender's public key. */
+/**
+ * Open a sealed box. `recipientPkB64` MUST be the recipient's own public key
+ * (SPKI base64) — it is checked via the AAD, and the recipient must supply the
+ * key it actually controls, never one relayed by an untrusted party.
+ */
 export async function eciesOpen(
   recipientPrivateKey: WebCryptoKey,
   senderPkB64: string,
   sealedB64: string,
+  recipientPkB64: string,
 ): Promise<Uint8Array> {
   const aesKey = await deriveAesKey(recipientPrivateKey, senderPkB64)
   const sealed = fromB64(sealedB64)
   const iv = sealed.subarray(0, 12) as BinaryData
   const ciphertext = sealed.subarray(12)
+  const aad = new TextEncoder().encode(`gathernet/v1/ecies/${recipientPkB64}`)
   return new Uint8Array(
-    await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext as BinaryData),
+    await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv, additionalData: aad as BinaryData },
+      aesKey,
+      ciphertext as BinaryData,
+    ),
   )
 }

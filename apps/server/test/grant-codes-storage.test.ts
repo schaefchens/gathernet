@@ -131,6 +131,7 @@ describe('device-code grant flow', () => {
       appKeys.privateKey,
       result.hubEphemeralPk,
       result.sealedStorageKey,
+      appKeys.publicKeyB64,
     )
     expect(Buffer.from(opened)).toEqual(Buffer.from(storageKey))
 
