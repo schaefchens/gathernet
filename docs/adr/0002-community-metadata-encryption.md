@@ -60,17 +60,28 @@ directory metadata and avatars.
   invite link or another device. This is an accepted UX degradation, mirroring
   the app-grant manual-vs-QR split.
 
-### Deferred hardening (recorded, not yet built)
+### Hardening
 
-1. **No K_meta rotation on member removal.** A removed member who cached K_meta
-   could still decrypt directory metadata *if* they could fetch the ciphertext —
-   but the server denies removed/left members. So directory forward-secrecy
-   relies on server access control, not crypto. (Messages keep true MLS forward
-   secrecy regardless.)
-2. **No cross-device K_meta sync.** A device restored purely from the recovery
-   phrase re-obtains K_meta from another active device or a fresh invite; it can
-   still read channel messages (MLS external-join) meanwhile.
+**Cross-device K_meta sync — IMPLEMENTED (Phase A).** Each device holds a
+persistent ECIES **receipt keypair** (`packages/shared/src/ecies.ts`,
+extractable P-256; private key sealed under the DMK in `DeviceRecord`). K_meta
+is sealed to a device's receipt key and stored server-side as an opaque
+`community_key_grants` row; the server only relays ciphertext. A device that
+lacks K_meta (restored from the phrase, or joined by a bare code) fetches and
+opens its grant. **No crypto-library change:** the receipt key is authenticated
+by the device's existing Ed25519 key — `receiptPkSig = Ed25519(deviceKey,
+domain‖receiptPk)` — reusing the shipped identity→DeviceCert→devicePk chain, so
+an honest-but-curious server cannot substitute a receipt key. Verification
+reuses the already-exposed `ed25519Verify` + `decodeDeviceCert`; the DeviceCert
+format is untouched. Grants are demand-driven and rate-friendly (WS events and
+list views only *fetch*; sealing to others happens on an explicit community
+open, guarded by an in-memory `grantedTo` cache).
 
-Both are addressed by the same future primitive: per-device ECIES
-`community_key_grants` that seal K_meta to a device receipt key, enabling
-rotation-on-removal and multi-device sync. Out of scope for Communities v2.
+**Rotation on member removal — still deferred (Phase B).** K_meta is not yet
+rotated when a member is removed, so a removed member who cached K_meta could
+decrypt directory metadata *if* they could fetch the ciphertext — but the server
+denies removed/left members, so directory forward-secrecy relies on server
+access control, not crypto. (Messages keep true MLS forward secrecy regardless.)
+The `communities.keyEpoch` column and the epoch in `community_key_grants` are
+already in place so Phase B (client-driven re-encryption under a new epoch +
+compare-and-set rotation) needs no further migration.

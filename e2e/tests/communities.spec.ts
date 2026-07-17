@@ -23,7 +23,7 @@ import { type BrowserContext, expect, type Page, test } from '@playwright/test'
 
 const PASSWORD = 'test-password-1'
 
-async function createAccount(page: Page, displayName: string): Promise<void> {
+async function createAccount(page: Page, displayName: string): Promise<string> {
   await page.goto('/')
   await page.getByRole('button', { name: 'Create account' }).click()
   await page.getByPlaceholder('Display name').fill(displayName)
@@ -46,12 +46,28 @@ async function createAccount(page: Page, displayName: string): Promise<void> {
   await page.getByPlaceholder('Repeat password').fill(PASSWORD)
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible({ timeout: 60_000 })
+  return words.join(' ')
 }
 
-async function newUser(context: BrowserContext, name: string): Promise<Page> {
+/** Restore an existing account onto a fresh device (a new browser context). */
+async function restoreAccount(page: Page, phrase: string): Promise<void> {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'I have a recovery phrase' }).click()
+  await page.getByPlaceholder('worship gather bread …').fill(phrase)
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await page.getByPlaceholder('Unlock password', { exact: true }).fill(PASSWORD)
+  await page.getByPlaceholder('Repeat password').fill(PASSWORD)
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible({ timeout: 60_000 })
+}
+
+async function newUser(
+  context: BrowserContext,
+  name: string,
+): Promise<{ page: Page; phrase: string }> {
   const page = await context.newPage()
-  await createAccount(page, name)
-  return page
+  const phrase = await createAccount(page, name)
+  return { page, phrase }
 }
 
 async function addChannel(
@@ -81,8 +97,8 @@ test('communities v2: encrypted metadata, K_meta out-of-band, open + request joi
   // full K_meta-carrying link there).
   const ctxA = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] })
   const ctxB = await browser.newContext()
-  const alice = await newUser(ctxA, 'Pastor Alice')
-  const bob = await newUser(ctxB, 'Member Bob')
+  const { page: alice } = await newUser(ctxA, 'Pastor Alice')
+  const { page: bob } = await newUser(ctxB, 'Member Bob')
 
   // Alice creates a community — name + description are encrypted under K_meta.
   await alice.getByRole('link', { name: 'Communities' }).click()
@@ -175,4 +191,59 @@ test('communities v2: encrypted metadata, K_meta out-of-band, open + request joi
 
   await ctxA.close()
   await ctxB.close()
+})
+
+test('communities v2: K_meta syncs to a restored second device via receipt-key grant', async ({
+  browser,
+}) => {
+  // Three contexts: Alice, Bob's first device, and Bob's phrase-restored device.
+  const ctxA = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] })
+  const ctxB1 = await browser.newContext()
+  const ctxB2 = await browser.newContext()
+  const { page: alice } = await newUser(ctxA, 'Pastor Alice')
+  const { page: bob1, phrase: bobPhrase } = await newUser(ctxB1, 'Member Bob')
+
+  // Alice creates a community and grabs the K_meta-carrying invite link.
+  await alice.getByRole('link', { name: 'Communities' }).click()
+  await alice.getByRole('button', { name: 'Create community' }).first().click()
+  await alice.getByPlaceholder('Community name').fill('Grace Fellowship')
+  await alice.getByRole('button', { name: 'Create community' }).last().click()
+  await expect(alice.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+    timeout: 30_000,
+  })
+  await alice.getByRole('button', { name: 'Copy', exact: true }).click({ timeout: 20_000 })
+  const payload = await alice.evaluate(() => navigator.clipboard.readText())
+
+  // Bob's first device joins by link — it holds K_meta and decrypts the name.
+  await bob1.getByRole('link', { name: 'Communities' }).click()
+  await bob1.getByRole('button', { name: 'Join with a code' }).click()
+  await bob1.getByPlaceholder('Invite code or link').fill(payload)
+  await bob1.getByRole('button', { name: 'Join', exact: true }).click()
+  await expect(bob1.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+    timeout: 30_000,
+  })
+
+  // Bob restores his account on a brand-new device (no K_meta anywhere on it).
+  // Navigate within the SPA — a full page load would drop to the unlock screen.
+  const bob2 = await ctxB2.newPage()
+  await restoreAccount(bob2, bobPhrase)
+  await bob2.getByRole('link', { name: 'Communities' }).click()
+  // The community is listed, but its name can't be decrypted yet → placeholder.
+  await bob2.getByRole('link', { name: /Encrypted community/ }).click()
+  await expect(bob2.getByRole('heading', { name: 'Encrypted community' })).toBeVisible({
+    timeout: 30_000,
+  })
+
+  // Bob's first device re-opens the community, which seeds K_meta grants to its
+  // other devices. The grant reaches the second device, which decrypts the
+  // metadata live (community.key_grants_available → fetch + open).
+  await bob1.getByRole('link', { name: 'Communities' }).click()
+  await bob1.getByRole('link', { name: /Grace Fellowship/ }).click()
+  await expect(bob2.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+    timeout: 40_000,
+  })
+
+  await ctxA.close()
+  await ctxB1.close()
+  await ctxB2.close()
 })
