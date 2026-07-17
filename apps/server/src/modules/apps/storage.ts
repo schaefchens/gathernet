@@ -26,6 +26,12 @@ export async function putStorage(
   }
 
   return db.transaction(async (tx) => {
+    // Serialize concurrent PUTs for this (app, account) so the key-count quota
+    // check below is atomic — distinct new keys have no shared row to lock, so
+    // without this N concurrent inserts could each pass the count and blow past
+    // APP_STORAGE_MAX_KEYS.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${pubId}), hashtext(${accountId}))`)
+
     const [existing] = await tx
       .select({ version: appStorage.version })
       .from(appStorage)

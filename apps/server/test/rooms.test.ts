@@ -372,6 +372,21 @@ describe('room lifecycle', () => {
     expect(res.json().error).toBe('unknown_device')
   })
 
+  it('app-device room members can chat.ack (no devices-FK breakage)', async () => {
+    // Regression: mls_cursors.device_id used to FK devices, so acks from an
+    // app_device (rooms) failed and cursors never advanced (pruning broke).
+    const host = await roomUser('AckHost')
+    const guest = await roomUser('AckGuest')
+    const { roomId, code } = await createRoom(host)
+    await joinAndCommit(guest, roomId, code)
+
+    const guestWs = await TestWsClient.connect(port, guest.token)
+    const ackId = guestWs.send('chat.ack', { groupId: roomId, seq: 1 })
+    const reply = await guestWs.waitFor((m) => m.replyTo === ackId)
+    expect(reply.type).toBe('ack')
+    await guestWs.close()
+  })
+
   it('revoking an app grant closes the live app WebSocket', async () => {
     const user = await roomUser('RevokeMe')
     const ws = await TestWsClient.connect(port, user.token)

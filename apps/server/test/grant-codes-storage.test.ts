@@ -295,6 +295,19 @@ describe('encrypted app storage', () => {
     expect(overwrite.statusCode).toBe(200)
   })
 
+  it('enforces the key-count quota under concurrent writes', async () => {
+    // Regression: the count-then-insert was a TOCTOU race; an advisory lock
+    // now serializes per-account PUTs so the cap holds even for a burst.
+    const { token } = await appSession()
+    const results = await Promise.all(
+      Array.from({ length: 120 }, (_, i) => put(token, `c${i}`, Buffer.from('x'))),
+    )
+    const ok = results.filter((r) => r.statusCode === 200).length
+    const over = results.filter((r) => r.statusCode === 507).length
+    expect(ok).toBe(100)
+    expect(over).toBe(20)
+  })
+
   it('requires the storage scope', async () => {
     const { token } = await appSession(['identity'])
     const res = await put(token, 'k', Buffer.from('x'))

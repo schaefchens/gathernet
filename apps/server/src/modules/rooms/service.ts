@@ -292,11 +292,20 @@ export async function joinRoom(
   if (membership?.status === 'kicked') throw new ServiceError(403, 'kicked')
   if (membership?.status === 'active') return joined()
 
-  const activeCount = await countActiveMembers(db, room.roomId)
-  if (activeCount >= room.maxMembers) throw new ServiceError(409, 'room_full')
+  // Fast early-out (also gates the in_progress knock path). The authoritative,
+  // race-free capacity enforcement for open joins happens inside the tx below.
+  if ((await countActiveMembers(db, room.roomId)) >= room.maxMembers) {
+    throw new ServiceError(409, 'room_full')
+  }
 
   if (room.phase === 'open') {
     await db.transaction(async (tx) => {
+      // Serialize concurrent joins on this room so the capacity check and the
+      // insert are atomic — otherwise simultaneous joiners could each read a
+      // count below maxMembers and all become active, exceeding the cap.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${room.roomId}))`)
+      const activeCount = await countActiveMembers(tx, room.roomId)
+      if (activeCount >= room.maxMembers) throw new ServiceError(409, 'room_full')
       await tx
         .insert(roomMembers)
         .values({ roomId: room.roomId, accountId: caller.accountId, appUserId: caller.appUserId })
@@ -699,7 +708,7 @@ async function loadRoom(
   return { room, group }
 }
 
-async function countActiveMembers(db: Db, roomId: string): Promise<number> {
+async function countActiveMembers(db: DbOrTx, roomId: string): Promise<number> {
   const rows = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(roomMembers)

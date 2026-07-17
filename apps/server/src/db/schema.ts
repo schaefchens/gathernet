@@ -202,9 +202,13 @@ export const welcomes = pgTable(
   'welcomes',
   {
     id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-    recipientDevice: text('recipient_device')
-      .notNull()
-      .references(() => devices.deviceId),
+    /**
+     * Deliberately NOT an FK: a recipient may be a `devices` row (dm/channel)
+     * OR an `app_devices` row (rooms). Migration 0005 dropped the original FK
+     * to `devices` — without it, room welcomes to app devices aborted the
+     * commit transaction. Index retained.
+     */
+    recipientDevice: text('recipient_device').notNull(),
     groupId: text('group_id')
       .notNull()
       .references(() => groups.groupId),
@@ -221,9 +225,13 @@ export const mlsCursors = pgTable(
     groupId: text('group_id')
       .notNull()
       .references(() => groups.groupId),
-    deviceId: text('device_id')
-      .notNull()
-      .references(() => devices.deviceId),
+    /**
+     * Not an FK (see welcomes): room acks come from `app_devices`, not
+     * `devices`. Migration 0005 dropped the FK — without it, room chat.ack
+     * failed on every ack for app-device members, so their cursors never
+     * advanced and room ciphertext was never pruned.
+     */
+    deviceId: text('device_id').notNull(),
     ackedSeq: integer('acked_seq').notNull().default(0),
   },
   (t) => [primaryKey({ columns: [t.groupId, t.deviceId] })],
