@@ -1,10 +1,21 @@
 import { type BrowserContext, expect, type Page, test } from '@playwright/test'
 
 /**
- * Communities journey, two browsers: create a community with a members channel
- * and a leaders-only channel, invite a second user, exchange an E2EE channel
- * message, and prove the leaders channel is inaccessible to a plain member —
- * then promote them and watch access open up.
+ * Communities v2 journey, two browsers. Proves the end-to-end wiring of the
+ * encrypted-metadata + rich-channel model through the real UI + server + MLS:
+ *
+ *  - a community's name/description are E2E-encrypted; the creator renders them
+ *    from the locally-held K_meta;
+ *  - K_meta rides OUT OF BAND in the invite link's fragment, so a joiner who
+ *    opens the link can decrypt the community's + channels' metadata (a joiner
+ *    with only the bare code could not — that's an accepted degradation);
+ *  - an open channel: click-to-join, then a bidirectional E2EE message;
+ *  - a by-request channel: the joiner waits until a moderator accepts, via the
+ *    moderation panel.
+ *
+ * The exhaustive branch matrix (visibility, targeted/code invites, moderator
+ * appointment + channel-kick, leaders-only access, disappearing-message TTL) is
+ * covered by the server test suite; this journey exercises the UI paths.
  *
  * Requires the dev stack: server :4000 + hub :5173 (docker compose up -d
  * postgres; server dev; hub dev).
@@ -43,59 +54,72 @@ async function newUser(context: BrowserContext, name: string): Promise<Page> {
   return page
 }
 
-async function addChannel(page: Page, name: string, access: 'members' | 'leaders'): Promise<void> {
+async function addChannel(
+  page: Page,
+  opts: {
+    emoji?: string
+    title: string
+    joinPolicy?: 'open' | 'request'
+    postPolicy?: 'everyone' | 'moderators'
+  },
+): Promise<void> {
   await page.getByRole('button', { name: 'Add channel' }).click()
-  await page.getByPlaceholder('Channel name').fill(name)
-  await page.locator('select').last().selectOption(access) // header presence select is first
+  if (opts.emoji) await page.getByPlaceholder('Emoji').fill(opts.emoji)
+  await page.getByPlaceholder('Channel title').fill(opts.title)
+  if (opts.joinPolicy) await page.getByLabel('Who can join').selectOption(opts.joinPolicy)
+  if (opts.postPolicy) await page.getByLabel('Who can post').selectOption(opts.postPolicy)
   await page.getByRole('button', { name: 'Create channel' }).click()
-  await expect(page.getByRole('button', { name: new RegExp(name) })).toBeVisible({
+  await expect(page.getByRole('button', { name: new RegExp(opts.title) })).toBeVisible({
     timeout: 20_000,
   })
 }
 
-test('communities: channels, access control, invite, E2EE channel chat, promotion', async ({
+test('communities v2: encrypted metadata, K_meta out-of-band, open + request join, moderation', async ({
   browser,
 }) => {
-  const ctxA = await browser.newContext()
+  // Alice's context can read the clipboard (the invite "Copy" button writes the
+  // full K_meta-carrying link there).
+  const ctxA = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] })
   const ctxB = await browser.newContext()
   const alice = await newUser(ctxA, 'Pastor Alice')
   const bob = await newUser(ctxB, 'Member Bob')
 
-  // Alice creates a community.
+  // Alice creates a community — name + description are encrypted under K_meta.
   await alice.getByRole('link', { name: 'Communities' }).click()
-  await alice.getByRole('button', { name: 'Create community' }).first().click() // header toggle
+  await alice.getByRole('button', { name: 'Create community' }).first().click()
   await alice.getByPlaceholder('Community name').fill('Grace Fellowship')
-  await alice.getByRole('button', { name: 'Create community' }).last().click() // form submit
+  await alice.getByPlaceholder('What is this community about?').fill('**Welcome** to our church')
+  await alice.getByRole('button', { name: 'Create community' }).last().click()
+  // The creator decrypts the name locally from the K_meta it just generated.
   await expect(alice.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
     timeout: 30_000,
   })
 
-  // Two channels: one for all members, one for leaders only.
-  await addChannel(alice, 'general', 'members')
-  await addChannel(alice, 'leaders', 'leaders')
+  // An open, listed channel with an emoji + title.
+  await addChannel(alice, { emoji: '🙏', title: 'general' })
 
-  // Alice grabs the auto-created invite code.
-  const code = (
-    await alice.locator('.font-mono.text-2xl').first().textContent({ timeout: 20_000 })
-  )?.trim()
-  expect(code).toMatch(/^[0-9A-Z]{10}$/)
+  // Grab the full invite link (carries K_meta in the URL fragment) via clipboard.
+  await alice.getByRole('button', { name: 'Copy', exact: true }).click({ timeout: 20_000 })
+  const payload = await alice.evaluate(() => navigator.clipboard.readText())
+  expect(payload).toContain('gathernet:community:')
+  expect(payload).toContain('#') // the K_meta fragment
 
-  // Bob joins with the code.
+  // Bob joins with the LINK → K_meta rides along → he decrypts the metadata.
   await bob.getByRole('link', { name: 'Communities' }).click()
   await bob.getByRole('button', { name: 'Join with a code' }).click()
-  await bob.getByPlaceholder('Community invite code').fill(code ?? '')
+  await bob.getByPlaceholder('Invite code or link').fill(payload)
   await bob.getByRole('button', { name: 'Join', exact: true }).click()
   await expect(bob.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
     timeout: 30_000,
   })
-
-  // Bob sees the members channel but the leaders channel is hidden from him.
+  // Channel title decrypts on the joiner too (proves out-of-band K_meta worked).
   await expect(bob.getByRole('button', { name: /general/ })).toBeVisible({ timeout: 20_000 })
-  await expect(bob.getByRole('button', { name: /leaders/ })).toHaveCount(0)
 
-  // Both open #general and exchange an E2EE message.
-  await alice.getByRole('button', { name: /general/ }).click()
+  // Bob joins the open channel; both exchange an E2EE message.
   await bob.getByRole('button', { name: /general/ }).click()
+  await bob.getByRole('button', { name: 'Join', exact: true }).click()
+
+  await alice.getByRole('button', { name: /general/ }).click()
   const aliceInput = alice.getByPlaceholder('Message…')
   await expect(aliceInput).toBeEnabled({ timeout: 40_000 })
   await aliceInput.fill('Peace be with you all')
@@ -108,10 +132,46 @@ test('communities: channels, access control, invite, E2EE channel chat, promotio
   await bob.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(alice.getByText('And also with you')).toBeVisible({ timeout: 40_000 })
 
-  // Alice promotes Bob to leader → the community.role_changed WS event
-  // refreshes Bob's channel list live, revealing the leaders channel.
-  await alice.getByRole('button', { name: 'Make leader' }).click()
-  await expect(bob.getByRole('button', { name: /leaders/ })).toBeVisible({ timeout: 30_000 })
+  // A by-request channel: Bob requests, waits, and a moderator (Alice) accepts.
+  await addChannel(alice, { title: 'prayer', joinPolicy: 'request' })
+
+  await expect(bob.getByRole('button', { name: /prayer/ })).toBeVisible({ timeout: 20_000 })
+  await bob.getByRole('button', { name: /prayer/ }).click()
+  await bob.getByRole('button', { name: 'Request to join' }).click()
+  await expect(bob.getByText('Waiting for approval')).toBeVisible({ timeout: 20_000 })
+
+  // Alice opens the channel's Moderation tab and accepts Bob's pending request
+  // (the Accept button is unique to a pending-request row).
+  await alice.getByRole('button', { name: /prayer/ }).click()
+  await alice.getByRole('button', { name: 'Moderation' }).click()
+  const acceptBtn = alice.getByRole('button', { name: 'Accept', exact: true })
+  await expect(acceptBtn).toBeVisible({ timeout: 20_000 })
+  await acceptBtn.click()
+
+  // The community.channel_join_approved WS event flips Bob to active live, so
+  // his prayer channel becomes writable without a reload.
+  const bobPrayerInput = bob.getByPlaceholder('Message…')
+  await expect(bobPrayerInput).toBeEnabled({ timeout: 40_000 })
+
+  // Announcement channel: read-only for members, writable only by moderators.
+  await addChannel(alice, { title: 'announcements', postPolicy: 'moderators' })
+  await expect(bob.getByRole('button', { name: /announcements/ })).toBeVisible({ timeout: 20_000 })
+  await bob.getByRole('button', { name: /announcements/ }).click()
+  await bob.getByRole('button', { name: 'Join', exact: true }).click()
+
+  // Bob (a plain member) sees the read-only notice and gets no composer.
+  await expect(bob.getByText('Only moderators can post in this channel.')).toBeVisible({
+    timeout: 40_000,
+  })
+  await expect(bob.getByPlaceholder('Message…')).toHaveCount(0)
+
+  // Alice (a moderator) can post, and Bob receives it.
+  await alice.getByRole('button', { name: /announcements/ }).click()
+  const aliceAnnounce = alice.getByPlaceholder('Message…')
+  await expect(aliceAnnounce).toBeEnabled({ timeout: 40_000 })
+  await aliceAnnounce.fill('Service at 10am')
+  await alice.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(bob.getByText('Service at 10am')).toBeVisible({ timeout: 40_000 })
 
   await ctxA.close()
   await ctxB.close()
