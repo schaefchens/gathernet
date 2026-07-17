@@ -382,7 +382,7 @@ describe('room lifecycle', () => {
 
     const guestWs = await TestWsClient.connect(port, guest.token)
     const ackId = guestWs.send('chat.ack', { groupId: roomId, seq: 1 })
-    const reply = await guestWs.waitFor((m) => m.replyTo === ackId)
+    const reply = await guestWs.waitFor((m) => 'replyTo' in m && m.replyTo === ackId)
     expect(reply.type).toBe('ack')
     await guestWs.close()
   })
