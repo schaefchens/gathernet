@@ -6,7 +6,7 @@ import type {
 } from '@gathernet/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { QrScanner } from '../components/QrScanner.tsx'
 import { CommunityAvatar } from '../features/communities/CommunityAvatar.tsx'
@@ -20,6 +20,7 @@ import {
   rememberKMeta,
   sealMeta,
 } from '../lib/community-keys.ts'
+import { communityChatStore } from '../stores/community-chat.ts'
 
 export const Route = createFileRoute('/communities/')({ component: CommunitiesScreen })
 
@@ -33,6 +34,7 @@ type Panel = 'none' | 'create' | 'join'
 
 function CommunitiesScreen() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const [panel, setPanel] = useState<Panel>('none')
 
   const communities = useQuery({
@@ -40,6 +42,25 @@ function CommunitiesScreen() {
     queryFn: () => api<{ communities: CommunityListItem[] }>('GET', '/api/v1/communities'),
   })
   const list = communities.data?.communities ?? []
+
+  // On a device that joined via a bare code or was restored from the phrase,
+  // pull any K_meta grants so the list decrypts names instead of placeholders.
+  // Fetch-only (no granting) to keep the list cheap; granting happens on open.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the loaded id set; queryClient is stable.
+  useEffect(() => {
+    if (list.length === 0) return
+    let cancelled = false
+    void (async () => {
+      let any = false
+      for (const c of list) {
+        if (await communityChatStore.fetchKeyGrant(c.communityId)) any = true
+      }
+      if (any && !cancelled) void queryClient.invalidateQueries({ queryKey: ['communities'] })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [list.map((c) => c.communityId).join(','), queryClient])
 
   return (
     <div className="space-y-4">

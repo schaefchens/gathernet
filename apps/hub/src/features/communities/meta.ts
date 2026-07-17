@@ -1,10 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import {
   type ChannelMeta,
   type CommunityMeta,
   getKMeta,
+  onKMetaChange,
   openMeta,
 } from '../../lib/community-keys.ts'
+
+let kMetaVersion = 0
+onKMetaChange(() => {
+  kMetaVersion += 1
+})
+
+/** Re-renders when any K_meta becomes available (e.g. a cross-device grant). */
+export function useKMetaVersion(): number {
+  return useSyncExternalStore(onKMetaChange, () => kMetaVersion)
+}
 
 /**
  * Decrypt a server-opaque `metaCiphertext` with the community's K_meta. Returns
@@ -18,9 +29,10 @@ export function useDecryptedMeta<T extends CommunityMeta | ChannelMeta>(
   metaCiphertext: string | null,
 ): T | null {
   const [meta, setMeta] = useState<T | null>(null)
+  const kMetaVersion = useKMetaVersion()
+  // biome-ignore lint/correctness/useExhaustiveDependencies: kMetaVersion re-runs decryption once a cross-device grant supplies K_meta.
   useEffect(() => {
     let cancelled = false
-    setMeta(null)
     void (async () => {
       const kMeta = await getKMeta(communityId)
       const opened = await openMeta<T>(kMeta, metaCiphertext)
@@ -29,7 +41,8 @@ export function useDecryptedMeta<T extends CommunityMeta | ChannelMeta>(
     return () => {
       cancelled = true
     }
-  }, [communityId, metaCiphertext])
+    // kMetaVersion re-runs decryption once a cross-device grant supplies the key.
+  }, [communityId, metaCiphertext, kMetaVersion])
   return meta
 }
 

@@ -1,4 +1,9 @@
-import { type LoginResponse, type SessionResponse, SIG_DOMAIN } from '@gathernet/shared'
+import {
+  generateEciesKeypairExtractable,
+  type LoginResponse,
+  type SessionResponse,
+  SIG_DOMAIN,
+} from '@gathernet/shared'
 import { create } from 'zustand'
 import { api, setTokenProvider } from '../lib/api.ts'
 import { type HubCrypto, type IdentityHandle, loadCrypto } from '../lib/mls.ts'
@@ -64,18 +69,27 @@ interface EnrollmentMaterial {
     challenge: string
     identitySig: string
     deviceSig: string
+    receiptPk: string
+    receiptPkSig: string
   }
   deviceSecret: Uint8Array
   credential: Uint8Array
+  /** persistent ECIES receipt keypair for cross-device K_meta grants */
+  receiptPk: string
+  receiptPrivPkcs8: Uint8Array
 }
 
-/** Builds the cert + all three signatures for enroll endpoints. */
-function buildEnrollment(
+/**
+ * Builds the cert + all signatures for enroll endpoints, plus a persistent
+ * ECIES receipt keypair signed by the device key (so community K_meta grants
+ * can be sealed to an authenticated key without touching the crypto library).
+ */
+async function buildEnrollment(
   crypto: HubCrypto,
   identity: IdentityHandle,
   deviceName: string,
   challenge: Uint8Array,
-): EnrollmentMaterial {
+): Promise<EnrollmentMaterial> {
   const device = crypto.generateDeviceKeypair()
   const cert = crypto.encodeDeviceCert(
     identity.publicKey,
@@ -85,6 +99,13 @@ function buildEnrollment(
   )
   const certSig = identity.sign(concat(encoder.encode(SIG_DOMAIN.deviceCert), cert))
   const enrollPayload = concat(encoder.encode(SIG_DOMAIN.enroll), challenge, cert)
+
+  const receipt = await generateEciesKeypairExtractable()
+  const receiptPkBytes = fromB64(receipt.publicKeyB64)
+  const receiptPkSig = crypto.ed25519Sign(
+    device.secret,
+    concat(encoder.encode(SIG_DOMAIN.receiptKey), receiptPkBytes),
+  )
   return {
     body: {
       accountPk: b64(identity.publicKey),
@@ -93,9 +114,13 @@ function buildEnrollment(
       challenge: b64(challenge),
       identitySig: b64(identity.sign(enrollPayload)),
       deviceSig: b64(crypto.ed25519Sign(device.secret, enrollPayload)),
+      receiptPk: receipt.publicKeyB64,
+      receiptPkSig: b64(receiptPkSig),
     },
     deviceSecret: device.secret,
     credential: crypto.makeCredential(cert, certSig),
+    receiptPk: receipt.publicKeyB64,
+    receiptPrivPkcs8: fromB64(receipt.privateKeyPkcs8B64),
   }
 }
 
@@ -164,7 +189,7 @@ export const useSession = create<SessionState>((set, _get) => ({
     const identity = crypto.identityFromMnemonic(phrase)
     try {
       const challenge = await getChallenge('enroll')
-      const enrollment = buildEnrollment(crypto, identity, deviceName, challenge)
+      const enrollment = await buildEnrollment(crypto, identity, deviceName, challenge)
       const session = await api<SessionResponse>('POST', '/api/v1/accounts', {
         ...enrollment.body,
         displayName,
@@ -183,6 +208,8 @@ export const useSession = create<SessionState>((set, _get) => ({
         credential: enrollment.credential,
         accountId: session.accountId,
         deviceId: session.deviceId,
+        receiptPk: enrollment.receiptPk,
+        receiptPrivPkcs8: enrollment.receiptPrivPkcs8,
       }
       await secureStore.putDevice(record)
       await requestPersistence()
@@ -197,7 +224,7 @@ export const useSession = create<SessionState>((set, _get) => ({
     const identity = crypto.identityFromMnemonic(phrase)
     try {
       const challenge = await getChallenge('enroll')
-      const enrollment = buildEnrollment(crypto, identity, deviceName, challenge)
+      const enrollment = await buildEnrollment(crypto, identity, deviceName, challenge)
       const session = await api<SessionResponse>('POST', '/api/v1/devices', enrollment.body)
 
       await setupLocalEncryption(crypto, password, {
@@ -213,6 +240,8 @@ export const useSession = create<SessionState>((set, _get) => ({
         credential: enrollment.credential,
         accountId: session.accountId,
         deviceId: session.deviceId,
+        receiptPk: enrollment.receiptPk,
+        receiptPrivPkcs8: enrollment.receiptPrivPkcs8,
       }
       await secureStore.putDevice(record)
       await requestPersistence()

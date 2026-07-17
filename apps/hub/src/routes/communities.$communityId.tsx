@@ -75,6 +75,21 @@ function CommunityDetailScreen() {
     void queryClient.invalidateQueries({ queryKey: ['communities'] })
   }
 
+  // Cross-device K_meta sync: fetch a grant if this device lacks the key (and
+  // seed grants to other member devices). If the key arrives, re-decrypt views.
+  useEffect(() => {
+    let cancelled = false
+    void communityChatStore.syncKeyGrants(communityId).then((obtained) => {
+      if (obtained && !cancelled) {
+        void queryClient.invalidateQueries({ queryKey: ['community', communityId] })
+        void queryClient.invalidateQueries({ queryKey: ['communities'] })
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [communityId, queryClient])
+
   const deleteChannel = useMutation({
     mutationFn: (channelId: string) =>
       api('DELETE', `/api/v1/communities/${communityId}/channels/${channelId}`),

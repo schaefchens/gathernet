@@ -6,6 +6,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { wsClient } from './lib/ws-client.ts'
 import { routeTree } from './routeTree.gen.ts'
+import { communityChatStore } from './stores/community-chat.ts'
 import { wirePresence } from './stores/presence.ts'
 import { useSession } from './stores/session.ts'
 
@@ -48,6 +49,15 @@ for (const event of [
 ] as const) {
   wsClient.on(event, (m) => invalidateCommunity(m.payload.communityId))
 }
+
+// A K_meta grant became available for this account → a device lacking the key
+// can now fetch + open it; refresh decrypted views once it lands.
+wsClient.on('community.key_grants_available', (m) => {
+  // Fetch-only: obtain our key. Never re-grant here — that would cascade.
+  void communityChatStore.fetchKeyGrant(m.payload.communityId).then((obtained) => {
+    if (obtained) invalidateCommunity(m.payload.communityId)
+  })
+})
 
 const router = createRouter({ routeTree })
 

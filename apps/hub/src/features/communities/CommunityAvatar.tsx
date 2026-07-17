@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, apiBytes } from '../../lib/api.ts'
 import { getKMeta, openMedia, sealMedia } from '../../lib/community-keys.ts'
+import { useKMetaVersion } from './meta.ts'
 
 /** Server rejects ciphertext over 350KB (base64) with 413 — guard client-side. */
 const MAX_CIPHERTEXT_B64 = 350 * 1024
@@ -43,7 +44,9 @@ export function CommunityAvatar({
   size?: AvatarSize
 }) {
   const [url, setUrl] = useState<string | null>(null)
+  const kMetaVersion = useKMetaVersion()
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: kMetaVersion re-decrypts the avatar once a cross-device grant supplies K_meta.
   useEffect(() => {
     setUrl(null)
     if (!mediaId) return
@@ -69,7 +72,7 @@ export function CommunityAvatar({
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [communityId, mediaId])
+  }, [communityId, mediaId, kMetaVersion])
 
   const base = `${SIZE_CLASS[size]} rounded-full shrink-0 object-cover`
   if (url) return <img src={url} alt="" className={base} />

@@ -120,6 +120,11 @@ export interface DeviceRecord {
   credential: Uint8Array
   accountId: string
   deviceId: string
+  /** persistent ECIES receipt public key (raw SPKI, base64) — community K_meta
+   *  grants are sealed to it. Optional: devices enrolled before this feature. */
+  receiptPk?: string
+  /** the matching PKCS#8 private key (sealed under the DMK like the rest) */
+  receiptPrivPkcs8?: Uint8Array
 }
 
 export const secureStore = {
@@ -249,9 +254,9 @@ export const messageStore = {
       'messages',
       'readonly',
       (s) =>
-        s.getAll(
-          IDBKeyRange.bound([groupId, 0], [groupId, Number.MAX_SAFE_INTEGER]),
-        ) as IDBRequest<MessageRow[]>,
+        s.getAll(IDBKeyRange.bound([groupId, 0], [groupId, Number.MAX_SAFE_INTEGER])) as IDBRequest<
+          MessageRow[]
+        >,
     )
     return sealed.map((row) => openJson<StoredMessage>(row.box, `msg:${groupId}:${row.seq}`))
   },
@@ -271,9 +276,9 @@ export const messageStore = {
       'messages',
       'readonly',
       (s) =>
-        s.getAll(
-          IDBKeyRange.bound([groupId, 0], [groupId, Number.MAX_SAFE_INTEGER]),
-        ) as IDBRequest<MessageRow[]>,
+        s.getAll(IDBKeyRange.bound([groupId, 0], [groupId, Number.MAX_SAFE_INTEGER])) as IDBRequest<
+          MessageRow[]
+        >,
     )
     const stale = rows.filter((r) => r.sentAt < cutoffMs)
     for (const row of stale) {

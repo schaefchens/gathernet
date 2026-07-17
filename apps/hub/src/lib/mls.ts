@@ -94,6 +94,10 @@ export interface HubCrypto {
   generateDeviceKeypair(): DeviceKeys
   deviceKeypairFromSecret(secret: Uint8Array): DeviceKeys
   ed25519Sign(secret: Uint8Array, message: Uint8Array): Uint8Array
+  /** Verify an Ed25519 signature (surfaces the already-built mls-client fn). */
+  ed25519Verify(publicKey: Uint8Array, message: Uint8Array, sig: Uint8Array): boolean
+  /** Decode a DeviceCert to read its account/device public keys (no verify). */
+  decodeDeviceCert(cert: Uint8Array): { accountPk: Uint8Array; devicePk: Uint8Array }
   argon2id(password: string, salt: Uint8Array, profile: 'default' | 'light'): Uint8Array
   seal(key: Uint8Array, plaintext: Uint8Array, aad: Uint8Array): Uint8Array
   open(key: Uint8Array, sealed: Uint8Array, aad: Uint8Array): Uint8Array
@@ -151,6 +155,11 @@ async function loadImpl(): Promise<HubCrypto> {
       return keys
     },
     ed25519Sign: mls.ed25519Sign,
+    ed25519Verify: mls.ed25519Verify,
+    decodeDeviceCert: (cert) => {
+      const info = mls.decodeDeviceCert(cert)
+      return { accountPk: info.accountPk, devicePk: info.devicePk }
+    },
     argon2id: (password, salt, profile) => mls.argon2idHash(password, salt, profile),
     seal: mls.seal,
     open: mls.openSealed,

@@ -10,7 +10,7 @@ import {
 import type { ChannelJoinInfoResponse, MailboxMessage } from '@gathernet/shared'
 import { create } from 'zustand'
 import { ApiError, api } from '../lib/api.ts'
-import { forgetKMetaCache } from '../lib/community-keys.ts'
+import { fetchKMetaGrant, forgetKMetaCache, syncKeyGrants } from '../lib/community-keys.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
 import {
   channelStore,
@@ -424,6 +424,23 @@ class CommunityChatStore {
     }
     await messageStore.put(stored)
     appendMessage(stored)
+  }
+
+  /**
+   * Cross-device K_meta sync for a community: fetch a grant sealed to this
+   * device if we lack the key, and grant our key to other member devices that
+   * don't have it. Returns true iff K_meta was newly obtained (caller refreshes
+   * decrypted views). No-op before unlock.
+   */
+  async syncKeyGrants(communityId: string): Promise<boolean> {
+    if (!this.record) return false
+    return syncKeyGrants(communityId, this.record).catch(() => false)
+  }
+
+  /** Fetch-only variant (WS events / list views) — never seals to others. */
+  async fetchKeyGrant(communityId: string): Promise<boolean> {
+    if (!this.record) return false
+    return fetchKMetaGrant(communityId, this.record).catch(() => false)
   }
 
   /** Forget a locally-held channel (e.g. after it was deleted server-side). */
