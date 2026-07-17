@@ -323,8 +323,9 @@ function ChannelWorkspace({
   const isModerator = isActive && channel.myRole === 'moderator'
   const isManager = isLeader || isModerator
   const canEdit = isLeader || isModerator
-  // Announcement channels are read-only for everyone but managers.
-  const canPost = channel.postPolicy === 'everyone' || isManager
+  // Announcement channels are read-only for everyone but managers; a muted
+  // member is read-only regardless.
+  const canPost = (channel.postPolicy === 'everyone' || isManager) && !channel.muted
   const [view, setView] = useState<WorkspaceView>('chat')
 
   if (!isActive) {
@@ -369,6 +370,7 @@ function ChannelWorkspace({
           access={channel.access}
           postPolicy={channel.postPolicy}
           canPost={canPost}
+          muted={channel.muted}
           description={meta?.description}
           messageTtlDays={channel.messageTtlDays}
         />

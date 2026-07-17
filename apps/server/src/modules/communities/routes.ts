@@ -12,6 +12,7 @@ import {
   resolveJoinRequestSchema,
   setMemberRoleRequestSchema,
   setModeratorRequestSchema,
+  setMutedRequestSchema,
   updateChannelRequestSchema,
   updateCommunityRequestSchema,
   uploadMediaRequestSchema,
@@ -46,6 +47,7 @@ import {
   revokeCommunityInvite,
   setMemberRole,
   setModerator,
+  setMuted,
   updateChannel,
   updateCommunity,
   uploadCommunityMedia,
@@ -369,6 +371,25 @@ export function registerCommunityRoutes(
         request.params.channelId,
         request.params.accountId,
         body.action,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string; accountId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/mute/:accountId',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = setMutedRequestSchema.parse(request.body)
+      await setMuted(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.accountId,
+        body.muted,
       )
       return { ok: true }
     },

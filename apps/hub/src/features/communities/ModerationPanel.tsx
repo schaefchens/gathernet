@@ -70,6 +70,11 @@ export function ModerationPanel({
       api('POST', `${base}/moderators/${input.accountId}`, { action: input.action }),
     onSuccess: refresh,
   })
+  const setMuted = useMutation({
+    mutationFn: (input: { accountId: string; muted: boolean }) =>
+      api('POST', `${base}/mute/${input.accountId}`, { muted: input.muted }),
+    onSuccess: refresh,
+  })
   const invite = useMutation({
     mutationFn: (inviteeAccountId: string) =>
       api<ChannelInviteResponse>('POST', `${base}/invites`, {
@@ -157,7 +162,7 @@ export function ModerationPanel({
               isSelf={member.accountId === myAccountId}
               isCommunityLeader={communityLeaderIds.has(member.accountId)}
               isLeader={isLeader}
-              busy={kick.isPending || setModerator.isPending}
+              busy={kick.isPending || setModerator.isPending || setMuted.isPending}
               onKick={() => {
                 if (confirm(t('communities.kickConfirm', { name: member.displayName }))) {
                   kick.mutate(member.accountId)
@@ -168,6 +173,9 @@ export function ModerationPanel({
                   accountId: member.accountId,
                   action: member.role === 'moderator' ? 'unset' : 'set',
                 })
+              }
+              onToggleMuted={() =>
+                setMuted.mutate({ accountId: member.accountId, muted: !member.muted })
               }
             />
           ))}
@@ -233,6 +241,7 @@ function MemberRow({
   busy,
   onKick,
   onToggleModerator,
+  onToggleMuted,
 }: {
   member: ChannelMemberEntry
   isSelf: boolean
@@ -241,19 +250,36 @@ function MemberRow({
   busy: boolean
   onKick: () => void
   onToggleModerator: () => void
+  onToggleMuted: () => void
 }) {
   const { t } = useTranslation()
-  const canKick = !isSelf && !isCommunityLeader
+  // Managers may mute/kick anyone except themselves and community leaders.
+  const canModerate = !isSelf && !isCommunityLeader
   return (
     <li className="flex items-center gap-2 bg-overlay rounded-md px-3 py-2">
       <span className="flex-1 text-sm truncate">
         {member.displayName}
         {isSelf && <span className="ml-1 text-xs text-ink-faint">({t('communities.you')})</span>}
       </span>
+      {member.muted && (
+        <span className="text-[10px] uppercase tracking-wide border border-edge text-ink-faint rounded px-1.5 py-0.5">
+          {t('communities.mutedBadge')}
+        </span>
+      )}
       {member.role === 'moderator' && (
         <span className="text-[10px] uppercase tracking-wide border border-indigo-soft text-indigo-soft rounded px-1.5 py-0.5">
           {t('communities.moderatorBadge')}
         </span>
+      )}
+      {canModerate && (
+        <button
+          type="button"
+          className="btn-quiet text-xs px-2 py-1"
+          disabled={busy}
+          onClick={onToggleMuted}
+        >
+          {member.muted ? t('communities.unmute') : t('communities.mute')}
+        </button>
       )}
       {isLeader && !isSelf && (
         <button
@@ -267,7 +293,7 @@ function MemberRow({
             : t('communities.makeModerator')}
         </button>
       )}
-      {canKick && (
+      {canModerate && (
         <button
           type="button"
           className="btn-danger text-xs px-2 py-1"

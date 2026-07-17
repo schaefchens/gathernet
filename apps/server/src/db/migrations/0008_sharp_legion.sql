@@ -1,0 +1,1 @@
+ALTER TABLE "channel_members" ADD COLUMN "muted" boolean DEFAULT false NOT NULL;

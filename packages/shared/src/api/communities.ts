@@ -113,6 +113,8 @@ export const communityChannelSchema = z.object({
   myStatus: channelMyStatusSchema,
   /** the caller's channel role (only meaningful when myStatus='active') */
   myRole: channelMemberRoleSchema,
+  /** whether the caller is muted here (read-only regardless of postPolicy) */
+  muted: z.boolean(),
   /** at least one of the caller's devices holds an active MLS leaf */
   joined: z.boolean(),
   currentEpoch: z.number().int().nonnegative(),
@@ -267,6 +269,11 @@ export const channelMemberSchema = z.object({
   displayName: z.string(),
   status: z.enum(['active', 'pending', 'invited']),
   role: channelMemberRoleSchema,
+  muted: z.boolean(),
+})
+
+export const setMutedRequestSchema = z.object({
+  muted: z.boolean(),
 })
 
 export const channelMembersResponseSchema = z.object({
@@ -304,4 +311,5 @@ export type ChannelInviteResponse = z.infer<typeof channelInviteResponseSchema>
 export type SetModeratorRequest = z.infer<typeof setModeratorRequestSchema>
 export type ChannelMemberEntry = z.infer<typeof channelMemberSchema>
 export type ChannelMembersResponse = z.infer<typeof channelMembersResponseSchema>
+export type SetMutedRequest = z.infer<typeof setMutedRequestSchema>
 export type SetMemberRoleRequest = z.infer<typeof setMemberRoleRequestSchema>

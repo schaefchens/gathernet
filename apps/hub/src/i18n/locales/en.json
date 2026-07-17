@@ -279,6 +279,10 @@
       "everyone": "All members",
       "moderators": "Only moderators"
     },
-    "readOnlyHint": "Only moderators can post in this channel."
+    "readOnlyHint": "Only moderators can post in this channel.",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "mutedBadge": "Muted",
+    "mutedHint": "You have been muted in this channel."
   }
 }

@@ -570,6 +570,8 @@ export const channelMembers = pgTable(
       .references(() => accounts.accountId),
     status: channelMemberStatusEnum('status').notNull().default('active'),
     role: channelMemberRoleEnum('role').notNull().default('member'),
+    /** moderator/leader muted this member — read-only for them in this channel */
+    muted: boolean('muted').notNull().default(false),
     invitedBy: text('invited_by'),
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -694,8 +694,20 @@ describe('moderators + channel kicks', () => {
     }>
     expect(entries).toEqual(
       expect.arrayContaining([
-        { accountId: owner.accountId, displayName: 'OwnerR', status: 'active', role: 'moderator' },
-        { accountId: member.accountId, displayName: 'MemberR', status: 'pending', role: 'member' },
+        {
+          accountId: owner.accountId,
+          displayName: 'OwnerR',
+          status: 'active',
+          role: 'moderator',
+          muted: false,
+        },
+        {
+          accountId: member.accountId,
+          displayName: 'MemberR',
+          status: 'pending',
+          role: 'member',
+          muted: false,
+        },
       ]),
     )
 
@@ -740,6 +752,76 @@ describe('moderators + channel kicks', () => {
       payload: { postPolicy: 'everyone' },
     })
     expect(patch.statusCode).toBe(200)
+    const epoch2 = (await getChannel(member, channelId)).json().epoch as number
+    await expect(
+      postMessage(testDb.db, member.deviceId, channelId, epoch2, fakeB64(48)),
+    ).resolves.toMatchObject({ senderDevice: member.deviceId })
+  })
+
+  it('mute: a muted member keeps read access but is refused posting; unmute restores', async () => {
+    const owner = await createUser('OwnerMute')
+    const member = await createUser('MemberMute')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId) // open, everyone can post
+    await addMember(owner, communityId, member)
+    await joinOpenChannel(member, communityId, channelId)
+
+    const { postMessage } = await import('../src/modules/delivery/service.ts')
+    const muteUrl = `/api/v1/communities/${communityId}/channels/${channelId}/mute/${member.accountId}`
+
+    // Before muting, the member may post.
+    const epoch0 = (await getChannel(member, channelId)).json().epoch as number
+    await expect(
+      postMessage(testDb.db, member.deviceId, channelId, epoch0, fakeB64(48)),
+    ).resolves.toMatchObject({ senderDevice: member.deviceId })
+
+    // A moderator cannot mute themselves; the owner mutes the member.
+    const self = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/mute/${owner.accountId}`,
+      headers: auth(owner),
+      payload: { muted: true },
+    })
+    expect(self.statusCode).toBe(400)
+
+    const mute = await app.inject({
+      method: 'POST',
+      url: muteUrl,
+      headers: auth(owner),
+      payload: { muted: true },
+    })
+    expect(mute.statusCode).toBe(200)
+
+    // Read access remains, but posting is refused.
+    const info = await getChannel(member, channelId)
+    expect(info.json().status).toBe('active')
+    await expect(
+      postMessage(testDb.db, member.deviceId, channelId, info.json().epoch as number, fakeB64(48)),
+    ).rejects.toThrow('muted')
+
+    // Roster reflects the mute; the member's own detail sees muted=true.
+    const roster = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/members`,
+      headers: auth(owner),
+    })
+    const muted = (roster.json().members as Array<{ accountId: string; muted: boolean }>).find(
+      (m) => m.accountId === member.accountId,
+    )
+    expect(muted?.muted).toBe(true)
+    const memberChan = channelsOf(await detail(member, communityId)).find(
+      (c) => c.channelId === channelId,
+    ) as { muted?: boolean } | undefined
+    expect(memberChan?.muted).toBe(true)
+
+    // Unmuting restores posting.
+    const unmute = await app.inject({
+      method: 'POST',
+      url: muteUrl,
+      headers: auth(owner),
+      payload: { muted: false },
+    })
+    expect(unmute.statusCode).toBe(200)
     const epoch2 = (await getChannel(member, channelId)).json().epoch as number
     await expect(
       postMessage(testDb.db, member.deviceId, channelId, epoch2, fakeB64(48)),

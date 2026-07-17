@@ -57,6 +57,13 @@
       "when": 1784291525347,
       "tag": "0007_smooth_wendell_rand",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784305541951,
+      "tag": "0008_sharp_legion",
+      "breakpoints": true
     }
   ]
 }

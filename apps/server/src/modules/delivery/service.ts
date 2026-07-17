@@ -597,6 +597,8 @@ export async function postMessage(
       ) {
         throw new ServiceError(403, 'not_a_member')
       }
+      // A muted member keeps read access but may not post.
+      if (chanMem.muted) throw new ServiceError(403, 'muted')
       // Announcement channels: only community leaders/owner and channel
       // moderators may post application messages; everyone else is read-only.
       if (channel.postPolicy === 'moderators') {

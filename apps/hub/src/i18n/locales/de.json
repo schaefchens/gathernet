@@ -279,6 +279,10 @@
       "everyone": "Alle Mitglieder",
       "moderators": "Nur Moderatoren"
     },
-    "readOnlyHint": "Nur Moderatoren können in diesem Kanal schreiben."
+    "readOnlyHint": "Nur Moderatoren können in diesem Kanal schreiben.",
+    "mute": "Stummschalten",
+    "unmute": "Stummschaltung aufheben",
+    "mutedBadge": "Stumm",
+    "mutedHint": "Du wurdest in diesem Kanal stummgeschaltet."
   }
 }

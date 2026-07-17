@@ -18,6 +18,8 @@ interface ChannelChatProps {
   postPolicy: ChannelPostPolicy
   /** whether the current user may post (mods/leaders in announcement channels) */
   canPost: boolean
+  /** the current user is muted here (distinct read-only reason) */
+  muted: boolean
   description?: string | undefined
   messageTtlDays: number
 }
@@ -38,6 +40,7 @@ export function ChannelChat({
   access,
   postPolicy,
   canPost,
+  muted,
   description,
   messageTtlDays,
 }: ChannelChatProps) {
@@ -106,7 +109,7 @@ export function ChannelChat({
           onSend={(text) => communityChatStore.send(channelId, text)}
           notReadyLabel={notReadyLabel}
           readOnly={!canPost}
-          readOnlyLabel={t('communities.readOnlyHint')}
+          readOnlyLabel={muted ? t('communities.mutedHint') : t('communities.readOnlyHint')}
         />
       )}
     </div>

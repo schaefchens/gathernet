@@ -284,6 +284,7 @@ export async function getCommunityDetail(
       groupInfo: groups.groupInfo,
       myStatus: channelMembers.status,
       myRole: channelMembers.role,
+      myMuted: channelMembers.muted,
       joined: sql<boolean>`EXISTS (
         SELECT 1 FROM group_members gm
         WHERE gm.group_id = ${communityChannels.channelId}
@@ -325,6 +326,7 @@ export async function getCommunityDetail(
         position: c.position,
         myStatus,
         myRole: (c.myRole ?? 'member') as ChannelMemberRole,
+        muted: c.myMuted ?? false,
         joined: c.joined,
         currentEpoch: c.currentEpoch,
         // GroupInfo is released only to active channel members.
@@ -1036,6 +1038,64 @@ export async function setModerator(
 }
 
 /**
+ * Moderator/leader mutes or unmutes an active member in a channel. A muted
+ * member keeps read access but is refused posting (enforced in delivery's
+ * `postMessage`, regardless of the channel's postPolicy).
+ */
+export async function setMuted(
+  db: Db,
+  registry: ConnectionRegistry,
+  actorAccountId: string,
+  communityId: string,
+  channelId: string,
+  targetAccountId: string,
+  muted: boolean,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, actorAccountId)
+  await loadChannel(db, communityId, channelId)
+  await requireChannelManager(db, channelId, membership)
+  if (targetAccountId === actorAccountId) throw new ServiceError(400, 'cannot_mute_self')
+
+  const target = await db.query.channelMembers.findFirst({
+    where: and(
+      eq(channelMembers.channelId, channelId),
+      eq(channelMembers.accountId, targetAccountId),
+    ),
+  })
+  if (target?.status !== 'active') throw new ServiceError(404, 'not_a_channel_member')
+
+  // A plain-member moderator cannot mute a community leader/owner.
+  if (!isLeaderRole(membership.role)) {
+    const targetCommunity = await db.query.communityMembers.findFirst({
+      where: and(
+        eq(communityMembers.communityId, communityId),
+        eq(communityMembers.accountId, targetAccountId),
+      ),
+    })
+    if (targetCommunity && isLeaderRole(targetCommunity.role)) {
+      throw new ServiceError(403, 'cannot_mute_leader')
+    }
+  }
+
+  await db
+    .update(channelMembers)
+    .set({ muted })
+    .where(
+      and(eq(channelMembers.channelId, channelId), eq(channelMembers.accountId, targetAccountId)),
+    )
+  await announceChannelMember(
+    db,
+    registry,
+    communityId,
+    channelId,
+    targetAccountId,
+    'active',
+    target.role,
+    [targetAccountId],
+  )
+}
+
+/**
  * Moderator/leader removes a member from a channel (not the community). The
  * acting client follows up with an MLS removeMembers commit to evict the
  * target's device leaves; the server marks the account removed and notifies.
@@ -1128,7 +1188,9 @@ export async function listChannelMembers(
   actorAccountId: string,
   communityId: string,
   channelId: string,
-): Promise<Array<{ accountId: string; displayName: string; status: string; role: string }>> {
+): Promise<
+  Array<{ accountId: string; displayName: string; status: string; role: string; muted: boolean }>
+> {
   const membership = await requireActiveMembership(db, communityId, actorAccountId)
   await loadChannel(db, communityId, channelId)
   await requireChannelManager(db, channelId, membership)
@@ -1137,6 +1199,7 @@ export async function listChannelMembers(
       accountId: channelMembers.accountId,
       status: channelMembers.status,
       role: channelMembers.role,
+      muted: channelMembers.muted,
       displayName: accounts.displayName,
     })
     .from(channelMembers)
