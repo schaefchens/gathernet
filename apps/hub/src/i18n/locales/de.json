@@ -12,7 +12,9 @@
     "loading": "Lädt…",
     "error": "Etwas ist schiefgelaufen",
     "retry": "Erneut versuchen",
-    "connecting": "Verbindung wird wiederhergestellt…"
+    "connecting": "Verbindung wird wiederhergestellt…",
+    "showMore": "Mehr anzeigen",
+    "showLess": "Weniger anzeigen"
   },
   "welcome": {
     "title": "Gathernet",
@@ -100,7 +102,8 @@
     "pending": "Wird gesendet…",
     "sent": "Gesendet",
     "settingUp": "Verschlüsselung wird eingerichtet…",
-    "cannotSend": "Die Verschlüsselung für diesen Chat wird noch eingerichtet."
+    "cannotSend": "Die Verschlüsselung für diesen Chat wird noch eingerichtet.",
+    "readOnly": "Dieser Kanal ist schreibgeschützt."
   },
   "settings": {
     "title": "Einstellungen",
@@ -176,9 +179,10 @@
     "create": "Gemeinschaft erstellen",
     "join": "Beitreten",
     "joinWithCode": "Mit Code beitreten",
-    "codePlaceholder": "Einladungscode der Gemeinschaft",
+    "codePlaceholder": "Einladungscode oder Link",
     "namePlaceholder": "Name der Gemeinschaft",
     "descriptionPlaceholder": "Worum geht es in dieser Gemeinschaft?",
+    "encryptedName": "Verschlüsselte Gemeinschaft",
     "invalidCode": "Der Code ist ungültig, abgelaufen oder bereits verwendet.",
     "alreadyMember": "Du bist bereits Mitglied dieser Gemeinschaft.",
     "notFound": "Gemeinschaft nicht gefunden.",
@@ -191,7 +195,13 @@
     "addChannel": "Kanal hinzufügen",
     "createChannel": "Kanal erstellen",
     "channelNamePlaceholder": "Kanalname",
-    "deleteChannelConfirm": "#{{name}} löschen? Der Verlauf wird für alle entfernt.",
+    "channelTitlePlaceholder": "Kanaltitel",
+    "channelEmojiPlaceholder": "Emoji",
+    "channelDescriptionPlaceholder": "Beschreibe diesen Kanal…",
+    "channelAvatar": "Kanalbild",
+    "markdownHint": "Markdown möglich: **fett**, *kursiv*, `Code`, Links und - Listen.",
+    "deleteChannel": "Kanal löschen",
+    "deleteChannelConfirm": "Diesen Kanal löschen? Der Verlauf wird für alle entfernt.",
     "channelJoining": "Kanal wird beigetreten…",
     "channelPending": "Verschlüsselung wird eingerichtet…",
     "channelLocked": "Dies ist ein Kanal nur für Leiter. Du hast keinen Zugriff.",
@@ -205,14 +215,70 @@
     "removeConfirm": "{{name}} aus der Gemeinschaft entfernen? Der Zugriff auf alle Kanäle geht verloren.",
     "leave": "Gemeinschaft verlassen",
     "leaveConfirm": "Diese Gemeinschaft verlassen?",
+    "viewChat": "Chat",
+    "communitySettings": "Gemeinschaftseinstellungen",
+    "channelSettings": "Kanaleinstellungen",
+    "disappearingMessages": "Verschwindende Nachrichten",
+    "ttl24h": "Nach 24 Stunden",
+    "ttl3d": "Nach 3 Tagen",
+    "ttl7d": "Nach 7 Tagen",
+    "ttl14d": "Nach 14 Tagen",
+    "ttl30d": "Nach 30 Tagen",
+    "requestToJoin": "Beitritt anfragen",
+    "requestToJoinHint": "Dieser Kanal nimmt neue Mitglieder auf Anfrage auf.",
+    "requested": "Angefragt",
+    "waitingApproval": "Warten auf Freigabe",
+    "waitingApprovalHint": "Ein Moderator prüft deine Anfrage, diesem Kanal beizutreten.",
+    "youreInvited": "Du wurdest in diesen Kanal eingeladen.",
+    "acceptInvite": "Einladung annehmen",
+    "invited": "Eingeladen",
+    "moderation": "Moderation",
+    "pendingRequests": "Offene Anfragen",
+    "noPendingRequests": "Keine offenen Anfragen.",
+    "activeMembers": "Mitglieder",
+    "accept": "Annehmen",
+    "decline": "Ablehnen",
+    "kickFromChannel": "Entfernen",
+    "kickConfirm": "{{name}} aus diesem Kanal entfernen?",
+    "inviteMember": "Mitglied einladen",
+    "chooseMember": "Mitglied auswählen…",
+    "noMembersToInvite": "Alle sind bereits in diesem Kanal.",
+    "createInviteCode": "Einladungscode erstellen",
+    "channelCode": "Kanalcode",
+    "channelCodeHint": "Wer diesen Code hat, kann dem Kanal beitreten.",
+    "moderatorBadge": "Moderator",
+    "makeModerator": "Zum Moderator machen",
+    "removeModerator": "Moderatorrolle entfernen",
+    "uploadAvatar": "Bild hochladen",
+    "changeAvatar": "Bild ändern",
+    "avatarNoKey": "Dieses Gerät kann keine Bilder für diese Gemeinschaft verschlüsseln.",
+    "avatarTooLarge": "Das Bild ist zu groß. Versuche ein kleineres.",
+    "avatarFailed": "Das Bild konnte nicht hochgeladen werden.",
     "access": {
+      "label": "Zugriff",
       "members": "Alle Mitglieder",
       "leaders": "Nur Leiter"
+    },
+    "visibility": {
+      "label": "Sichtbarkeit",
+      "listed": "Im Verzeichnis gelistet",
+      "unlisted": "Nicht gelistet"
+    },
+    "joinPolicy": {
+      "label": "Wer kann beitreten",
+      "open": "Alle können beitreten",
+      "request": "Auf Anfrage"
     },
     "roles": {
       "owner": "Eigentümer",
       "leader": "Leiter",
       "member": "Mitglied"
-    }
+    },
+    "postPolicy": {
+      "label": "Wer darf schreiben",
+      "everyone": "Alle Mitglieder",
+      "moderators": "Nur Moderatoren"
+    },
+    "readOnlyHint": "Nur Moderatoren können in diesem Kanal schreiben."
   }
 }

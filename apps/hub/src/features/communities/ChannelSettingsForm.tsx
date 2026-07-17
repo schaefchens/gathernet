@@ -1,0 +1,254 @@
+import type {
+  ChannelAccess,
+  ChannelJoinPolicy,
+  ChannelPostPolicy,
+  ChannelVisibility,
+  CommunityChannel,
+  CreateChannelResponse,
+  UpdateChannelRequest,
+} from '@gathernet/shared'
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { api } from '../../lib/api.ts'
+import { type ChannelMeta, getKMeta, sealMeta } from '../../lib/community-keys.ts'
+import { communityChatStore } from '../../stores/community-chat.ts'
+import { AvatarUploader } from './CommunityAvatar.tsx'
+
+/**
+ * Disappearing-message TTL choices (mirrors shared CHANNEL_MESSAGE_TTL_DAYS).
+ * Kept as literal i18n keys so the typed `t()` accepts them.
+ */
+const TTL_OPTIONS = [
+  { days: 1, key: 'communities.ttl24h' },
+  { days: 3, key: 'communities.ttl3d' },
+  { days: 7, key: 'communities.ttl7d' },
+  { days: 14, key: 'communities.ttl14d' },
+  { days: 30, key: 'communities.ttl30d' },
+] as const
+
+const SELECT_CLASS = 'w-full bg-overlay border border-edge rounded-md px-3 py-2 text-sm'
+
+interface ChannelSettingsFormProps {
+  communityId: string
+  mode: 'create' | 'edit'
+  /** existing channel (edit mode) — provides current settings */
+  channel?: CommunityChannel
+  /** decrypted channel meta for prefill (edit mode) */
+  initialMeta?: ChannelMeta | null
+  /** called after a successful create/edit; create passes the new channelId */
+  onDone: (channelId?: string) => void
+  onCancel: () => void
+  /** leaders only, edit mode — show the delete affordance */
+  canDelete?: boolean
+  onDelete?: () => void
+}
+
+/**
+ * Create/edit form for a community channel. Seals the display metadata
+ * (title/emoji/markdown description) under the community K_meta and sends the
+ * plaintext settings (access/visibility/join policy/TTL). On create it also
+ * publishes the epoch-0 GroupInfo so members can external-join.
+ */
+export function ChannelSettingsForm({
+  communityId,
+  mode,
+  channel,
+  initialMeta,
+  onDone,
+  onCancel,
+  canDelete,
+  onDelete,
+}: ChannelSettingsFormProps) {
+  const { t } = useTranslation()
+  const [title, setTitle] = useState(initialMeta?.title ?? '')
+  const [emoji, setEmoji] = useState(initialMeta?.emoji ?? '')
+  const [description, setDescription] = useState(initialMeta?.description ?? '')
+  const [access, setAccess] = useState<ChannelAccess>(channel?.access ?? 'members')
+  const [visibility, setVisibility] = useState<ChannelVisibility>(channel?.visibility ?? 'listed')
+  const [joinPolicy, setJoinPolicy] = useState<ChannelJoinPolicy>(channel?.joinPolicy ?? 'open')
+  const [postPolicy, setPostPolicy] = useState<ChannelPostPolicy>(channel?.postPolicy ?? 'everyone')
+  const [ttl, setTtl] = useState<number>(channel?.messageTtlDays ?? 30)
+  const [avatarMediaId, setAvatarMediaId] = useState<string | null>(channel?.avatarMediaId ?? null)
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    const trimmed = title.trim()
+    if (!trimmed || busy) return
+    setBusy(true)
+    try {
+      const kMeta = await getKMeta(communityId)
+      const meta: ChannelMeta = {
+        title: trimmed,
+        ...(emoji.trim() ? { emoji: emoji.trim() } : {}),
+        ...(description.trim() ? { description: description.trim() } : {}),
+      }
+      const metaCiphertext = kMeta ? await sealMeta(kMeta, meta) : undefined
+
+      if (mode === 'create') {
+        const res = await api<CreateChannelResponse>(
+          'POST',
+          `/api/v1/communities/${communityId}/channels`,
+          {
+            ...(metaCiphertext ? { metaCiphertext } : {}),
+            ...(avatarMediaId ? { avatarMediaId } : {}),
+            access,
+            visibility,
+            joinPolicy,
+            postPolicy,
+            messageTtlDays: ttl,
+          },
+        )
+        // The creator's first act: publish epoch-0 GroupInfo so members can join.
+        await communityChatStore.bootstrapChannel(res.channelId).catch((err) => {
+          console.error('channel bootstrap failed', err)
+        })
+        onDone(res.channelId)
+      } else if (channel) {
+        const body: UpdateChannelRequest = {
+          ...(metaCiphertext ? { metaCiphertext } : {}),
+          access,
+          visibility,
+          joinPolicy,
+          postPolicy,
+          messageTtlDays: ttl,
+        }
+        if (avatarMediaId !== channel.avatarMediaId) {
+          body.avatarMediaId = avatarMediaId as UpdateChannelRequest['avatarMediaId']
+        }
+        await api('PATCH', `/api/v1/communities/${communityId}/channels/${channel.channelId}`, body)
+        onDone()
+      }
+    } catch (err) {
+      console.error('channel save failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form
+      className="space-y-3 border border-edge rounded-md p-3 bg-overlay/40"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void submit()
+      }}
+    >
+      <div className="flex gap-2">
+        <input
+          value={emoji}
+          onChange={(e) => setEmoji(e.target.value)}
+          placeholder={t('communities.channelEmojiPlaceholder')}
+          maxLength={8}
+          className="w-16 text-center"
+          aria-label={t('communities.channelEmojiPlaceholder')}
+        />
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder={t('communities.channelTitlePlaceholder')}
+          maxLength={80}
+          autoFocus
+        />
+      </div>
+
+      <div className="space-y-1">
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder={t('communities.channelDescriptionPlaceholder')}
+          maxLength={2000}
+          rows={3}
+        />
+        <p className="text-[11px] text-ink-faint">{t('communities.markdownHint')}</p>
+      </div>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.access.label')}</span>
+        <select
+          className={SELECT_CLASS}
+          value={access}
+          onChange={(e) => setAccess(e.target.value as ChannelAccess)}
+        >
+          <option value="members">{t('communities.access.members')}</option>
+          <option value="leaders">{t('communities.access.leaders')}</option>
+        </select>
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.visibility.label')}</span>
+        <select
+          className={SELECT_CLASS}
+          value={visibility}
+          onChange={(e) => setVisibility(e.target.value as ChannelVisibility)}
+        >
+          <option value="listed">{t('communities.visibility.listed')}</option>
+          <option value="unlisted">{t('communities.visibility.unlisted')}</option>
+        </select>
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.joinPolicy.label')}</span>
+        <select
+          className={SELECT_CLASS}
+          value={joinPolicy}
+          onChange={(e) => setJoinPolicy(e.target.value as ChannelJoinPolicy)}
+        >
+          <option value="open">{t('communities.joinPolicy.open')}</option>
+          <option value="request">{t('communities.joinPolicy.request')}</option>
+        </select>
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.postPolicy.label')}</span>
+        <select
+          className={SELECT_CLASS}
+          value={postPolicy}
+          onChange={(e) => setPostPolicy(e.target.value as ChannelPostPolicy)}
+        >
+          <option value="everyone">{t('communities.postPolicy.everyone')}</option>
+          <option value="moderators">{t('communities.postPolicy.moderators')}</option>
+        </select>
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.disappearingMessages')}</span>
+        <select
+          className={SELECT_CLASS}
+          value={ttl}
+          onChange={(e) => setTtl(Number(e.target.value))}
+        >
+          {TTL_OPTIONS.map(({ days, key }) => (
+            <option key={days} value={days}>
+              {t(key)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.channelAvatar')}</span>
+        <AvatarUploader
+          communityId={communityId}
+          currentMediaId={avatarMediaId}
+          label={title || '#'}
+          onUploaded={setAvatarMediaId}
+        />
+      </div>
+
+      <div className="flex gap-2">
+        <button type="submit" className="btn-gold flex-1 text-sm" disabled={!title.trim() || busy}>
+          {mode === 'create' ? t('communities.createChannel') : t('common.save')}
+        </button>
+        <button type="button" className="btn-quiet text-sm" onClick={onCancel}>
+          {t('common.cancel')}
+        </button>
+      </div>
+
+      {mode === 'edit' && canDelete && onDelete && (
+        <button type="button" className="btn-danger w-full text-sm" onClick={onDelete}>
+          {t('communities.deleteChannel')}
+        </button>
+      )}
+    </form>
+  )
+}

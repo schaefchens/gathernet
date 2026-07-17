@@ -10,6 +10,7 @@ import {
 import type { ChannelJoinInfoResponse, MailboxMessage } from '@gathernet/shared'
 import { create } from 'zustand'
 import { ApiError, api } from '../lib/api.ts'
+import { forgetKMetaCache } from '../lib/community-keys.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
 import {
   channelStore,
@@ -214,6 +215,7 @@ class CommunityChatStore {
     this.crypto = null
     this.record = null
     this.ready = new Set()
+    forgetKMetaCache()
     useCommunityChat.setState({ channels: {}, messages: {} })
   }
 
@@ -264,9 +266,11 @@ class CommunityChatStore {
   }
 
   /**
-   * Open a channel for reading/writing. Idempotent. Resolves to the resulting
-   * status: 'ready' once encryption works, 'locked' if the server forbids us,
-   * 'pending' if no GroupInfo has been published yet.
+   * Open an ALREADY-JOINED channel for reading/writing (restore local MLS state
+   * or external-join with the released GroupInfo). Idempotent. The server only
+   * releases GroupInfo to active channel members, so this is called by the UI
+   * for channels whose directory `myStatus` is 'active'; for others the UI shows
+   * the join/request/invite affordances instead and calls `joinChannel`.
    */
   async openChannel(channelId: string): Promise<ChannelStatus> {
     const engine = this.engine
@@ -290,16 +294,84 @@ class CommunityChatStore {
       this.setStatus(channelId, 'error')
       return 'error'
     }
+    return this.consumeJoinInfo(channelId, info)
+  }
 
-    if (!info.groupInfo) {
+  /**
+   * Explicit join action (open channels + invite acceptance). POSTs to the
+   * channel join endpoint: the server flips us to active (open policy or
+   * accepting a targeted invite) and returns GroupInfo, or leaves us 'pending'
+   * (request policy → awaiting a moderator). Returns the resulting status.
+   */
+  async joinChannel(communityId: string, channelId: string): Promise<ChannelStatus> {
+    if (!this.engine || !this.record) return 'error'
+    let info: ChannelJoinInfoResponse
+    try {
+      info = await api<ChannelJoinInfoResponse>(
+        'POST',
+        `/api/v1/communities/${communityId}/channels/${channelId}/join`,
+      )
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 403) {
+        this.setStatus(channelId, 'locked')
+        return 'locked'
+      }
+      this.setStatus(channelId, 'error')
+      return 'error'
+    }
+    return this.consumeJoinInfo(channelId, info)
+  }
+
+  /** Join a channel via a per-channel invite code (reaches unlisted channels). */
+  async joinByCode(
+    communityId: string,
+    code: string,
+  ): Promise<{ channelId: string; status: ChannelStatus } | null> {
+    if (!this.engine || !this.record) return null
+    let info: ChannelJoinInfoResponse
+    try {
+      info = await api<ChannelJoinInfoResponse>(
+        'POST',
+        `/api/v1/communities/${communityId}/channels/join-by-code`,
+        { code },
+      )
+    } catch {
+      return null
+    }
+    const status = await this.consumeJoinInfo(info.channelId, info)
+    return { channelId: info.channelId, status }
+  }
+
+  /** Turn a join-info response into a local status, external-joining if active. */
+  private async consumeJoinInfo(
+    channelId: string,
+    info: ChannelJoinInfoResponse,
+  ): Promise<ChannelStatus> {
+    if (info.status !== 'active' || !info.groupInfo) {
       this.setStatus(channelId, 'pending')
       return 'pending'
     }
+    return this.externalJoinInto(channelId, info.groupInfo, info.epoch)
+  }
 
+  private async externalJoinInto(
+    channelId: string,
+    groupInfo: string,
+    epoch: number,
+  ): Promise<ChannelStatus> {
+    const engine = this.engine
+    const record = this.record
+    if (!engine || !record) return 'error'
+    if (this.ready.has(channelId)) {
+      this.setStatus(channelId, 'ready')
+      await engine.catchUp(channelId).catch(() => {})
+      return 'ready'
+    }
+    this.setStatus(channelId, 'joining')
     try {
       const joined = await engine.externalJoinWithRetry(
         channelId,
-        { groupInfo: info.groupInfo, epoch: info.epoch },
+        { groupInfo, epoch },
         record.deviceId,
       )
       if (joined) {
@@ -315,6 +387,25 @@ class CommunityChatStore {
     }
     this.setStatus(channelId, 'pending')
     return 'pending'
+  }
+
+  /**
+   * Disappearing messages (client side): drop locally-held messages older than
+   * the channel's TTL from IndexedDB and the in-memory store. The server prunes
+   * the ciphertext on its own schedule; this keeps decrypted copies from
+   * outliving the window. Called by the UI on channel open with the channel's
+   * `messageTtlDays`.
+   */
+  async pruneChannelLocal(channelId: string, ttlDays: number): Promise<void> {
+    const cutoff = Date.now() - ttlDays * 24 * 3600 * 1000
+    await messageStore.pruneOlderThan(channelId, cutoff).catch(() => {})
+    useCommunityChat.setState((state) => {
+      const list = state.messages[channelId]
+      if (!list) return state
+      return {
+        messages: { ...state.messages, [channelId]: list.filter((m) => m.sentAt >= cutoff) },
+      }
+    })
   }
 
   async send(channelId: string, text: string): Promise<void> {

@@ -12,7 +12,9 @@
     "loading": "Loading…",
     "error": "Something went wrong",
     "retry": "Try again",
-    "connecting": "Reconnecting…"
+    "connecting": "Reconnecting…",
+    "showMore": "Show more",
+    "showLess": "Show less"
   },
   "welcome": {
     "title": "Gathernet",
@@ -100,7 +102,8 @@
     "pending": "Sending…",
     "sent": "Sent",
     "settingUp": "Setting up encryption…",
-    "cannotSend": "Encryption is still being set up for this chat."
+    "cannotSend": "Encryption is still being set up for this chat.",
+    "readOnly": "This channel is read-only."
   },
   "settings": {
     "title": "Settings",
@@ -176,9 +179,10 @@
     "create": "Create community",
     "join": "Join",
     "joinWithCode": "Join with a code",
-    "codePlaceholder": "Community invite code",
+    "codePlaceholder": "Invite code or link",
     "namePlaceholder": "Community name",
     "descriptionPlaceholder": "What is this community about?",
+    "encryptedName": "Encrypted community",
     "invalidCode": "That code is invalid, expired, or already used.",
     "alreadyMember": "You're already a member of this community.",
     "notFound": "Community not found.",
@@ -191,7 +195,13 @@
     "addChannel": "Add channel",
     "createChannel": "Create channel",
     "channelNamePlaceholder": "Channel name",
-    "deleteChannelConfirm": "Delete #{{name}}? Its history is removed for everyone.",
+    "channelTitlePlaceholder": "Channel title",
+    "channelEmojiPlaceholder": "Emoji",
+    "channelDescriptionPlaceholder": "Describe this channel…",
+    "channelAvatar": "Channel image",
+    "markdownHint": "Markdown supported: **bold**, *italic*, `code`, links and - lists.",
+    "deleteChannel": "Delete channel",
+    "deleteChannelConfirm": "Delete this channel? Its history is removed for everyone.",
     "channelJoining": "Joining channel…",
     "channelPending": "Setting up encryption…",
     "channelLocked": "This is a leaders-only channel. You don't have access.",
@@ -205,14 +215,70 @@
     "removeConfirm": "Remove {{name}} from the community? They lose access to all channels.",
     "leave": "Leave community",
     "leaveConfirm": "Leave this community?",
+    "viewChat": "Chat",
+    "communitySettings": "Community settings",
+    "channelSettings": "Channel settings",
+    "disappearingMessages": "Disappearing messages",
+    "ttl24h": "After 24 hours",
+    "ttl3d": "After 3 days",
+    "ttl7d": "After 7 days",
+    "ttl14d": "After 14 days",
+    "ttl30d": "After 30 days",
+    "requestToJoin": "Request to join",
+    "requestToJoinHint": "This channel admits new members by request.",
+    "requested": "Requested",
+    "waitingApproval": "Waiting for approval",
+    "waitingApprovalHint": "A moderator will review your request to join this channel.",
+    "youreInvited": "You've been invited to this channel.",
+    "acceptInvite": "Accept invite",
+    "invited": "Invited",
+    "moderation": "Moderation",
+    "pendingRequests": "Pending requests",
+    "noPendingRequests": "No pending requests.",
+    "activeMembers": "Members",
+    "accept": "Accept",
+    "decline": "Decline",
+    "kickFromChannel": "Remove",
+    "kickConfirm": "Remove {{name}} from this channel?",
+    "inviteMember": "Invite a member",
+    "chooseMember": "Choose a member…",
+    "noMembersToInvite": "Everyone is already in this channel.",
+    "createInviteCode": "Create invite code",
+    "channelCode": "Channel code",
+    "channelCodeHint": "Anyone with this code can join the channel.",
+    "moderatorBadge": "Moderator",
+    "makeModerator": "Make moderator",
+    "removeModerator": "Remove moderator",
+    "uploadAvatar": "Upload image",
+    "changeAvatar": "Change image",
+    "avatarNoKey": "This device can't encrypt images for this community.",
+    "avatarTooLarge": "That image is too large. Try a smaller one.",
+    "avatarFailed": "Couldn't upload that image.",
     "access": {
+      "label": "Access",
       "members": "All members",
       "leaders": "Leaders only"
+    },
+    "visibility": {
+      "label": "Visibility",
+      "listed": "Listed in the directory",
+      "unlisted": "Unlisted"
+    },
+    "joinPolicy": {
+      "label": "Who can join",
+      "open": "Anyone can join",
+      "request": "By request"
     },
     "roles": {
       "owner": "Owner",
       "leader": "Leader",
       "member": "Member"
-    }
+    },
+    "postPolicy": {
+      "label": "Who can post",
+      "everyone": "All members",
+      "moderators": "Only moderators"
+    },
+    "readOnlyHint": "Only moderators can post in this channel."
   }
 }

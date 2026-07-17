@@ -142,6 +142,24 @@ export const secureStore = {
       s.put(requireBox().seal(root, 'secure:storage-root'), 'storage-root'),
     )
   },
+  /**
+   * Per-community metadata key (K_meta), keyed by communityId. It decrypts the
+   * community's and channels' display metadata + avatars; the server never sees
+   * it — it arrives out-of-band in the invite payload fragment and is kept here
+   * sealed under the DMK. Stored in the `secure` store under a `kmeta:<id>` key
+   * (no DB-version bump needed — the store has no fixed keyPath).
+   */
+  async getCommunityKey(communityId: string): Promise<Uint8Array | null> {
+    const sealed = await tx<Uint8Array | undefined>('secure', 'readonly', (s) =>
+      s.get(`kmeta:${communityId}`),
+    )
+    return sealed ? requireBox().open(sealed, `secure:kmeta:${communityId}`) : null
+  },
+  putCommunityKey(communityId: string, key: Uint8Array): Promise<unknown> {
+    return tx('secure', 'readwrite', (s) =>
+      s.put(requireBox().seal(key, `secure:kmeta:${communityId}`), `kmeta:${communityId}`),
+    )
+  },
 }
 
 /** Per-group MLS snapshots. */
@@ -216,15 +234,24 @@ export interface StoredMessage {
   outgoing: boolean
 }
 
+interface MessageRow {
+  groupId: string
+  seq: number
+  /** plaintext timestamp — device-local only, enables TTL pruning without
+   *  decrypting every row (the message text stays sealed in `box`) */
+  sentAt: number
+  box: Uint8Array
+}
+
 export const messageStore = {
   async list(groupId: string): Promise<StoredMessage[]> {
-    const sealed = await tx<{ groupId: string; seq: number; box: Uint8Array }[]>(
+    const sealed = await tx<MessageRow[]>(
       'messages',
       'readonly',
       (s) =>
-        s.getAll(IDBKeyRange.bound([groupId, 0], [groupId, Number.MAX_SAFE_INTEGER])) as IDBRequest<
-          { groupId: string; seq: number; box: Uint8Array }[]
-        >,
+        s.getAll(
+          IDBKeyRange.bound([groupId, 0], [groupId, Number.MAX_SAFE_INTEGER]),
+        ) as IDBRequest<MessageRow[]>,
     )
     return sealed.map((row) => openJson<StoredMessage>(row.box, `msg:${groupId}:${row.seq}`))
   },
@@ -233,9 +260,25 @@ export const messageStore = {
       s.put({
         groupId: message.groupId,
         seq: message.seq,
+        sentAt: message.sentAt,
         box: sealJson(message, `msg:${message.groupId}:${message.seq}`),
-      }),
+      } satisfies MessageRow),
     )
+  },
+  /** Disappearing messages: delete this group's rows older than `cutoffMs`. */
+  async pruneOlderThan(groupId: string, cutoffMs: number): Promise<void> {
+    const rows = await tx<MessageRow[]>(
+      'messages',
+      'readonly',
+      (s) =>
+        s.getAll(
+          IDBKeyRange.bound([groupId, 0], [groupId, Number.MAX_SAFE_INTEGER]),
+        ) as IDBRequest<MessageRow[]>,
+    )
+    const stale = rows.filter((r) => r.sentAt < cutoffMs)
+    for (const row of stale) {
+      await tx('messages', 'readwrite', (s) => s.delete([row.groupId, row.seq]))
+    }
   },
 }
 

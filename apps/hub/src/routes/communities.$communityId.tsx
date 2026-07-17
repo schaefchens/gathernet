@@ -1,17 +1,23 @@
 import type {
-  ChannelAccess,
   CommunityChannel,
   CommunityDetailResponse,
-  CreateChannelResponse,
+  UpdateCommunityRequest,
 } from '@gathernet/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChannelChat } from '../features/communities/ChannelChat.tsx'
+import { ChannelJoinPanel } from '../features/communities/ChannelJoinPanel.tsx'
+import { ChannelSettingsForm } from '../features/communities/ChannelSettingsForm.tsx'
+import { ClampedMarkdown } from '../features/communities/ClampedMarkdown.tsx'
+import { AvatarUploader, CommunityAvatar } from '../features/communities/CommunityAvatar.tsx'
 import { InvitePanel } from '../features/communities/InvitePanel.tsx'
 import { MemberPanel } from '../features/communities/MemberPanel.tsx'
+import { ModerationPanel } from '../features/communities/ModerationPanel.tsx'
+import { channelFallbackTitle, useDecryptedMeta } from '../features/communities/meta.ts'
 import { api } from '../lib/api.ts'
+import { type ChannelMeta, type CommunityMeta, getKMeta, sealMeta } from '../lib/community-keys.ts'
 import { communityChatStore } from '../stores/community-chat.ts'
 import { useSession } from '../stores/session.ts'
 
@@ -39,40 +45,35 @@ function CommunityDetailScreen() {
   const channels = detail?.channels ?? []
   const isLeader = detail?.myRole === 'owner' || detail?.myRole === 'leader'
 
+  const communityMeta = useDecryptedMeta<CommunityMeta>(
+    communityId,
+    detail?.community.metaCiphertext ?? null,
+  )
+  const communityName = communityMeta?.name ?? t('communities.encryptedName')
+
   const [selected, setSelected] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+
+  const sorted = [...channels].sort((a, b) => a.position - b.position)
 
   // Keep the selection valid as channels appear/disappear (WS-driven refetch).
   useEffect(() => {
-    if (channels.length === 0) {
+    if (sorted.length === 0) {
       setSelected(null)
       return
     }
-    if (!selected || !channels.some((c) => c.channelId === selected)) {
-      setSelected(channels[0]?.channelId ?? null)
+    if (!selected || !sorted.some((c) => c.channelId === selected)) {
+      setSelected(sorted[0]?.channelId ?? null)
     }
-  }, [channels, selected])
+  }, [sorted, selected])
 
-  const selectedChannel = channels.find((c) => c.channelId === selected) ?? null
+  const selectedChannel = sorted.find((c) => c.channelId === selected) ?? null
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['community', communityId] })
     void queryClient.invalidateQueries({ queryKey: ['communities'] })
   }
-
-  const createChannel = useMutation({
-    mutationFn: (input: { name: string; access: ChannelAccess }) =>
-      api<CreateChannelResponse>('POST', `/api/v1/communities/${communityId}/channels`, input),
-    onSuccess: async (res) => {
-      // The creator's first act: publish epoch-0 GroupInfo so members can join.
-      await communityChatStore.bootstrapChannel(res.channelId).catch((err) => {
-        console.error('channel bootstrap failed', err)
-      })
-      invalidate()
-      setShowCreate(false)
-      setSelected(res.channelId)
-    },
-  })
 
   const deleteChannel = useMutation({
     mutationFn: (channelId: string) =>
@@ -82,6 +83,10 @@ function CommunityDetailScreen() {
       invalidate()
     },
   })
+
+  const onDeleteChannel = (channelId: string) => {
+    if (confirm(t('communities.deleteChannelConfirm'))) deleteChannel.mutate(channelId)
+  }
 
   if (detailQuery.isLoading) {
     return <p className="text-ink-soft">{t('common.loading')}</p>
@@ -107,15 +112,48 @@ function CommunityDetailScreen() {
         >
           ←
         </Link>
-        <h1 className="flex-1 font-display text-2xl truncate">{detail.community.name}</h1>
+        <CommunityAvatar
+          communityId={communityId}
+          mediaId={detail.community.avatarMediaId}
+          label={communityName}
+          size="md"
+        />
+        <h1 className="flex-1 font-display text-2xl truncate">{communityName}</h1>
+        {isLeader && (
+          <button
+            type="button"
+            className="btn-quiet text-xs px-2 py-1"
+            onClick={() => setShowSettings((s) => !s)}
+          >
+            {t('communities.communitySettings')}
+          </button>
+        )}
         <span
           className={`text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5 ${ROLE_BADGE[detail.myRole]}`}
         >
           {t(`communities.roles.${detail.myRole}`)}
         </span>
       </div>
-      {detail.community.description && (
-        <p className="text-sm text-ink-soft">{detail.community.description}</p>
+      {communityMeta?.description && !showSettings && (
+        <ClampedMarkdown
+          text={communityMeta.description}
+          className="text-sm text-ink-soft [&_p]:mb-2 [&_ul]:mb-2"
+        />
+      )}
+
+      {showSettings && isLeader && (
+        <CommunitySettingsForm
+          key={communityMeta ? 'loaded' : 'empty'}
+          communityId={communityId}
+          initialMeta={communityMeta}
+          avatarMediaId={detail.community.avatarMediaId}
+          communityName={communityName}
+          onDone={() => {
+            setShowSettings(false)
+            invalidate()
+          }}
+          onCancel={() => setShowSettings(false)}
+        />
       )}
 
       <div className="grid md:grid-cols-3 gap-4">
@@ -135,28 +173,29 @@ function CommunityDetailScreen() {
             </div>
 
             {showCreate && isLeader && (
-              <CreateChannelForm
-                pending={createChannel.isPending}
-                onCreate={(name, access) => createChannel.mutate({ name, access })}
+              <ChannelSettingsForm
+                communityId={communityId}
+                mode="create"
+                onDone={(channelId) => {
+                  setShowCreate(false)
+                  invalidate()
+                  if (channelId) setSelected(channelId)
+                }}
+                onCancel={() => setShowCreate(false)}
               />
             )}
 
-            {channels.length === 0 && (
+            {sorted.length === 0 && (
               <p className="text-xs text-ink-faint">{t('communities.noChannels')}</p>
             )}
             <ul className="space-y-1">
-              {channels.map((channel) => (
+              {sorted.map((channel) => (
                 <ChannelRow
                   key={channel.channelId}
+                  communityId={communityId}
                   channel={channel}
                   active={channel.channelId === selected}
-                  canDelete={isLeader}
                   onSelect={() => setSelected(channel.channelId)}
-                  onDelete={() => {
-                    if (confirm(t('communities.deleteChannelConfirm', { name: channel.name }))) {
-                      deleteChannel.mutate(channel.channelId)
-                    }
-                  }}
                 />
               ))}
             </ul>
@@ -174,10 +213,15 @@ function CommunityDetailScreen() {
 
         <div className="md:col-span-2">
           {selectedChannel ? (
-            <ChannelChat
-              channelId={selectedChannel.channelId}
-              channelName={selectedChannel.name}
-              access={selectedChannel.access}
+            <ChannelWorkspace
+              key={selectedChannel.channelId}
+              communityId={communityId}
+              channel={selectedChannel}
+              isLeader={isLeader}
+              myAccountId={myAccountId}
+              members={detail.members}
+              onChanged={invalidate}
+              onDeleteChannel={onDeleteChannel}
             />
           ) : (
             <div className="card grid place-items-center h-[calc(100vh-11rem)] text-ink-soft">
@@ -191,81 +235,291 @@ function CommunityDetailScreen() {
 }
 
 function ChannelRow({
+  communityId,
   channel,
   active,
-  canDelete,
   onSelect,
-  onDelete,
 }: {
+  communityId: string
   channel: CommunityChannel
   active: boolean
-  canDelete: boolean
   onSelect: () => void
-  onDelete: () => void
 }) {
+  const { t } = useTranslation()
+  const meta = useDecryptedMeta<ChannelMeta>(communityId, channel.metaCiphertext)
+  const title = meta?.title ?? channelFallbackTitle(channel.channelId)
+
   return (
-    <li className="flex items-center gap-1">
+    <li>
       <button
         type="button"
         onClick={onSelect}
-        className={`flex-1 flex items-center gap-2 text-left rounded-md px-3 py-2 text-sm transition-colors ${
+        className={`w-full flex items-center gap-2 text-left rounded-md px-2 py-1.5 text-sm transition-colors ${
           active ? 'bg-overlay text-gold' : 'text-ink-soft hover:text-ink hover:bg-overlay/50'
         }`}
       >
-        <span className="text-ink-faint">{channel.access === 'leaders' ? '🔒' : '#'}</span>
-        <span className="truncate">{channel.name}</span>
+        {channel.avatarMediaId ? (
+          <CommunityAvatar
+            communityId={communityId}
+            mediaId={channel.avatarMediaId}
+            label={meta?.emoji ?? title}
+            size="sm"
+          />
+        ) : (
+          <span className="h-8 w-8 shrink-0 grid place-items-center rounded-md bg-overlay text-ink-faint">
+            {meta?.emoji ?? '#'}
+          </span>
+        )}
+        <span className="truncate flex-1">{title}</span>
+        {channel.access === 'leaders' && (
+          <span title={t('communities.access.leaders')} aria-hidden>
+            🔒
+          </span>
+        )}
+        {channel.visibility === 'unlisted' && (
+          <span className="text-[10px] text-ink-faint uppercase tracking-wide">
+            {t('communities.visibility.unlisted')}
+          </span>
+        )}
+        {channel.myStatus === 'pending' && (
+          <span className="text-[10px] uppercase tracking-wide text-amber">
+            {t('communities.requested')}
+          </span>
+        )}
+        {channel.myStatus === 'invited' && (
+          <span className="text-[10px] uppercase tracking-wide text-gold">
+            {t('communities.invited')}
+          </span>
+        )}
       </button>
-      {canDelete && (
-        <button
-          type="button"
-          onClick={onDelete}
-          className="text-ink-faint hover:text-danger px-1"
-          aria-label="delete channel"
-        >
-          ×
-        </button>
-      )}
     </li>
   )
 }
 
-function CreateChannelForm({
-  pending,
-  onCreate,
+type WorkspaceView = 'chat' | 'settings' | 'moderation'
+
+function ChannelWorkspace({
+  communityId,
+  channel,
+  isLeader,
+  myAccountId,
+  members,
+  onChanged,
+  onDeleteChannel,
 }: {
-  pending: boolean
-  onCreate: (name: string, access: ChannelAccess) => void
+  communityId: string
+  channel: CommunityChannel
+  isLeader: boolean
+  myAccountId: string | null
+  members: CommunityDetailResponse['members']
+  onChanged: () => void
+  onDeleteChannel: (channelId: string) => void
 }) {
   const { t } = useTranslation()
-  const [name, setName] = useState('')
-  const [access, setAccess] = useState<ChannelAccess>('members')
+  const meta = useDecryptedMeta<ChannelMeta>(communityId, channel.metaCiphertext)
+  const title = meta?.title ?? channelFallbackTitle(channel.channelId)
+  const emoji = meta?.emoji
+  const isActive = channel.myStatus === 'active'
+  const isModerator = isActive && channel.myRole === 'moderator'
+  const isManager = isLeader || isModerator
+  const canEdit = isLeader || isModerator
+  // Announcement channels are read-only for everyone but managers.
+  const canPost = channel.postPolicy === 'everyone' || isManager
+  const [view, setView] = useState<WorkspaceView>('chat')
+
+  if (!isActive) {
+    return (
+      <ChannelJoinPanel
+        communityId={communityId}
+        channel={channel}
+        title={title}
+        emoji={emoji}
+        onChanged={onChanged}
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {(isManager || canEdit) && (
+        <div className="flex gap-2">
+          <TabButton active={view === 'chat'} onClick={() => setView('chat')}>
+            {t('communities.viewChat')}
+          </TabButton>
+          {isManager && (
+            <TabButton active={view === 'moderation'} onClick={() => setView('moderation')}>
+              {t('communities.moderation')}
+            </TabButton>
+          )}
+          {canEdit && (
+            <TabButton active={view === 'settings'} onClick={() => setView('settings')}>
+              {t('communities.channelSettings')}
+            </TabButton>
+          )}
+        </div>
+      )}
+
+      {view === 'chat' && (
+        <ChannelChat
+          communityId={communityId}
+          channelId={channel.channelId}
+          title={title}
+          emoji={emoji}
+          avatarMediaId={channel.avatarMediaId}
+          access={channel.access}
+          postPolicy={channel.postPolicy}
+          canPost={canPost}
+          description={meta?.description}
+          messageTtlDays={channel.messageTtlDays}
+        />
+      )}
+
+      {view === 'moderation' && isManager && (
+        <ModerationPanel
+          communityId={communityId}
+          channelId={channel.channelId}
+          isLeader={isLeader}
+          members={members}
+          myAccountId={myAccountId}
+          onChanged={onChanged}
+        />
+      )}
+
+      {view === 'settings' && canEdit && (
+        <div className="card h-[calc(100vh-12.5rem)] overflow-y-auto">
+          <ChannelSettingsForm
+            key={meta ? 'loaded' : 'empty'}
+            communityId={communityId}
+            mode="edit"
+            channel={channel}
+            initialMeta={meta}
+            onDone={() => {
+              setView('chat')
+              onChanged()
+            }}
+            onCancel={() => setView('chat')}
+            canDelete={isLeader}
+            onDelete={() => onDeleteChannel(channel.channelId)}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
+        active ? 'border-gold text-gold' : 'border-edge text-ink-soft hover:text-ink'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function CommunitySettingsForm({
+  communityId,
+  initialMeta,
+  avatarMediaId,
+  communityName,
+  onDone,
+  onCancel,
+}: {
+  communityId: string
+  initialMeta: CommunityMeta | null
+  avatarMediaId: string | null
+  communityName: string
+  onDone: () => void
+  onCancel: () => void
+}) {
+  const { t } = useTranslation()
+  const [name, setName] = useState(initialMeta?.name ?? '')
+  const [description, setDescription] = useState(initialMeta?.description ?? '')
+  const [media, setMedia] = useState<string | null>(avatarMediaId)
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    const trimmed = name.trim()
+    if (!trimmed || busy) return
+    setBusy(true)
+    try {
+      const kMeta = await getKMeta(communityId)
+      const body: UpdateCommunityRequest = {}
+      if (kMeta) {
+        body.metaCiphertext = await sealMeta(kMeta, {
+          name: trimmed,
+          ...(description.trim() ? { description: description.trim() } : {}),
+        })
+      }
+      if (media !== avatarMediaId) {
+        body.avatarMediaId = media as UpdateCommunityRequest['avatarMediaId']
+      }
+      // PATCH requires at least one field — nothing to change if K_meta is
+      // absent and the avatar is untouched.
+      if (body.metaCiphertext === undefined && body.avatarMediaId === undefined) {
+        onCancel()
+        return
+      }
+      await api('PATCH', `/api/v1/communities/${communityId}`, body)
+      onDone()
+    } catch (err) {
+      console.error('community settings save failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <form
-      className="space-y-2 border border-edge rounded-md p-3 bg-overlay/40"
+      className="card space-y-3"
       onSubmit={(e) => {
         e.preventDefault()
-        if (name.trim()) onCreate(name.trim(), access)
+        void submit()
       }}
     >
+      <h2 className="font-medium text-ink-soft">{t('communities.communitySettings')}</h2>
+      <AvatarUploader
+        communityId={communityId}
+        currentMediaId={media}
+        label={communityName}
+        onUploaded={setMedia}
+      />
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder={t('communities.channelNamePlaceholder')}
+        placeholder={t('communities.namePlaceholder')}
         maxLength={80}
-        autoFocus
       />
-      <select
-        className="w-full bg-overlay border border-edge rounded-md px-3 py-2 text-sm"
-        value={access}
-        onChange={(e) => setAccess(e.target.value as ChannelAccess)}
-      >
-        <option value="members">{t('communities.access.members')}</option>
-        <option value="leaders">{t('communities.access.leaders')}</option>
-      </select>
-      <button type="submit" className="btn-gold w-full text-sm" disabled={!name.trim() || pending}>
-        {t('communities.createChannel')}
-      </button>
+      <div className="space-y-1">
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder={t('communities.descriptionPlaceholder')}
+          maxLength={2000}
+          rows={3}
+        />
+        <p className="text-[11px] text-ink-faint">{t('communities.markdownHint')}</p>
+      </div>
+      <div className="flex gap-2">
+        <button type="submit" className="btn-gold flex-1" disabled={!name.trim() || busy}>
+          {t('common.save')}
+        </button>
+        <button type="button" className="btn-quiet" onClick={onCancel}>
+          {t('common.cancel')}
+        </button>
+      </div>
     </form>
   )
 }

@@ -9,6 +9,10 @@ interface MessageThreadProps {
   onSend: (text: string) => Promise<void>
   /** shown in the body while `ready` is false */
   notReadyLabel?: string
+  /** hide the composer entirely (e.g. announcement channels — read-only) */
+  readOnly?: boolean
+  /** replaces the composer with this hint when `readOnly` */
+  readOnlyLabel?: string
 }
 
 /**
@@ -16,7 +20,14 @@ interface MessageThreadProps {
  * chats and community channels. The parent owns the header and the message
  * data; this component owns only the draft/sending UI state.
  */
-export function MessageThread({ messages, ready, onSend, notReadyLabel }: MessageThreadProps) {
+export function MessageThread({
+  messages,
+  ready,
+  onSend,
+  notReadyLabel,
+  readOnly,
+  readOnlyLabel,
+}: MessageThreadProps) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
@@ -73,24 +84,30 @@ export function MessageThread({ messages, ready, onSend, notReadyLabel }: Messag
         <div ref={bottomRef} />
       </div>
 
-      <form
-        className="flex gap-2 pt-3 border-t border-edge"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void send()
-        }}
-      >
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={ready ? t('chat.placeholder') : t('chat.cannotSend')}
-          disabled={!ready}
-          autoFocus
-        />
-        <button type="submit" className="btn-gold" disabled={!ready || !draft.trim() || sending}>
-          {t('chat.send')}
-        </button>
-      </form>
+      {readOnly ? (
+        <p className="pt-3 border-t border-edge text-center text-xs text-ink-faint">
+          {readOnlyLabel ?? t('chat.readOnly')}
+        </p>
+      ) : (
+        <form
+          className="flex gap-2 pt-3 border-t border-edge"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void send()
+          }}
+        >
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={ready ? t('chat.placeholder') : t('chat.cannotSend')}
+            disabled={!ready}
+            autoFocus
+          />
+          <button type="submit" className="btn-gold" disabled={!ready || !draft.trim() || sending}>
+            {t('chat.send')}
+          </button>
+        </form>
+      )}
     </>
   )
 }

@@ -9,8 +9,17 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { QrScanner } from '../components/QrScanner.tsx'
-import { COMMUNITY_QR_PREFIX } from '../features/communities/InvitePanel.tsx'
+import { CommunityAvatar } from '../features/communities/CommunityAvatar.tsx'
+import { useDecryptedMeta } from '../features/communities/meta.ts'
 import { ApiError, api } from '../lib/api.ts'
+import {
+  COMMUNITY_INVITE_SCHEME,
+  type CommunityMeta,
+  generateKMeta,
+  parseInvite,
+  rememberKMeta,
+  sealMeta,
+} from '../lib/community-keys.ts'
 
 export const Route = createFileRoute('/communities/')({ component: CommunitiesScreen })
 
@@ -65,27 +74,49 @@ function CommunitiesScreen() {
       <ul className="space-y-2">
         {list.map((community) => (
           <li key={community.communityId}>
-            <Link
-              to="/communities/$communityId"
-              params={{ communityId: community.communityId }}
-              className="card flex items-center gap-3 py-3 hover:border-indigo-soft transition-colors"
-            >
-              <span className="flex-1 min-w-0">
-                <span className="font-medium block truncate">{community.name}</span>
-                <span className="text-xs text-ink-faint">
-                  {t('communities.channelCount', { count: community.channelCount })}
-                </span>
-              </span>
-              <span
-                className={`text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5 ${ROLE_BADGE[community.myRole]}`}
-              >
-                {t(`communities.roles.${community.myRole}`)}
-              </span>
-            </Link>
+            <CommunityCard community={community} roleBadge={ROLE_BADGE[community.myRole]} />
           </li>
         ))}
       </ul>
     </div>
+  )
+}
+
+function CommunityCard({
+  community,
+  roleBadge,
+}: {
+  community: CommunityListItem
+  roleBadge: string
+}) {
+  const { t } = useTranslation()
+  const meta = useDecryptedMeta<CommunityMeta>(community.communityId, community.metaCiphertext)
+  const name = meta?.name ?? t('communities.encryptedName')
+
+  return (
+    <Link
+      to="/communities/$communityId"
+      params={{ communityId: community.communityId }}
+      className="card flex items-center gap-3 py-3 hover:border-indigo-soft transition-colors"
+    >
+      <CommunityAvatar
+        communityId={community.communityId}
+        mediaId={community.avatarMediaId}
+        label={name}
+        size="md"
+      />
+      <span className="flex-1 min-w-0">
+        <span className="font-medium block truncate">{name}</span>
+        <span className="text-xs text-ink-faint">
+          {t('communities.channelCount', { count: community.channelCount })}
+        </span>
+      </span>
+      <span
+        className={`text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5 ${roleBadge}`}
+      >
+        {t(`communities.roles.${community.myRole}`)}
+      </span>
+    </Link>
   )
 }
 
@@ -97,11 +128,19 @@ function CreatePanel({ onDone }: { onDone: () => void }) {
   const [description, setDescription] = useState('')
 
   const create = useMutation({
-    mutationFn: () =>
-      api<CreateCommunityResponse>('POST', '/api/v1/communities', {
+    mutationFn: async () => {
+      const kMeta = generateKMeta()
+      const meta: CommunityMeta = {
         name: name.trim(),
         ...(description.trim() ? { description: description.trim() } : {}),
-      }),
+      }
+      const metaCiphertext = await sealMeta(kMeta, meta)
+      const res = await api<CreateCommunityResponse>('POST', '/api/v1/communities', {
+        metaCiphertext,
+      })
+      await rememberKMeta(res.communityId, kMeta)
+      return res
+    },
     onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ['communities'] })
       onDone()
@@ -145,14 +184,16 @@ function JoinPanel({ onDone }: { onDone: () => void }) {
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const accept = async (rawCode: string) => {
+  const accept = async (raw: string) => {
     setError(null)
+    const { code: parsedCode, kMeta } = parseInvite(raw)
     try {
       const res = await api<AcceptCommunityInviteResponse>(
         'POST',
         '/api/v1/communities/invites/accept',
-        { code: rawCode.trim() },
+        { code: parsedCode },
       )
+      if (kMeta) await rememberKMeta(res.communityId, kMeta)
       void queryClient.invalidateQueries({ queryKey: ['communities'] })
       onDone()
       void navigate({
@@ -179,10 +220,14 @@ function JoinPanel({ onDone }: { onDone: () => void }) {
       >
         <input
           value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          onChange={(e) => {
+            // Auto-uppercase a bare code, but leave a full invite payload
+            // untouched — its K_meta fragment is case-sensitive base64url.
+            const v = e.target.value
+            setCode(v.includes('#') || v.includes(':') ? v : v.toUpperCase())
+          }}
           placeholder={t('communities.codePlaceholder')}
-          maxLength={10}
-          className="text-center font-mono text-xl tracking-[0.3em]"
+          className="text-center font-mono text-xl tracking-[0.2em]"
           autoFocus
           autoComplete="off"
         />
@@ -199,7 +244,10 @@ function JoinPanel({ onDone }: { onDone: () => void }) {
         {scanning ? t('common.cancel') : t('communities.scan')}
       </button>
       {scanning && (
-        <QrScanner prefixes={[COMMUNITY_QR_PREFIX]} onCode={(payload) => void accept(payload)} />
+        <QrScanner
+          prefixes={[COMMUNITY_INVITE_SCHEME]}
+          onCode={(payload) => void accept(payload)}
+        />
       )}
     </div>
   )

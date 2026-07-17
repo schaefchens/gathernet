@@ -36,8 +36,15 @@ for (const event of [
   'community.member_left',
   'community.member_removed',
   'community.role_changed',
+  'community.updated',
   'community.channel_created',
+  'community.channel_updated',
   'community.channel_deleted',
+  'community.channel_join_request',
+  'community.channel_join_approved',
+  'community.channel_join_declined',
+  'community.channel_invited',
+  'community.channel_member_changed',
 ] as const) {
   wsClient.on(event, (m) => invalidateCommunity(m.payload.communityId))
 }

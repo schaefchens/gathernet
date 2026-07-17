@@ -41,3 +41,13 @@ export async function api<T>(
   }
   return json as T
 }
+
+/** Binary GET (e.g. encrypted community media octet-streams). */
+export async function apiBytes(path: string): Promise<Uint8Array> {
+  const headers: Record<string, string> = {}
+  const token = tokenProvider()
+  if (token) headers.authorization = `Bearer ${token}`
+  const res = await fetch(path, { method: 'GET', headers })
+  if (!res.ok) throw new ApiError(res.status, 'http_error')
+  return new Uint8Array(await res.arrayBuffer())
+}
