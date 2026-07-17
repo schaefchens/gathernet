@@ -487,13 +487,24 @@ export const communityMemberStatusEnum = pgEnum('community_member_status', [
   'removed',
 ])
 export const channelAccessEnum = pgEnum('channel_access', ['members', 'leaders'])
+export const channelVisibilityEnum = pgEnum('channel_visibility', ['listed', 'unlisted'])
+export const channelJoinPolicyEnum = pgEnum('channel_join_policy', ['open', 'request'])
+export const channelPostPolicyEnum = pgEnum('channel_post_policy', ['everyone', 'moderators'])
+export const channelMemberStatusEnum = pgEnum('channel_member_status', [
+  'active',
+  'pending',
+  'invited',
+  'removed',
+])
+export const channelMemberRoleEnum = pgEnum('channel_member_role', ['member', 'moderator'])
+export const channelInviteKindEnum = pgEnum('channel_invite_kind', ['code', 'targeted'])
 
 export const communities = pgTable('communities', {
   /** 'cm_' + hex(8 random bytes) */
   communityId: text('community_id').primaryKey(),
-  name: text('name').notNull(),
-  description: text('description'),
-  iconUrl: text('icon_url'),
+  /** seal(K_meta, {name, description}) — server never sees plaintext */
+  metaCiphertext: bytea('meta_ciphertext'),
+  avatarMediaId: text('avatar_media_id'),
   ownerAccountId: text('owner_account_id')
     .notNull()
     .references(() => accounts.accountId),
@@ -517,7 +528,8 @@ export const communityMembers = pgTable(
   (t) => [primaryKey({ columns: [t.communityId, t.accountId] })],
 )
 
-/** channelId == the MLS groupId (groups.kind = 'channel'). */
+/** channelId == the MLS groupId (groups.kind = 'channel'). Display metadata
+ *  (title/emoji/description) is encrypted under the community's K_meta. */
 export const communityChannels = pgTable(
   'community_channels',
   {
@@ -527,14 +539,80 @@ export const communityChannels = pgTable(
     communityId: text('community_id')
       .notNull()
       .references(() => communities.communityId),
-    name: text('name').notNull(),
+    /** seal(K_meta, {title, emoji, description}) */
+    metaCiphertext: bytea('meta_ciphertext'),
+    avatarMediaId: text('avatar_media_id'),
     position: integer('position').notNull().default(0),
+    /** who is eligible to join at all */
     access: channelAccessEnum('access').notNull().default('members'),
-    joinDefault: boolean('join_default').notNull().default(true),
+    /** listed = shown in the directory to eligible members; unlisted = code/invite only */
+    visibility: channelVisibilityEnum('visibility').notNull().default('listed'),
+    /** open = eligible member self-joins; request = pending until a mod accepts */
+    joinPolicy: channelJoinPolicyEnum('join_policy').notNull().default('open'),
+    /** everyone = any active member may post; moderators = read-only for non-mods */
+    postPolicy: channelPostPolicyEnum('post_policy').notNull().default('everyone'),
+    /** disappearing-message window in days (server prunes; clients also prune locally) */
+    messageTtlDays: integer('message_ttl_days').notNull().default(30),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('community_channels_community_idx').on(t.communityId)],
 )
+
+/** Account-level channel membership (device leaves live in group_members). */
+export const channelMembers = pgTable(
+  'channel_members',
+  {
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => communityChannels.channelId),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => accounts.accountId),
+    status: channelMemberStatusEnum('status').notNull().default('active'),
+    role: channelMemberRoleEnum('role').notNull().default('member'),
+    invitedBy: text('invited_by'),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.channelId, t.accountId] }),
+    index('channel_members_account_idx').on(t.accountId),
+  ],
+)
+
+export const channelInvites = pgTable(
+  'channel_invites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => communityChannels.channelId),
+    kind: channelInviteKindEnum('kind').notNull(),
+    /** set for kind='code' */
+    code: text('code').unique(),
+    /** set for kind='targeted' */
+    inviteeAccountId: text('invitee_account_id'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => accounts.accountId),
+    maxUses: integer('max_uses').notNull().default(1),
+    useCount: integer('use_count').notNull().default(0),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('channel_invites_channel_idx').on(t.channelId)],
+)
+
+/** Encrypted media (community + channel avatars); ciphertext = seal(K_meta, imageBytes). */
+export const communityMedia = pgTable('community_media', {
+  /** 'md_' + hex(16 random bytes) */
+  mediaId: text('media_id').primaryKey(),
+  communityId: text('community_id')
+    .notNull()
+    .references(() => communities.communityId),
+  ciphertext: bytea('ciphertext').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
 
 export const communityInvites = pgTable(
   'community_invites',

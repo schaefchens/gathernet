@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import { channelAccessSchema, communityRoleSchema } from '../api/communities.ts'
+import {
+  channelMemberRoleSchema,
+  channelMyStatusSchema,
+  communityRoleSchema,
+} from '../api/communities.ts'
 import {
   accountIdSchema,
   appUserIdSchema,
@@ -261,13 +265,27 @@ export const communityRoleChangedMessage = z.object({
   }),
 })
 
+/** Community display metadata (name/avatar) changed — clients refetch + redecrypt. */
+export const communityUpdatedMessage = z.object({
+  type: z.literal('community.updated'),
+  payload: z.object({
+    communityId: communityIdSchema,
+  }),
+})
+
 export const communityChannelCreatedMessage = z.object({
   type: z.literal('community.channel_created'),
   payload: z.object({
     communityId: communityIdSchema,
     channelId: groupIdSchema,
-    name: z.string(),
-    access: channelAccessSchema,
+  }),
+})
+
+export const communityChannelUpdatedMessage = z.object({
+  type: z.literal('community.channel_updated'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
   }),
 })
 
@@ -276,6 +294,62 @@ export const communityChannelDeletedMessage = z.object({
   payload: z.object({
     communityId: communityIdSchema,
     channelId: groupIdSchema,
+  }),
+})
+
+/** To channel moderators + community leaders: someone requested to join. */
+export const communityChannelJoinRequestMessage = z.object({
+  type: z.literal('community.channel_join_request'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+    accountId: accountIdSchema,
+    displayName: z.string(),
+  }),
+})
+
+/** To the requester: a moderator accepted — carries GroupInfo for the join. */
+export const communityChannelJoinApprovedMessage = z.object({
+  type: z.literal('community.channel_join_approved'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+    groupInfo: z.base64().nullable(),
+    epoch: z.number().int().nonnegative(),
+  }),
+})
+
+/** To the requester: a moderator declined the join request. */
+export const communityChannelJoinDeclinedMessage = z.object({
+  type: z.literal('community.channel_join_declined'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+  }),
+})
+
+/** To the invitee: a moderator invited them to a channel (they may accept). */
+export const communityChannelInvitedMessage = z.object({
+  type: z.literal('community.channel_invited'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+  }),
+})
+
+/**
+ * To active channel members + community leaders + the affected account: a
+ * channel membership changed (joined/left/kicked/moderator-set). `status` is
+ * the new channel-membership state; `role` the new channel role.
+ */
+export const communityChannelMemberChangedMessage = z.object({
+  type: z.literal('community.channel_member_changed'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+    accountId: accountIdSchema,
+    status: channelMyStatusSchema,
+    role: channelMemberRoleSchema,
   }),
 })
 
@@ -307,8 +381,15 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   communityMemberLeftMessage,
   communityMemberRemovedMessage,
   communityRoleChangedMessage,
+  communityUpdatedMessage,
   communityChannelCreatedMessage,
+  communityChannelUpdatedMessage,
   communityChannelDeletedMessage,
+  communityChannelJoinRequestMessage,
+  communityChannelJoinApprovedMessage,
+  communityChannelJoinDeclinedMessage,
+  communityChannelInvitedMessage,
+  communityChannelMemberChangedMessage,
 ])
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>

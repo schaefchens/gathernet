@@ -1,14 +1,20 @@
 import {
   acceptCommunityInviteRequestSchema,
+  createChannelInviteRequestSchema,
   createChannelRequestSchema,
   createCommunityInviteRequestSchema,
   createCommunityRequestSchema,
   type DeviceId,
   type GroupId,
+  joinByCodeRequestSchema,
   postCommitRequestSchema,
   publishChannelGroupInfoRequestSchema,
+  resolveJoinRequestSchema,
   setMemberRoleRequestSchema,
+  setModeratorRequestSchema,
+  updateChannelRequestSchema,
   updateCommunityRequestSchema,
+  uploadMediaRequestSchema,
 } from '@gathernet/shared'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
@@ -20,19 +26,29 @@ import {
   acceptCommunityInvite,
   channelCommunityId,
   createChannel,
+  createChannelInvite,
   createCommunity,
   createCommunityInvite,
   deleteChannel,
   getChannelJoinInfo,
   getCommunityDetail,
+  getCommunityMedia,
+  joinChannel,
+  joinChannelByCode,
+  kickFromChannel,
   leaveCommunity,
+  listChannelMembers,
   listCommunities,
   listCommunityInvites,
   publishChannelGroupInfo,
   removeMember,
+  resolveJoinRequest,
   revokeCommunityInvite,
   setMemberRole,
+  setModerator,
+  updateChannel,
   updateCommunity,
+  uploadCommunityMedia,
 } from './service.ts'
 
 export interface CommunityRoutesOptions {
@@ -58,7 +74,7 @@ export function registerCommunityRoutes(
 
   app.post('/api/v1/communities', auth, async (request, reply) => {
     const session = requireSession(request)
-    const body = createCommunityRequestSchema.parse(request.body)
+    const body = createCommunityRequestSchema.parse(request.body ?? {})
     reply.status(201)
     return createCommunity(db, session.accountId, body)
   })
@@ -75,6 +91,20 @@ export function registerCommunityRoutes(
     const body = acceptCommunityInviteRequestSchema.parse(request.body)
     return acceptCommunityInvite(db, registry, session.accountId, body.code)
   })
+
+  /* ------------------------------- media -------------------------------- */
+
+  app.get<{ Params: { mediaId: string } }>(
+    '/api/v1/communities/media/:mediaId',
+    auth,
+    async (request, reply) => {
+      const session = requireSession(request)
+      const bytes = await getCommunityMedia(db, session.accountId, request.params.mediaId)
+      reply.header('cache-control', 'private, max-age=31536000, immutable')
+      reply.type('application/octet-stream')
+      return reply.send(bytes)
+    },
+  )
 
   /* ------------------------------ channels ------------------------------ */
 
@@ -161,9 +191,20 @@ export function registerCommunityRoutes(
   app.patch<{ Params: { id: string } }>('/api/v1/communities/:id', auth, async (request) => {
     const session = requireSession(request)
     const body = updateCommunityRequestSchema.parse(request.body)
-    await updateCommunity(db, session.accountId, request.params.id, body)
+    await updateCommunity(db, registry, session.accountId, request.params.id, body)
     return { ok: true }
   })
+
+  app.post<{ Params: { id: string } }>(
+    '/api/v1/communities/:id/media',
+    auth,
+    async (request, reply) => {
+      const session = requireSession(request)
+      const body = uploadMediaRequestSchema.parse(request.body)
+      reply.status(201)
+      return uploadCommunityMedia(db, session.accountId, request.params.id, body.ciphertext)
+    },
+  )
 
   app.post<{ Params: { id: string } }>(
     '/api/v1/communities/:id/invites',
@@ -196,9 +237,38 @@ export function registerCommunityRoutes(
     auth,
     async (request, reply) => {
       const session = requireSession(request)
-      const body = createChannelRequestSchema.parse(request.body)
+      const body = createChannelRequestSchema.parse(request.body ?? {})
       reply.status(201)
       return createChannel(db, registry, session.accountId, request.params.id, body)
+    },
+  )
+
+  // Join by per-channel code — static segment precedes `:channelId`.
+  app.post<{ Params: { id: string } }>(
+    '/api/v1/communities/:id/channels/join-by-code',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = joinByCodeRequestSchema.parse(request.body)
+      return joinChannelByCode(db, registry, session.accountId, request.params.id, body.code)
+    },
+  )
+
+  app.patch<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = updateChannelRequestSchema.parse(request.body)
+      await updateChannel(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        body,
+      )
+      return { ok: true }
     },
   )
 
@@ -213,6 +283,109 @@ export function registerCommunityRoutes(
         session.accountId,
         request.params.id,
         request.params.channelId,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/join',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      return joinChannel(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+      )
+    },
+  )
+
+  app.get<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/members',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const members = await listChannelMembers(
+        db,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+      )
+      return { members }
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string; accountId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/requests/:accountId',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = resolveJoinRequestSchema.parse(request.body)
+      await resolveJoinRequest(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.accountId,
+        body.action,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/invites',
+    auth,
+    async (request, reply) => {
+      const session = requireSession(request)
+      const body = createChannelInviteRequestSchema.parse(request.body)
+      reply.status(201)
+      return createChannelInvite(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        body,
+      )
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string; accountId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/moderators/:accountId',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = setModeratorRequestSchema.parse(request.body)
+      await setModerator(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.accountId,
+        body.action,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string; accountId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/kick/:accountId',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      await kickFromChannel(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.accountId,
       )
       return { ok: true }
     },

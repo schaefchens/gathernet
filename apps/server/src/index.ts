@@ -3,8 +3,8 @@ import { loadConfig } from './config.ts'
 import { createDb, createPool, runMigrations } from './db/index.ts'
 import { pruneGrantCodes } from './modules/apps/grant-codes.ts'
 import { pruneExpiredChallenges } from './modules/auth/challenges.ts'
-import { pruneCommunityInvites } from './modules/communities/service.ts'
-import { pruneMailbox } from './modules/delivery/service.ts'
+import { pruneChannelInvites, pruneCommunityInvites } from './modules/communities/service.ts'
+import { pruneChannelMessages, pruneMailbox } from './modules/delivery/service.ts'
 import { pruneRooms } from './modules/rooms/service.ts'
 
 const config = loadConfig()
@@ -19,9 +19,11 @@ async function runJobs(): Promise<void> {
   try {
     await pruneExpiredChallenges(db)
     await pruneGrantCodes(db)
+    await pruneChannelMessages(db)
     await pruneMailbox(db)
     await pruneRooms(db)
     await pruneCommunityInvites(db)
+    await pruneChannelInvites(db)
   } catch (err) {
     app.log.error({ err }, 'housekeeping job failed')
   }

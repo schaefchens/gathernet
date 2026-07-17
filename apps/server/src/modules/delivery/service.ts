@@ -15,6 +15,7 @@ import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import {
   appDevices,
+  channelMembers,
   communityChannels,
   communityMembers,
   devices,
@@ -282,8 +283,10 @@ export async function postCommit(
     /** room member status per account, for adds/removes validation */
     const roomStatus = new Map<string, string>()
     let channelAccess: string | null = null
-    /** community membership (role+status) per account, for channel validation */
-    const channelMembers = new Map<string, { role: string; status: string }>()
+    /** community membership (role+status) per account, for channel eligibility */
+    const communityRoles = new Map<string, { role: string; status: string }>()
+    /** channel_members (channel-level status+role) per account */
+    const chanMember = new Map<string, { status: string; role: string }>()
     if (isRoom) {
       const memberRows = await tx.select().from(roomMembers).where(eq(roomMembers.roomId, groupId))
       for (const m of memberRows) roomStatus.set(m.accountId, m.status)
@@ -304,9 +307,18 @@ export async function postCommit(
         .from(communityMembers)
         .where(eq(communityMembers.communityId, channel.communityId))
       for (const m of memberRows)
-        channelMembers.set(m.accountId, { role: m.role, status: m.status })
+        communityRoles.set(m.accountId, { role: m.role, status: m.status })
+      const chanRows = await tx
+        .select()
+        .from(channelMembers)
+        .where(eq(channelMembers.channelId, groupId))
+      for (const m of chanRows) chanMember.set(m.accountId, { status: m.status, role: m.role })
+      // Must be eligible by community access AND an active channel member.
       // Don't leak channel existence to unauthorized callers.
-      if (!satisfiesChannelAccess(channelMembers.get(accountId), channelAccess)) {
+      if (
+        !satisfiesChannelAccess(communityRoles.get(accountId), channelAccess) ||
+        chanMember.get(accountId)?.status !== 'active'
+      ) {
         throw new ServiceError(404, 'group_not_found')
       }
     } else if (group.account_a !== accountId && group.account_b !== accountId) {
@@ -369,7 +381,8 @@ export async function postCommit(
         else if (isChannel)
           authorized =
             owner !== undefined &&
-            satisfiesChannelAccess(channelMembers.get(owner), channelAccess ?? 'members')
+            satisfiesChannelAccess(communityRoles.get(owner), channelAccess ?? 'members') &&
+            chanMember.get(owner)?.status === 'active'
         else authorized = owner === group.account_a || owner === group.account_b
         if (!authorized) throw new ServiceError(400, 'invalid_member_change')
       }
@@ -390,18 +403,23 @@ export async function postCommit(
       }
     }
 
-    // Channels: leaders/owner may remove anyone; a plain member may only
-    // remove leaves whose owner no longer satisfies access (cleanup after a
-    // member was removed/demoted at the community level).
+    // Channels: community leaders/owner and channel moderators may remove
+    // anyone; a plain member may only remove leaves whose owner is no longer an
+    // authorized active channel member (cleanup after a community/channel kick
+    // or demotion).
     if (isChannel && body.memberChanges.removes.length > 0) {
-      const committer = channelMembers.get(accountId)
-      const committerIsLeader = committer?.role === 'owner' || committer?.role === 'leader'
-      if (!committerIsLeader) {
+      const committer = communityRoles.get(accountId)
+      const committerIsManager =
+        committer?.role === 'owner' ||
+        committer?.role === 'leader' ||
+        chanMember.get(accountId)?.role === 'moderator'
+      if (!committerIsManager) {
         for (const removeId of body.memberChanges.removes) {
           const owner = accountOfLeaf.get(removeId)
           if (
             owner &&
-            satisfiesChannelAccess(channelMembers.get(owner), channelAccess ?? 'members')
+            satisfiesChannelAccess(communityRoles.get(owner), channelAccess ?? 'members') &&
+            chanMember.get(owner)?.status === 'active'
           ) {
             throw new ServiceError(403, 'remove_not_allowed')
           }
@@ -564,8 +582,29 @@ export async function postMessage(
             ),
           })
         : undefined
-      if (!channel || !satisfiesChannelAccess(membership ?? undefined, channel.access)) {
+      const chanMem = channel
+        ? await tx.query.channelMembers.findFirst({
+            where: and(
+              eq(channelMembers.channelId, groupId),
+              eq(channelMembers.accountId, senderRow.accountId),
+            ),
+          })
+        : undefined
+      if (
+        !channel ||
+        !satisfiesChannelAccess(membership ?? undefined, channel.access) ||
+        chanMem?.status !== 'active'
+      ) {
         throw new ServiceError(403, 'not_a_member')
+      }
+      // Announcement channels: only community leaders/owner and channel
+      // moderators may post application messages; everyone else is read-only.
+      if (channel.postPolicy === 'moderators') {
+        const isManager =
+          membership?.role === 'owner' ||
+          membership?.role === 'leader' ||
+          chanMem.role === 'moderator'
+        if (!isManager) throw new ServiceError(403, 'read_only_channel')
       }
     }
     // Accept the current epoch and one behind (commit racing a message).
@@ -626,7 +665,19 @@ export async function listMessages(
           ),
         })
       : undefined
-    if (!channel || !satisfiesChannelAccess(membership ?? undefined, channel.access)) {
+    const chanMem = channel
+      ? await db.query.channelMembers.findFirst({
+          where: and(
+            eq(channelMembers.channelId, groupId),
+            eq(channelMembers.accountId, accountId),
+          ),
+        })
+      : undefined
+    if (
+      !channel ||
+      !satisfiesChannelAccess(membership ?? undefined, channel.access) ||
+      chanMem?.status !== 'active'
+    ) {
       throw new ServiceError(404, 'group_not_found')
     }
   } else if (group.accountA !== accountId && group.accountB !== accountId) {
@@ -705,6 +756,22 @@ export async function helloInfo(
       messages: Number((pendingMessages.rows[0] as { pending?: number })?.pending ?? 0),
     },
   }
+}
+
+/**
+ * Disappearing messages: delete channel ciphertext older than each channel's
+ * per-channel TTL. Clients prune their local decrypted copies independently;
+ * this removes the server-side ciphertext so it's gone for everyone. Runs on
+ * the hourly housekeeping schedule.
+ */
+export async function pruneChannelMessages(db: Db): Promise<number> {
+  const result = await db.execute(sql`
+    DELETE FROM mls_messages m
+    USING community_channels cc
+    WHERE m.group_id = cc.channel_id
+      AND m.created_at < now() - make_interval(days => cc.message_ttl_days)
+  `)
+  return result.rowCount ?? 0
 }
 
 /** Delete fully-acked or expired mailbox rows. Run periodically. */

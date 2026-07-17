@@ -22,6 +22,8 @@ export type GrantUserCode = Brand<string, 'GrantUserCode'>
 export type RoomCode = Brand<string, 'RoomCode'>
 /** community id ('cm_' + 16 hex) */
 export type CommunityId = Brand<string, 'CommunityId'>
+/** encrypted community media id ('md_' + 32 hex) */
+export type MediaId = Brand<string, 'MediaId'>
 
 const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,50}$/
 const HEX32_RE = /^[0-9a-f]{32}$/
@@ -31,6 +33,7 @@ const APP_USER_ID_RE = /^au_[0-9a-f]{32}$/
 const GRANT_CODE_RE = /^[0-9A-HJKMNP-TV-Z]{8}$/
 const ROOM_CODE_RE = /^[2-9ACDEFGHJKMNPQRTVWXYZ]{4}$/
 const COMMUNITY_ID_RE = /^cm_[0-9a-f]{16}$/
+const MEDIA_ID_RE = /^md_[0-9a-f]{32}$/
 
 export const accountIdSchema = z
   .string()
@@ -79,3 +82,7 @@ export const communityIdSchema = z
   .string()
   .regex(COMMUNITY_ID_RE)
   .transform((v) => v as CommunityId)
+export const mediaIdSchema = z
+  .string()
+  .regex(MEDIA_ID_RE)
+  .transform((v) => v as MediaId)

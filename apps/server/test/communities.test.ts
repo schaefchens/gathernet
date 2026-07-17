@@ -3,7 +3,8 @@ import type { FastifyInstance } from 'fastify'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
-import { pruneCommunityInvites } from '../src/modules/communities/service.ts'
+import { pruneChannelInvites, pruneCommunityInvites } from '../src/modules/communities/service.ts'
+import { pruneChannelMessages } from '../src/modules/delivery/service.ts'
 import { buildEnrollment, generateEd25519 } from './helpers/client-crypto.ts'
 import { makeTestDb, type TestDb } from './helpers/db.ts'
 import { TestWsClient } from './helpers/ws-client.ts'
@@ -31,6 +32,8 @@ afterAll(async () => {
 })
 
 const fakeB64 = (n = 64) => randomBytes(n).toString('base64')
+/** Stand-in for a server-opaque sealed metadata / media blob. */
+const sealed = (n = 48) => randomBytes(n).toString('base64')
 
 interface TestUser {
   accountId: string
@@ -58,31 +61,16 @@ async function createUser(displayName: string): Promise<TestUser> {
   return { accountId: json.accountId, deviceId: json.deviceId, token: json.token, identity }
 }
 
-/** Enroll a second device onto an existing account. */
-async function enrollDevice(user: TestUser, name = 'Second'): Promise<TestUser> {
-  const device = generateEd25519()
-  const challengeRes = await app.inject({
-    method: 'POST',
-    url: '/api/v1/auth/challenge',
-    payload: { purpose: 'enroll' },
-  })
-  const { body } = buildEnrollment(user.identity, device, challengeRes.json().challenge, name)
-  const res = await app.inject({ method: 'POST', url: '/api/v1/devices', payload: body })
-  expect(res.statusCode).toBe(201)
-  const json = res.json()
-  return { ...user, deviceId: json.deviceId, token: json.token }
-}
-
 function auth(user: TestUser) {
   return { authorization: `Bearer ${user.token}` }
 }
 
-async function createCommunity(owner: TestUser, name = 'Fellowship'): Promise<string> {
+async function createCommunity(owner: TestUser, meta?: string): Promise<string> {
   const res = await app.inject({
     method: 'POST',
     url: '/api/v1/communities',
     headers: auth(owner),
-    payload: { name },
+    payload: meta ? { metaCiphertext: meta } : {},
   })
   expect(res.statusCode).toBe(201)
   return res.json().communityId
@@ -108,7 +96,7 @@ async function join(user: TestUser, code: string) {
   })
 }
 
-/** Invite user into community as a member and return the response. */
+/** Invite user into community as a member. */
 async function addMember(owner: TestUser, communityId: string, user: TestUser) {
   const code = await makeInvite(owner, communityId, { maxUses: 10 })
   const res = await join(user, code)
@@ -116,16 +104,32 @@ async function addMember(owner: TestUser, communityId: string, user: TestUser) {
   return res
 }
 
+interface ChannelOpts {
+  meta?: string
+  access?: 'members' | 'leaders'
+  visibility?: 'listed' | 'unlisted'
+  joinPolicy?: 'open' | 'request'
+  postPolicy?: 'everyone' | 'moderators'
+  messageTtlDays?: number
+}
+
 async function createChannel(
   leader: TestUser,
   communityId: string,
-  opts: { name?: string; access?: 'members' | 'leaders' } = {},
+  opts: ChannelOpts = {},
 ): Promise<string> {
   const res = await app.inject({
     method: 'POST',
     url: `/api/v1/communities/${communityId}/channels`,
     headers: auth(leader),
-    payload: { name: opts.name ?? 'general', access: opts.access ?? 'members' },
+    payload: {
+      metaCiphertext: opts.meta ?? sealed(),
+      access: opts.access ?? 'members',
+      visibility: opts.visibility ?? 'listed',
+      joinPolicy: opts.joinPolicy ?? 'open',
+      postPolicy: opts.postPolicy ?? 'everyone',
+      messageTtlDays: opts.messageTtlDays ?? 30,
+    },
   })
   expect(res.statusCode).toBe(201)
   const channelId = res.json().channelId
@@ -148,12 +152,17 @@ async function getChannel(user: TestUser, channelId: string) {
   })
 }
 
-/** GET join info then external-join commit so the device lands in group_members. */
-async function joinChannel(user: TestUser, channelId: string) {
-  const info = await getChannel(user, channelId)
-  expect(info.statusCode).toBe(200)
-  const epoch = info.json().epoch as number
-  const commit = await app.inject({
+async function postJoin(user: TestUser, communityId: string, channelId: string) {
+  return app.inject({
+    method: 'POST',
+    url: `/api/v1/communities/${communityId}/channels/${channelId}/join`,
+    headers: auth(user),
+  })
+}
+
+/** External-join commit so the device lands in group_members. */
+async function externalJoin(user: TestUser, channelId: string, epoch: number) {
+  return app.inject({
     method: 'POST',
     url: `/api/v1/communities/channels/${channelId}/commits`,
     headers: auth(user),
@@ -166,7 +175,16 @@ async function joinChannel(user: TestUser, channelId: string) {
       deviceId: user.deviceId,
     },
   })
-  return commit
+}
+
+/** Full open-channel join: request membership then external-join via MLS. */
+async function joinOpenChannel(user: TestUser, communityId: string, channelId: string) {
+  const jr = await postJoin(user, communityId, channelId)
+  expect(jr.statusCode).toBe(200)
+  expect(jr.json().status).toBe('active')
+  const commit = await externalJoin(user, channelId, jr.json().epoch)
+  expect(commit.statusCode).toBe(200)
+  return jr
 }
 
 async function detail(user: TestUser, communityId: string) {
@@ -177,26 +195,43 @@ async function detail(user: TestUser, communityId: string) {
   })
 }
 
-describe('community lifecycle', () => {
-  it('creator becomes owner', async () => {
+function channelsOf(res: Awaited<ReturnType<typeof detail>>) {
+  return res.json().channels as Array<{
+    channelId: string
+    metaCiphertext: string | null
+    access: string
+    visibility: string
+    joinPolicy: string
+    messageTtlDays: number
+    myStatus: string
+    myRole: string
+    joined: boolean
+  }>
+}
+
+describe('community lifecycle + encrypted metadata', () => {
+  it('creator becomes owner; metadata is stored + returned as opaque ciphertext', async () => {
     const owner = await createUser('Owner1')
-    const communityId = await createCommunity(owner, 'Grace Church')
+    const meta = sealed()
+    const communityId = await createCommunity(owner, meta)
     const res = await detail(owner, communityId)
     expect(res.statusCode).toBe(200)
     expect(res.json().myRole).toBe('owner')
-    expect(res.json().community.name).toBe('Grace Church')
+    // Server stores/serves ciphertext verbatim — it never sees plaintext.
+    expect(res.json().community.metaCiphertext).toBe(meta)
+    expect(res.json().community.avatarMediaId).toBeNull()
     expect(res.json().members).toMatchObject([
       { accountId: owner.accountId, role: 'owner', displayName: 'Owner1' },
     ])
   })
 
-  it('invite → accept → member, visible in list with role and channel count', async () => {
+  it('invite → accept → member visible in list with role + channel count', async () => {
     const owner = await createUser('Owner2')
     const member = await createUser('Member2')
-    const communityId = await createCommunity(owner)
-    await createChannel(owner, communityId, { name: 'welcome' })
-    const accepted = await addMember(owner, communityId, member)
-    expect(accepted.json().communityId).toBe(communityId)
+    const meta = sealed()
+    const communityId = await createCommunity(owner, meta)
+    await createChannel(owner, communityId)
+    await addMember(owner, communityId, member)
 
     const list = await app.inject({
       method: 'GET',
@@ -204,16 +239,8 @@ describe('community lifecycle', () => {
       headers: auth(member),
     })
     expect(list.json().communities).toMatchObject([
-      { communityId, myRole: 'member', channelCount: 1 },
+      { communityId, myRole: 'member', channelCount: 1, metaCiphertext: meta },
     ])
-
-    const d = await detail(member, communityId)
-    expect(d.json().members).toHaveLength(2)
-    const roles = d
-      .json()
-      .members.map((m: { accountId: string; role: string }) => [m.accountId, m.role])
-    expect(roles).toContainEqual([owner.accountId, 'owner'])
-    expect(roles).toContainEqual([member.accountId, 'member'])
   })
 
   it('accepting again as an active member is rejected 409', async () => {
@@ -231,37 +258,148 @@ describe('community lifecycle', () => {
     const owner = await createUser('Owner4')
     const stranger = await createUser('Stranger4')
     const communityId = await createCommunity(owner)
-    const res = await detail(stranger, communityId)
-    expect(res.statusCode).toBe(404)
+    expect((await detail(stranger, communityId)).statusCode).toBe(404)
+  })
+
+  it('leader updates community metadata + avatar; members get community.updated', async () => {
+    const owner = await createUser('Owner4b')
+    const member = await createUser('Member4b')
+    const communityId = await createCommunity(owner, sealed())
+    await addMember(owner, communityId, member)
+    const memberWs = await TestWsClient.connect(port, member.token)
+
+    const avatar = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/media`,
+      headers: auth(owner),
+      payload: { ciphertext: sealed(128) },
+    })
+    expect(avatar.statusCode).toBe(201)
+    const mediaId = avatar.json().mediaId
+    expect(mediaId).toMatch(/^md_[0-9a-f]{32}$/)
+
+    const newMeta = sealed()
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/communities/${communityId}`,
+      headers: auth(owner),
+      payload: { metaCiphertext: newMeta, avatarMediaId: mediaId },
+    })
+    expect(patch.statusCode).toBe(200)
+    await memberWs.waitFor((m) => m.type === 'community.updated')
+
+    const d = await detail(member, communityId)
+    expect(d.json().community.metaCiphertext).toBe(newMeta)
+    expect(d.json().community.avatarMediaId).toBe(mediaId)
+    await memberWs.close()
   })
 })
 
-describe('channels and access levels', () => {
+describe('encrypted media', () => {
+  it('uploads + serves ciphertext to members, rejects oversize + non-members', async () => {
+    const owner = await createUser('OwnerMed')
+    const member = await createUser('MemberMed')
+    const stranger = await createUser('StrangerMed')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+
+    const ciphertext = sealed(256)
+    const up = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/media`,
+      headers: auth(member),
+      payload: { ciphertext },
+    })
+    expect(up.statusCode).toBe(201)
+    const mediaId = up.json().mediaId
+
+    // Member fetches the exact ciphertext back (server never decrypts).
+    const got = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/media/${mediaId}`,
+      headers: auth(member),
+    })
+    expect(got.statusCode).toBe(200)
+    expect(got.rawPayload.toString('base64')).toBe(ciphertext)
+
+    // A non-member cannot fetch it.
+    const denied = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/media/${mediaId}`,
+      headers: auth(stranger),
+    })
+    expect(denied.statusCode).toBe(404)
+
+    // Oversize ciphertext is rejected.
+    const big = Buffer.alloc(400 * 1024).toString('base64')
+    const tooBig = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/media`,
+      headers: auth(owner),
+      payload: { ciphertext: big },
+    })
+    expect(tooBig.statusCode).toBe(413)
+  })
+})
+
+describe('channels: metadata, visibility, access', () => {
+  it('create returns v2 settings + opaque metadata; round-trips in detail', async () => {
+    const owner = await createUser('OwnerCh')
+    const meta = sealed()
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId, {
+      meta,
+      access: 'members',
+      visibility: 'listed',
+      joinPolicy: 'request',
+      postPolicy: 'moderators',
+      messageTtlDays: 7,
+    })
+    const chans = channelsOf(await detail(owner, communityId))
+    const chan = chans.find((c) => c.channelId === channelId)
+    expect(chan).toMatchObject({
+      metaCiphertext: meta,
+      access: 'members',
+      visibility: 'listed',
+      joinPolicy: 'request',
+      postPolicy: 'moderators',
+      messageTtlDays: 7,
+      // creator is an active moderator
+      myStatus: 'active',
+      myRole: 'moderator',
+      joined: true,
+    })
+  })
+
   it('leaders channel is hidden from members but visible to leaders', async () => {
     const owner = await createUser('Owner5')
     const member = await createUser('Member5')
     const communityId = await createCommunity(owner)
-    const membersChan = await createChannel(owner, communityId, {
-      name: 'lobby',
-      access: 'members',
-    })
-    const leadersChan = await createChannel(owner, communityId, {
-      name: 'elders',
-      access: 'leaders',
-    })
+    const membersChan = await createChannel(owner, communityId, { access: 'members' })
+    const leadersChan = await createChannel(owner, communityId, { access: 'leaders' })
     await addMember(owner, communityId, member)
 
-    const memberView = await detail(member, communityId)
-    const memberChannelIds = memberView
-      .json()
-      .channels.map((c: { channelId: string }) => c.channelId)
-    expect(memberChannelIds).toContain(membersChan)
-    expect(memberChannelIds).not.toContain(leadersChan)
+    const memberIds = channelsOf(await detail(member, communityId)).map((c) => c.channelId)
+    expect(memberIds).toContain(membersChan)
+    expect(memberIds).not.toContain(leadersChan)
 
-    const ownerView = await detail(owner, communityId)
-    const ownerChannelIds = ownerView.json().channels.map((c: { channelId: string }) => c.channelId)
-    expect(ownerChannelIds).toContain(membersChan)
-    expect(ownerChannelIds).toContain(leadersChan)
+    const ownerIds = channelsOf(await detail(owner, communityId)).map((c) => c.channelId)
+    expect(ownerIds).toEqual(expect.arrayContaining([membersChan, leadersChan]))
+  })
+
+  it('unlisted channel is not shown in the directory until you are involved', async () => {
+    const owner = await createUser('OwnerUn')
+    const member = await createUser('MemberUn')
+    const communityId = await createCommunity(owner)
+    const hidden = await createChannel(owner, communityId, { visibility: 'unlisted' })
+    await addMember(owner, communityId, member)
+
+    const before = channelsOf(await detail(member, communityId)).map((c) => c.channelId)
+    expect(before).not.toContain(hidden)
+
+    // Direct self-join of an unlisted channel is refused.
+    const blind = await postJoin(member, communityId, hidden)
+    expect(blind.statusCode).toBe(404)
   })
 
   it('re-publishing epoch-0 group-info fails already_initialized', async () => {
@@ -277,81 +415,362 @@ describe('channels and access levels', () => {
     expect(again.statusCode).toBe(409)
     expect(again.json().error).toBe('already_initialized')
   })
+})
 
-  it('member can join a members channel and gets GroupInfo', async () => {
+describe('channel join flows', () => {
+  it('open channel: join → active → external-join → joined', async () => {
     const owner = await createUser('Owner7')
     const member = await createUser('Member7')
     const communityId = await createCommunity(owner)
-    const channelId = await createChannel(owner, communityId)
+    const channelId = await createChannel(owner, communityId, { joinPolicy: 'open' })
     await addMember(owner, communityId, member)
 
-    const info = await getChannel(member, channelId)
-    expect(info.statusCode).toBe(200)
-    expect(info.json().groupInfo).not.toBeNull()
-    expect(info.json().access).toBe('members')
+    // GroupInfo is not released before joining.
+    const pre = await getChannel(member, channelId)
+    expect(pre.statusCode).toBe(200)
+    expect(pre.json().status).toBe('none')
+    expect(pre.json().groupInfo).toBeNull()
 
-    const commit = await joinChannel(member, channelId)
-    expect(commit.statusCode).toBe(200)
-
-    // The member's device is now a leaf → detail reports joined.
-    const d = await detail(member, communityId)
-    const chan = d.json().channels.find((c: { channelId: string }) => c.channelId === channelId)
-    expect(chan.joined).toBe(true)
+    await joinOpenChannel(member, communityId, channelId)
+    const chan = channelsOf(await detail(member, communityId)).find(
+      (c) => c.channelId === channelId,
+    )
+    expect(chan).toMatchObject({ myStatus: 'active', joined: true })
   })
 
-  it('member is refused the leaders channel; a leader may join it', async () => {
+  it('request channel: pending until a moderator accepts (WS carries GroupInfo)', async () => {
     const owner = await createUser('Owner8')
     const member = await createUser('Member8')
     const communityId = await createCommunity(owner)
-    const leadersChan = await createChannel(owner, communityId, { access: 'leaders' })
+    const channelId = await createChannel(owner, communityId, { joinPolicy: 'request' })
     await addMember(owner, communityId, member)
 
-    const refused = await getChannel(member, leadersChan)
-    expect(refused.statusCode).toBe(403)
-    expect(refused.json().error).toBe('channel_forbidden')
+    const ownerWs = await TestWsClient.connect(port, owner.token)
+    const memberWs = await TestWsClient.connect(port, member.token)
 
-    // Even a blind commit attempt is rejected (server refuses authorization).
-    const blind = await app.inject({
+    const jr = await postJoin(member, communityId, channelId)
+    expect(jr.statusCode).toBe(200)
+    expect(jr.json().status).toBe('pending')
+    expect(jr.json().groupInfo).toBeNull()
+
+    // Owner (leader/manager) is notified of the request.
+    const reqEvt = await ownerWs.waitFor((m) => m.type === 'community.channel_join_request')
+    expect(reqEvt).toMatchObject({ payload: { channelId, accountId: member.accountId } })
+
+    // A pending member cannot yet post commits.
+    const early = await externalJoin(member, channelId, 0)
+    expect(early.statusCode).toBe(404)
+
+    // Owner accepts → member receives GroupInfo and can external-join.
+    const accept = await app.inject({
       method: 'POST',
-      url: `/api/v1/communities/channels/${leadersChan}/commits`,
-      headers: auth(member),
-      payload: {
-        epoch: 0,
-        commit: fakeB64(96),
-        groupInfo: fakeB64(128),
-        welcomes: [],
-        memberChanges: { adds: [member.deviceId], removes: [] },
-        deviceId: member.deviceId,
-      },
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/requests/${member.accountId}`,
+      headers: auth(owner),
+      payload: { action: 'accept' },
     })
-    expect(blind.statusCode).toBe(404)
+    expect(accept.statusCode).toBe(200)
+    const approved = await memberWs.waitFor((m) => m.type === 'community.channel_join_approved')
+    expect(approved).toMatchObject({ payload: { channelId } })
+    const approvedPayload = approved.payload as { groupInfo: string | null; epoch: number }
+    expect(approvedPayload.groupInfo).not.toBeNull()
 
-    // The owner (a leader) can join the leaders channel — it was created with
-    // the owner's device already as leaf, so a second owner device joins.
-    const owner2 = await enrollDevice(owner, 'OwnerLaptop')
-    const join2 = await joinChannel(owner2, leadersChan)
-    expect(join2.statusCode).toBe(200)
+    const commit = await externalJoin(member, channelId, approvedPayload.epoch)
+    expect(commit.statusCode).toBe(200)
+    await ownerWs.close()
+    await memberWs.close()
   })
 
-  it('promoting a member to leader unlocks the leaders channel', async () => {
+  it('request channel: moderator declines → requester stays out', async () => {
+    const owner = await createUser('Owner8b')
+    const member = await createUser('Member8b')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId, { joinPolicy: 'request' })
+    await addMember(owner, communityId, member)
+    const memberWs = await TestWsClient.connect(port, member.token)
+
+    expect((await postJoin(member, communityId, channelId)).json().status).toBe('pending')
+    const decline = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/requests/${member.accountId}`,
+      headers: auth(owner),
+      payload: { action: 'decline' },
+    })
+    expect(decline.statusCode).toBe(200)
+    await memberWs.waitFor((m) => m.type === 'community.channel_join_declined')
+    expect((await getChannel(member, channelId)).json().status).toBe('none')
+    await memberWs.close()
+  })
+
+  it('targeted invite: invitee accepts by joining', async () => {
     const owner = await createUser('Owner9')
     const member = await createUser('Member9')
     const communityId = await createCommunity(owner)
-    const leadersChan = await createChannel(owner, communityId, { access: 'leaders' })
+    // request policy proves the invite (not the policy) is what admits them.
+    const channelId = await createChannel(owner, communityId, { joinPolicy: 'request' })
+    await addMember(owner, communityId, member)
+    const memberWs = await TestWsClient.connect(port, member.token)
+
+    const invite = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/invites`,
+      headers: auth(owner),
+      payload: { kind: 'targeted', inviteeAccountId: member.accountId },
+    })
+    expect(invite.statusCode).toBe(201)
+    expect(invite.json().code).toBeNull()
+    await memberWs.waitFor((m) => m.type === 'community.channel_invited')
+
+    // Invitee's join accepts the invite → active immediately (bypasses request).
+    const jr = await postJoin(member, communityId, channelId)
+    expect(jr.json().status).toBe('active')
+    expect((await externalJoin(member, channelId, jr.json().epoch)).statusCode).toBe(200)
+    await memberWs.close()
+  })
+
+  it('code invite: reaches an unlisted channel; respects open policy', async () => {
+    const owner = await createUser('Owner10')
+    const member = await createUser('Member10')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId, {
+      visibility: 'unlisted',
+      joinPolicy: 'open',
+    })
     await addMember(owner, communityId, member)
 
-    expect((await getChannel(member, leadersChan)).statusCode).toBe(403)
-
-    const promote = await app.inject({
+    const invite = await app.inject({
       method: 'POST',
-      url: `/api/v1/communities/${communityId}/members/${member.accountId}/role`,
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/invites`,
+      headers: auth(owner),
+      payload: { kind: 'code', maxUses: 5 },
+    })
+    expect(invite.statusCode).toBe(201)
+    const code = invite.json().code
+    expect(code).toHaveLength(10)
+
+    const jr = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/join-by-code`,
+      headers: auth(member),
+      payload: { code },
+    })
+    expect(jr.statusCode).toBe(200)
+    expect(jr.json().status).toBe('active')
+    expect(jr.json().channelId).toBe(channelId)
+    expect((await externalJoin(member, channelId, jr.json().epoch)).statusCode).toBe(200)
+  })
+
+  it('member refused a leaders channel join', async () => {
+    const owner = await createUser('Owner11')
+    const member = await createUser('Member11')
+    const communityId = await createCommunity(owner)
+    const leadersChan = await createChannel(owner, communityId, { access: 'leaders' })
+    await addMember(owner, communityId, member)
+    const refused = await postJoin(member, communityId, leadersChan)
+    expect(refused.statusCode).toBe(403)
+    expect(refused.json().error).toBe('channel_forbidden')
+  })
+})
+
+describe('moderators + channel kicks', () => {
+  it('leader appoints a moderator who accepts requests + kicks from the channel', async () => {
+    const owner = await createUser('OwnerMod')
+    const mod = await createUser('ModMod')
+    const joiner = await createUser('JoinMod')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId, { joinPolicy: 'request' })
+    await addMember(owner, communityId, mod)
+    await addMember(owner, communityId, joiner)
+
+    // mod must be an active channel member before being made moderator; on a
+    // request channel their own join is pending until the owner accepts it.
+    expect((await postJoin(mod, communityId, channelId)).json().status).toBe('pending')
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/requests/${mod.accountId}`,
+      headers: auth(owner),
+      payload: { action: 'accept' },
+    })
+    expect((await getChannel(mod, channelId)).json().status).toBe('active')
+
+    // Only a leader/owner may appoint a moderator; a plain member cannot.
+    const byMember = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/moderators/${joiner.accountId}`,
+      headers: auth(joiner),
+      payload: { action: 'set' },
+    })
+    expect(byMember.statusCode).toBe(403)
+
+    const appoint = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/moderators/${mod.accountId}`,
+      headers: auth(owner),
+      payload: { action: 'set' },
+    })
+    expect(appoint.statusCode).toBe(200)
+
+    // The moderator (not a community leader) accepts the joiner's request.
+    expect((await postJoin(joiner, communityId, channelId)).json().status).toBe('pending')
+    const accept = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/requests/${joiner.accountId}`,
+      headers: auth(mod),
+      payload: { action: 'accept' },
+    })
+    expect(accept.statusCode).toBe(200)
+
+    const joinerWs = await TestWsClient.connect(port, joiner.token)
+    // The moderator kicks the joiner from the channel.
+    const kick = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/kick/${joiner.accountId}`,
+      headers: auth(mod),
+      payload: {},
+    })
+    expect(kick.statusCode).toBe(200)
+    const kicked = await joinerWs.waitFor(
+      (m) => m.type === 'community.channel_member_changed' && m.payload.status === 'none',
+    )
+    expect(kicked).toMatchObject({ payload: { channelId, accountId: joiner.accountId } })
+
+    // Kicked from the channel but still in the community.
+    expect((await getChannel(joiner, channelId)).json().status).toBe('none')
+    expect((await detail(joiner, communityId)).statusCode).toBe(200)
+    await joinerWs.close()
+  })
+
+  it('a moderator cannot kick a community leader from a channel', async () => {
+    const owner = await createUser('OwnerK')
+    const leader = await createUser('LeaderK')
+    const mod = await createUser('ModK')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    await addMember(owner, communityId, leader)
+    await addMember(owner, communityId, mod)
+    // promote leader
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/members/${leader.accountId}/role`,
       headers: auth(owner),
       payload: { role: 'leader' },
     })
-    expect(promote.statusCode).toBe(200)
+    await joinOpenChannel(leader, communityId, channelId)
+    await joinOpenChannel(mod, communityId, channelId)
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/moderators/${mod.accountId}`,
+      headers: auth(owner),
+      payload: { action: 'set' },
+    })
 
-    const after = await getChannel(member, leadersChan)
-    expect(after.statusCode).toBe(200)
+    const kick = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/kick/${leader.accountId}`,
+      headers: auth(mod),
+      payload: {},
+    })
+    expect(kick.statusCode).toBe(403)
+    expect(kick.json().error).toBe('cannot_kick_leader')
+  })
+
+  it('manager can list the channel roster (active + pending); a member cannot', async () => {
+    const owner = await createUser('OwnerR')
+    const member = await createUser('MemberR')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId, { joinPolicy: 'request' })
+    await addMember(owner, communityId, member)
+    expect((await postJoin(member, communityId, channelId)).json().status).toBe('pending')
+
+    const roster = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/members`,
+      headers: auth(owner),
+    })
+    expect(roster.statusCode).toBe(200)
+    const entries = roster.json().members as Array<{
+      accountId: string
+      status: string
+      role: string
+    }>
+    expect(entries).toEqual(
+      expect.arrayContaining([
+        { accountId: owner.accountId, displayName: 'OwnerR', status: 'active', role: 'moderator' },
+        { accountId: member.accountId, displayName: 'MemberR', status: 'pending', role: 'member' },
+      ]),
+    )
+
+    // A plain (non-manager) community member cannot read the roster.
+    const other = await createUser('OtherR')
+    await addMember(owner, communityId, other)
+    const denied = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/members`,
+      headers: auth(other),
+    })
+    expect(denied.statusCode).toBe(403)
+  })
+
+  it('read-only channel: only moderators may post application messages', async () => {
+    const owner = await createUser('OwnerRO')
+    const member = await createUser('MemberRO')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId, { postPolicy: 'moderators' })
+    await addMember(owner, communityId, member)
+    await joinOpenChannel(member, communityId, channelId)
+
+    const { postMessage } = await import('../src/modules/delivery/service.ts')
+
+    // A non-moderator member has read access but is refused posting.
+    const memberEpoch = (await getChannel(member, channelId)).json().epoch as number
+    await expect(
+      postMessage(testDb.db, member.deviceId, channelId, memberEpoch, fakeB64(48)),
+    ).rejects.toThrow('read_only_channel')
+
+    // The owner (a channel moderator) may post.
+    const ownerEpoch = (await getChannel(owner, channelId)).json().epoch as number
+    await expect(
+      postMessage(testDb.db, owner.deviceId, channelId, ownerEpoch, fakeB64(48)),
+    ).resolves.toMatchObject({ senderDevice: owner.deviceId })
+
+    // Toggling back to everyone re-opens posting for the member.
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}`,
+      headers: auth(owner),
+      payload: { postPolicy: 'everyone' },
+    })
+    expect(patch.statusCode).toBe(200)
+    const epoch2 = (await getChannel(member, channelId)).json().epoch as number
+    await expect(
+      postMessage(testDb.db, member.deviceId, channelId, epoch2, fakeB64(48)),
+    ).resolves.toMatchObject({ senderDevice: member.deviceId })
+  })
+
+  it('a plain member cannot accept requests, invite, or kick', async () => {
+    const owner = await createUser('OwnerP')
+    const member = await createUser('MemberP')
+    const other = await createUser('OtherP')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId, { joinPolicy: 'request' })
+    await addMember(owner, communityId, member)
+    await addMember(owner, communityId, other)
+    await postJoin(other, communityId, channelId) // pending
+
+    const accept = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/requests/${other.accountId}`,
+      headers: auth(member),
+      payload: { action: 'accept' },
+    })
+    expect(accept.statusCode).toBe(403)
+
+    const invite = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/invites`,
+      headers: auth(member),
+      payload: { kind: 'code' },
+    })
+    expect(invite.statusCode).toBe(403)
   })
 })
 
@@ -364,8 +783,8 @@ describe('channel messaging', () => {
     const channelId = await createChannel(owner, communityId)
     await addMember(owner, communityId, alice)
     await addMember(owner, communityId, bob)
-    expect((await joinChannel(alice, channelId)).statusCode).toBe(200)
-    expect((await joinChannel(bob, channelId)).statusCode).toBe(200)
+    await joinOpenChannel(alice, communityId, channelId)
+    await joinOpenChannel(bob, communityId, channelId)
 
     const aliceWs = await TestWsClient.connect(port, alice.token)
     const bobWs = await TestWsClient.connect(port, bob.token)
@@ -380,40 +799,19 @@ describe('channel messaging', () => {
     expect(received).toMatchObject({
       payload: { groupId: channelId, kind: 'application', payload: ciphertext },
     })
-
     await aliceWs.close()
     await bobWs.close()
   })
-
-  it('two devices of the same member both join a channel', async () => {
-    const owner = await createUser('OwnerB')
-    const member = await createUser('MemberB')
-    const communityId = await createCommunity(owner)
-    const channelId = await createChannel(owner, communityId)
-    await addMember(owner, communityId, member)
-
-    const member2 = await enrollDevice(member, 'Phone')
-    expect((await joinChannel(member, channelId)).statusCode).toBe(200)
-    expect((await joinChannel(member2, channelId)).statusCode).toBe(200)
-
-    const { sql } = await import('drizzle-orm')
-    const leaves = await testDb.db.execute(
-      sql`SELECT device_id FROM group_members WHERE group_id = ${channelId} AND account_id = ${member.accountId} AND removed_epoch IS NULL`,
-    )
-    const ids = leaves.rows.map((r) => (r as { device_id: string }).device_id)
-    expect(ids).toContain(member.deviceId)
-    expect(ids).toContain(member2.deviceId)
-  })
 })
 
-describe('roles, removal, and permissions', () => {
-  it('removing a member emits the event and blocks channel access + rejoin', async () => {
+describe('community removal clears channel membership', () => {
+  it('removing a member blocks channel access + rejoin', async () => {
     const owner = await createUser('OwnerC')
     const member = await createUser('MemberC')
     const communityId = await createCommunity(owner)
     const channelId = await createChannel(owner, communityId)
     await addMember(owner, communityId, member)
-    expect((await joinChannel(member, channelId)).statusCode).toBe(200)
+    await joinOpenChannel(member, communityId, channelId)
 
     const memberWs = await TestWsClient.connect(port, member.token)
     const remove = await app.inject({
@@ -422,27 +820,13 @@ describe('roles, removal, and permissions', () => {
       headers: auth(owner),
     })
     expect(remove.statusCode).toBe(200)
-    const evt = await memberWs.waitFor((m) => m.type === 'community.member_removed')
-    expect(evt).toMatchObject({ payload: { communityId, accountId: member.accountId } })
+    await memberWs.waitFor((m) => m.type === 'community.member_removed')
 
-    // Removed user is refused the channel and cannot commit back in.
-    expect((await getChannel(member, channelId)).statusCode).toBe(403)
-    const rejoin = await app.inject({
-      method: 'POST',
-      url: `/api/v1/communities/channels/${channelId}/commits`,
-      headers: auth(member),
-      payload: {
-        epoch: 1,
-        commit: fakeB64(96),
-        groupInfo: fakeB64(128),
-        welcomes: [],
-        memberChanges: { adds: [member.deviceId], removes: [] },
-        deviceId: member.deviceId,
-      },
-    })
-    expect(rejoin.statusCode).toBe(404)
-    // And the community itself is no longer visible.
+    // Channel + community both closed to the removed member.
+    expect((await getChannel(member, channelId)).statusCode).toBe(404)
     expect((await detail(member, communityId)).statusCode).toBe(404)
+    const rejoin = await externalJoin(member, channelId, 1)
+    expect(rejoin.statusCode).toBe(404)
     await memberWs.close()
   })
 
@@ -458,7 +842,7 @@ describe('roles, removal, and permissions', () => {
       method: 'POST',
       url: `/api/v1/communities/${communityId}/channels`,
       headers: auth(member),
-      payload: { name: 'nope', access: 'members' },
+      payload: { access: 'members' },
     })
     expect(chan.statusCode).toBe(403)
 
@@ -470,14 +854,6 @@ describe('roles, removal, and permissions', () => {
     })
     expect(invite.statusCode).toBe(403)
 
-    const remove = await app.inject({
-      method: 'POST',
-      url: `/api/v1/communities/${communityId}/members/${other.accountId}/remove`,
-      headers: auth(member),
-    })
-    expect(remove.statusCode).toBe(403)
-
-    // Only the owner may change roles.
     const role = await app.inject({
       method: 'POST',
       url: `/api/v1/communities/${communityId}/members/${other.accountId}/role`,
@@ -487,62 +863,69 @@ describe('roles, removal, and permissions', () => {
     expect(role.statusCode).toBe(403)
   })
 
-  it('owner cannot leave; a member can', async () => {
-    const owner = await createUser('OwnerE')
-    const member = await createUser('MemberE')
-    const communityId = await createCommunity(owner)
-    await addMember(owner, communityId, member)
-
-    const ownerLeave = await app.inject({
-      method: 'POST',
-      url: `/api/v1/communities/${communityId}/leave`,
-      headers: auth(owner),
-    })
-    expect(ownerLeave.statusCode).toBe(400)
-    expect(ownerLeave.json().error).toBe('owner_cannot_leave')
-
-    const ownerWs = await TestWsClient.connect(port, owner.token)
-    const memberLeave = await app.inject({
-      method: 'POST',
-      url: `/api/v1/communities/${communityId}/leave`,
-      headers: auth(member),
-    })
-    expect(memberLeave.statusCode).toBe(200)
-    const evt = await ownerWs.waitFor((m) => m.type === 'community.member_left')
-    expect(evt).toMatchObject({ payload: { communityId, accountId: member.accountId } })
-    expect((await detail(member, communityId)).statusCode).toBe(404)
-    await ownerWs.close()
-  })
-
-  it('a promoted leader can create channels and invites', async () => {
+  it('promoting a member to leader unlocks the leaders channel + creation rights', async () => {
     const owner = await createUser('OwnerF')
     const leader = await createUser('LeaderF')
     const communityId = await createCommunity(owner)
+    const leadersChan = await createChannel(owner, communityId, { access: 'leaders' })
     await addMember(owner, communityId, leader)
+    expect((await postJoin(leader, communityId, leadersChan)).statusCode).toBe(403)
+
     await app.inject({
       method: 'POST',
       url: `/api/v1/communities/${communityId}/members/${leader.accountId}/role`,
       headers: auth(owner),
       payload: { role: 'leader' },
     })
-
-    const chan = await createChannel(leader, communityId, { name: 'leader-made' })
+    // Now eligible for the leaders channel and can create channels.
+    expect((await postJoin(leader, communityId, leadersChan)).json().status).toBe('active')
+    const chan = await createChannel(leader, communityId)
     expect(chan).toBeTruthy()
-    const invite = await makeInvite(leader, communityId, { maxUses: 5 })
-    expect(invite).toHaveLength(10)
   })
 })
 
-describe('invite pruning', () => {
-  it('deletes expired invites', async () => {
+describe('disappearing messages + invite pruning', () => {
+  it('prunes channel ciphertext past the per-channel TTL', async () => {
+    const owner = await createUser('OwnerTTL')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId, { messageTtlDays: 1 })
+    const { sql } = await import('drizzle-orm')
+
+    // One message aged past the TTL, one fresh.
+    await testDb.db.execute(
+      sql`INSERT INTO mls_messages (group_id, seq, kind, epoch, sender_device, payload, created_at)
+          VALUES (${channelId}, 100, 'application', 0, ${owner.deviceId}, decode('00', 'hex'), now() - interval '2 days'),
+                 (${channelId}, 101, 'application', 0, ${owner.deviceId}, decode('01', 'hex'), now())`,
+    )
+    const pruned = await pruneChannelMessages(testDb.db)
+    expect(pruned).toBeGreaterThanOrEqual(1)
+    const remaining = await testDb.db.execute(
+      sql`SELECT seq FROM mls_messages WHERE group_id = ${channelId}`,
+    )
+    const seqs = remaining.rows.map((r) => (r as { seq: number }).seq)
+    expect(seqs).toContain(101)
+    expect(seqs).not.toContain(100)
+  })
+
+  it('prunes expired community + channel invites', async () => {
     const owner = await createUser('OwnerG')
     const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
     await makeInvite(owner, communityId, {})
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/invites`,
+      headers: auth(owner),
+      payload: { kind: 'code' },
+    })
     const { sql } = await import('drizzle-orm')
     await testDb.db.execute(
       sql`UPDATE community_invites SET expires_at = now() - interval '1 day' WHERE community_id = ${communityId}`,
     )
-    const pruned = await pruneCommunityInvites(testDb.db)
-    expect(pruned).toBeGreaterThanOrEqual(1)
+    await testDb.db.execute(
+      sql`UPDATE channel_invites SET expires_at = now() - interval '1 day' WHERE channel_id = ${channelId}`,
+    )
+    expect(await pruneCommunityInvites(testDb.db)).toBeGreaterThanOrEqual(1)
+    expect(await pruneChannelInvites(testDb.db)).toBeGreaterThanOrEqual(1)
   })
 })

@@ -13,6 +13,21 @@ export const REQUEST_TIMEOUT_MS = 15_000
 export const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 export const INVITE_CODE_LENGTH = 10
 
+/**
+ * Communities v2. Channel display metadata (title/emoji/markdown-description)
+ * and community/channel avatars are sealed under a per-community 32-byte
+ * K_meta the server never sees; it stores/serves only ciphertext. K_meta rides
+ * out-of-band in the invite payload fragment (`gathernet:community:<code>#<k>`).
+ */
+export const COMMUNITY_QR_PREFIX = 'gathernet:community:'
+/** Encrypted avatar ciphertext cap (server rejects larger blobs). */
+export const COMMUNITY_MEDIA_MAX_BYTES = 350 * 1024
+/** Allowed disappearing-message windows (days); 1 == 24h. */
+export const CHANNEL_MESSAGE_TTL_DAYS = [1, 3, 7, 14, 30] as const
+export const CHANNEL_MESSAGE_TTL_DEFAULT_DAYS = 30
+/** Sealed metadata blob cap (title+emoji+markdown description, base64). */
+export const COMMUNITY_META_MAX_B64 = 8192
+
 /** MLS key package pool per device. */
 export const KEY_PACKAGE_TARGET = 50
 export const KEY_PACKAGE_REPLENISH_BELOW = 20

@@ -1,0 +1,2 @@
+CREATE TYPE "public"."channel_post_policy" AS ENUM('everyone', 'moderators');--> statement-breakpoint
+ALTER TABLE "community_channels" ADD COLUMN "post_policy" "channel_post_policy" DEFAULT 'everyone' NOT NULL;
