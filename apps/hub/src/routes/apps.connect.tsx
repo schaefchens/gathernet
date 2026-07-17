@@ -12,8 +12,8 @@ export const Route = createFileRoute('/apps/connect')({ component: ConnectScreen
 
 type Step =
   | { kind: 'entry' }
-  | { kind: 'preview'; preview: GrantCodePreview }
-  | { kind: 'backfill'; preview: GrantCodePreview }
+  | { kind: 'preview'; preview: GrantCodePreview; scannedPk: string | null }
+  | { kind: 'backfill'; preview: GrantCodePreview; scannedPk: string | null }
   | { kind: 'success' }
   | { kind: 'denied' }
 
@@ -28,15 +28,20 @@ function ConnectScreen() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const lookUp = async (rawCode: string) => {
+  /**
+   * `scannedPk` is the app's ECIES ephemeral public key delivered OUT OF BAND
+   * in the scanned QR (`gathernet:grant:<userCode>:<pk>`). It is null for
+   * manual code entry, where no key travels alongside the code.
+   */
+  const lookUp = async (userCode: string, scannedPk: string | null) => {
     setBusy(true)
     setError(null)
     try {
       const preview = await api<GrantCodePreview>(
         'GET',
-        `/api/v1/apps/grant-codes/${normalizeCode(rawCode)}`,
+        `/api/v1/apps/grant-codes/${normalizeCode(userCode)}`,
       )
-      setStep({ kind: 'preview', preview })
+      setStep({ kind: 'preview', preview, scannedPk })
     } catch {
       setError(t('apps.codeInvalid'))
     } finally {
@@ -44,25 +49,30 @@ function ConnectScreen() {
     }
   }
 
-  const approve = async (preview: GrantCodePreview, options?: { withoutStorageKey?: boolean }) => {
+  const approve = async (
+    preview: GrantCodePreview,
+    scannedPk: string | null,
+    options?: { withoutStorageKey?: boolean },
+  ) => {
     setBusy(true)
     setError(null)
     try {
       const body: { scopes: string[]; sealedStorageKey?: string; hubEphemeralPk?: string } = {
         scopes: preview.requestedScopes,
       }
-      if (
-        !options?.withoutStorageKey &&
-        preview.requestedScopes.includes('storage') &&
-        preview.appEphemeralPk
-      ) {
+      // Seal the per-app storage key ONLY to the pk delivered out-of-band via
+      // the scanned QR — never to preview.appEphemeralPk, which the untrusted
+      // server relays and could substitute. Manual code entry (no scanned pk)
+      // degrades safely to no storage key: the app still gets identity/rooms,
+      // and the popup flow remains the way to hand off a storage key.
+      if (!options?.withoutStorageKey && preview.requestedScopes.includes('storage') && scannedPk) {
         const key = await getPerAppStorageKey(preview.app.pubId)
         if (!key) {
-          setStep({ kind: 'backfill', preview })
+          setStep({ kind: 'backfill', preview, scannedPk })
           setBusy(false)
           return
         }
-        const sealed = await eciesSeal(preview.appEphemeralPk, key)
+        const sealed = await eciesSeal(scannedPk, key)
         body.sealedStorageKey = sealed.sealedB64
         body.hubEphemeralPk = sealed.senderPkB64
       }
@@ -94,7 +104,7 @@ function ConnectScreen() {
     <div className="space-y-4 max-w-md mx-auto">
       <h1 className="font-display text-3xl">{t('apps.connectTitle')}</h1>
 
-      {step.kind === 'entry' && <EntryTabs busy={busy} error={error} onCode={lookUp} />}
+      {step.kind === 'entry' && <EntryTabs busy={busy} error={error} onLookUp={lookUp} />}
 
       {step.kind === 'preview' && (
         <ConsentCard
@@ -102,15 +112,15 @@ function ConnectScreen() {
           scopes={step.preview.requestedScopes}
           busy={busy}
           error={error}
-          onApprove={() => void approve(step.preview)}
+          onApprove={() => void approve(step.preview, step.scannedPk)}
           onDeny={() => void deny(step.preview)}
         />
       )}
 
       {step.kind === 'backfill' && (
         <BackfillPhrase
-          onComplete={() => void approve(step.preview)}
-          onSkip={() => void approve(step.preview, { withoutStorageKey: true })}
+          onComplete={() => void approve(step.preview, step.scannedPk)}
+          onSkip={() => void approve(step.preview, step.scannedPk, { withoutStorageKey: true })}
         />
       )}
 
@@ -138,7 +148,7 @@ function ConnectScreen() {
 function EntryTabs(props: {
   busy: boolean
   error: string | null
-  onCode(code: string): Promise<void>
+  onLookUp(userCode: string, scannedPk: string | null): Promise<void>
 }) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<'code' | 'scan'>('code')
@@ -168,7 +178,8 @@ function EntryTabs(props: {
           className="card space-y-4"
           onSubmit={(e) => {
             e.preventDefault()
-            void props.onCode(code)
+            // Manual entry carries no out-of-band key → no storage-key handoff.
+            void props.onLookUp(code, null)
           }}
         >
           <input
@@ -196,7 +207,14 @@ function EntryTabs(props: {
           <p className="text-sm text-ink-soft">{t('apps.scanHint')}</p>
           <QrScanner
             prefixes={[GRANT_QR_PREFIX]}
-            onCode={(payload) => void props.onCode(payload)}
+            onCode={(payload) => {
+              // Scanned payload is `<userCode>:<ephemeralPkB64>` — the app's
+              // ECIES key arrives out-of-band here, so the server can't swap it.
+              const sep = payload.indexOf(':')
+              const userCode = sep === -1 ? payload : payload.slice(0, sep)
+              const scannedPk = sep === -1 ? null : payload.slice(sep + 1)
+              void props.onLookUp(userCode, scannedPk)
+            }}
           />
           {props.error && <p className="text-sm text-danger">{props.error}</p>}
         </div>

@@ -169,5 +169,50 @@
   "pwa": {
     "updateAvailable": "Eine neue Version von Gathernet ist verfügbar.",
     "reload": "Aktualisieren"
+  },
+  "communities": {
+    "title": "Gemeinschaften",
+    "empty": "Du bist noch in keiner Gemeinschaft. Erstelle eine oder tritt mit einem Code bei.",
+    "create": "Gemeinschaft erstellen",
+    "join": "Beitreten",
+    "joinWithCode": "Mit Code beitreten",
+    "codePlaceholder": "Einladungscode der Gemeinschaft",
+    "namePlaceholder": "Name der Gemeinschaft",
+    "descriptionPlaceholder": "Worum geht es in dieser Gemeinschaft?",
+    "invalidCode": "Der Code ist ungültig, abgelaufen oder bereits verwendet.",
+    "alreadyMember": "Du bist bereits Mitglied dieser Gemeinschaft.",
+    "notFound": "Gemeinschaft nicht gefunden.",
+    "channelCount": "{{count}} Kanäle",
+    "channels": "Kanäle",
+    "noChannels": "Noch keine Kanäle.",
+    "selectChannel": "Wähle einen Kanal, um zu chatten.",
+    "members": "Mitglieder",
+    "you": "du",
+    "addChannel": "Kanal hinzufügen",
+    "createChannel": "Kanal erstellen",
+    "channelNamePlaceholder": "Kanalname",
+    "deleteChannelConfirm": "#{{name}} löschen? Der Verlauf wird für alle entfernt.",
+    "channelJoining": "Kanal wird beigetreten…",
+    "channelPending": "Verschlüsselung wird eingerichtet…",
+    "channelLocked": "Dies ist ein Kanal nur für Leiter. Du hast keinen Zugriff.",
+    "invite": "Einladen",
+    "inviteHint": "Teile diesen Code mit Menschen, die du in der Gemeinschaft haben möchtest. Nur auf Einladung — es gibt kein öffentliches Verzeichnis.",
+    "newInvite": "Neuer Einladungscode",
+    "scan": "Scannen",
+    "promote": "Zum Leiter machen",
+    "demote": "Leiterrolle entfernen",
+    "remove": "Entfernen",
+    "removeConfirm": "{{name}} aus der Gemeinschaft entfernen? Der Zugriff auf alle Kanäle geht verloren.",
+    "leave": "Gemeinschaft verlassen",
+    "leaveConfirm": "Diese Gemeinschaft verlassen?",
+    "access": {
+      "members": "Alle Mitglieder",
+      "leaders": "Nur Leiter"
+    },
+    "roles": {
+      "owner": "Eigentümer",
+      "leader": "Leiter",
+      "member": "Mitglied"
+    }
   }
 }

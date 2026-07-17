@@ -25,6 +25,23 @@ wsClient.on('session.revoked', () => {
   void useSession.getState().forgetDevice()
 })
 
+// Community membership/role/channel changes → refresh the list + the affected
+// community detail so member panels, roles, and channel lists stay live.
+const invalidateCommunity = (communityId: string) => {
+  void queryClient.invalidateQueries({ queryKey: ['communities'] })
+  void queryClient.invalidateQueries({ queryKey: ['community', communityId] })
+}
+for (const event of [
+  'community.member_joined',
+  'community.member_left',
+  'community.member_removed',
+  'community.role_changed',
+  'community.channel_created',
+  'community.channel_deleted',
+] as const) {
+  wsClient.on(event, (m) => invalidateCommunity(m.payload.communityId))
+}
+
 const router = createRouter({ routeTree })
 
 declare module '@tanstack/react-router' {

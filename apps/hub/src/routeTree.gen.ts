@@ -12,7 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AuthorizeRouteImport } from './routes/authorize'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CommunitiesIndexRouteImport } from './routes/communities.index'
 import { Route as FriendsAddRouteImport } from './routes/friends.add'
+import { Route as CommunitiesCommunityIdRouteImport } from './routes/communities.$communityId'
 import { Route as ChatFriendIdRouteImport } from './routes/chat.$friendId'
 import { Route as AppsConnectRouteImport } from './routes/apps.connect'
 
@@ -31,9 +33,19 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CommunitiesIndexRoute = CommunitiesIndexRouteImport.update({
+  id: '/communities/',
+  path: '/communities/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FriendsAddRoute = FriendsAddRouteImport.update({
   id: '/friends/add',
   path: '/friends/add',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CommunitiesCommunityIdRoute = CommunitiesCommunityIdRouteImport.update({
+  id: '/communities/$communityId',
+  path: '/communities/$communityId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatFriendIdRoute = ChatFriendIdRouteImport.update({
@@ -53,7 +65,9 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/apps/connect': typeof AppsConnectRoute
   '/chat/$friendId': typeof ChatFriendIdRoute
+  '/communities/$communityId': typeof CommunitiesCommunityIdRoute
   '/friends/add': typeof FriendsAddRoute
+  '/communities/': typeof CommunitiesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -61,7 +75,9 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/apps/connect': typeof AppsConnectRoute
   '/chat/$friendId': typeof ChatFriendIdRoute
+  '/communities/$communityId': typeof CommunitiesCommunityIdRoute
   '/friends/add': typeof FriendsAddRoute
+  '/communities': typeof CommunitiesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -70,7 +86,9 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/apps/connect': typeof AppsConnectRoute
   '/chat/$friendId': typeof ChatFriendIdRoute
+  '/communities/$communityId': typeof CommunitiesCommunityIdRoute
   '/friends/add': typeof FriendsAddRoute
+  '/communities/': typeof CommunitiesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -80,7 +98,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/apps/connect'
     | '/chat/$friendId'
+    | '/communities/$communityId'
     | '/friends/add'
+    | '/communities/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -88,7 +108,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/apps/connect'
     | '/chat/$friendId'
+    | '/communities/$communityId'
     | '/friends/add'
+    | '/communities'
   id:
     | '__root__'
     | '/'
@@ -96,7 +118,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/apps/connect'
     | '/chat/$friendId'
+    | '/communities/$communityId'
     | '/friends/add'
+    | '/communities/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -105,7 +129,9 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   AppsConnectRoute: typeof AppsConnectRoute
   ChatFriendIdRoute: typeof ChatFriendIdRoute
+  CommunitiesCommunityIdRoute: typeof CommunitiesCommunityIdRoute
   FriendsAddRoute: typeof FriendsAddRoute
+  CommunitiesIndexRoute: typeof CommunitiesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -131,11 +157,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/communities/': {
+      id: '/communities/'
+      path: '/communities'
+      fullPath: '/communities/'
+      preLoaderRoute: typeof CommunitiesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/friends/add': {
       id: '/friends/add'
       path: '/friends/add'
       fullPath: '/friends/add'
       preLoaderRoute: typeof FriendsAddRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/communities/$communityId': {
+      id: '/communities/$communityId'
+      path: '/communities/$communityId'
+      fullPath: '/communities/$communityId'
+      preLoaderRoute: typeof CommunitiesCommunityIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat/$friendId': {
@@ -161,7 +201,9 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   AppsConnectRoute: AppsConnectRoute,
   ChatFriendIdRoute: ChatFriendIdRoute,
+  CommunitiesCommunityIdRoute: CommunitiesCommunityIdRoute,
   FriendsAddRoute: FriendsAddRoute,
+  CommunitiesIndexRoute: CommunitiesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

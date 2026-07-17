@@ -169,5 +169,50 @@
   "pwa": {
     "updateAvailable": "A new version of Gathernet is available.",
     "reload": "Update"
+  },
+  "communities": {
+    "title": "Communities",
+    "empty": "You're not in any community yet. Create one or join with a code.",
+    "create": "Create community",
+    "join": "Join",
+    "joinWithCode": "Join with a code",
+    "codePlaceholder": "Community invite code",
+    "namePlaceholder": "Community name",
+    "descriptionPlaceholder": "What is this community about?",
+    "invalidCode": "That code is invalid, expired, or already used.",
+    "alreadyMember": "You're already a member of this community.",
+    "notFound": "Community not found.",
+    "channelCount": "{{count}} channels",
+    "channels": "Channels",
+    "noChannels": "No channels yet.",
+    "selectChannel": "Select a channel to start chatting.",
+    "members": "Members",
+    "you": "you",
+    "addChannel": "Add channel",
+    "createChannel": "Create channel",
+    "channelNamePlaceholder": "Channel name",
+    "deleteChannelConfirm": "Delete #{{name}}? Its history is removed for everyone.",
+    "channelJoining": "Joining channel…",
+    "channelPending": "Setting up encryption…",
+    "channelLocked": "This is a leaders-only channel. You don't have access.",
+    "invite": "Invite",
+    "inviteHint": "Share this code with people you want in the community. Invite-only — there is no public directory.",
+    "newInvite": "New invite code",
+    "scan": "Scan",
+    "promote": "Make leader",
+    "demote": "Remove leader",
+    "remove": "Remove",
+    "removeConfirm": "Remove {{name}} from the community? They lose access to all channels.",
+    "leave": "Leave community",
+    "leaveConfirm": "Leave this community?",
+    "access": {
+      "members": "All members",
+      "leaders": "Leaders only"
+    },
+    "roles": {
+      "owner": "Owner",
+      "leader": "Leader",
+      "member": "Member"
+    }
   }
 }

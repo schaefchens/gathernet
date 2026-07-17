@@ -204,6 +204,12 @@ importers:
 
   packages/sdk:
     dependencies:
+      '@gathernet/mls-client':
+        specifier: workspace:*
+        version: link:../mls-client
+      '@gathernet/mls-sync':
+        specifier: workspace:*
+        version: link:../mls-sync
       '@gathernet/shared':
         specifier: workspace:*
         version: link:../shared

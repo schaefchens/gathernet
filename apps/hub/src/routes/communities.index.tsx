@@ -1,0 +1,206 @@
+import type {
+  AcceptCommunityInviteResponse,
+  CommunityListItem,
+  CommunityRole,
+  CreateCommunityResponse,
+} from '@gathernet/shared'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { QrScanner } from '../components/QrScanner.tsx'
+import { COMMUNITY_QR_PREFIX } from '../features/communities/InvitePanel.tsx'
+import { ApiError, api } from '../lib/api.ts'
+
+export const Route = createFileRoute('/communities/')({ component: CommunitiesScreen })
+
+const ROLE_BADGE: Record<CommunityRole, string> = {
+  owner: 'text-gold border-gold',
+  leader: 'text-indigo-soft border-indigo-soft',
+  member: 'text-ink-soft border-edge',
+}
+
+type Panel = 'none' | 'create' | 'join'
+
+function CommunitiesScreen() {
+  const { t } = useTranslation()
+  const [panel, setPanel] = useState<Panel>('none')
+
+  const communities = useQuery({
+    queryKey: ['communities'],
+    queryFn: () => api<{ communities: CommunityListItem[] }>('GET', '/api/v1/communities'),
+  })
+  const list = communities.data?.communities ?? []
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="font-display text-3xl">{t('communities.title')}</h1>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="btn-quiet text-sm"
+            onClick={() => setPanel(panel === 'join' ? 'none' : 'join')}
+          >
+            {t('communities.joinWithCode')}
+          </button>
+          <button
+            type="button"
+            className="btn-gold text-sm"
+            onClick={() => setPanel(panel === 'create' ? 'none' : 'create')}
+          >
+            {t('communities.create')}
+          </button>
+        </div>
+      </div>
+
+      {panel === 'create' && <CreatePanel onDone={() => setPanel('none')} />}
+      {panel === 'join' && <JoinPanel onDone={() => setPanel('none')} />}
+
+      {communities.isLoading && <p className="text-ink-soft">{t('common.loading')}</p>}
+      {communities.data && list.length === 0 && panel === 'none' && (
+        <div className="card text-center text-ink-soft py-12">{t('communities.empty')}</div>
+      )}
+
+      <ul className="space-y-2">
+        {list.map((community) => (
+          <li key={community.communityId}>
+            <Link
+              to="/communities/$communityId"
+              params={{ communityId: community.communityId }}
+              className="card flex items-center gap-3 py-3 hover:border-indigo-soft transition-colors"
+            >
+              <span className="flex-1 min-w-0">
+                <span className="font-medium block truncate">{community.name}</span>
+                <span className="text-xs text-ink-faint">
+                  {t('communities.channelCount', { count: community.channelCount })}
+                </span>
+              </span>
+              <span
+                className={`text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5 ${ROLE_BADGE[community.myRole]}`}
+              >
+                {t(`communities.roles.${community.myRole}`)}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function CreatePanel({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+
+  const create = useMutation({
+    mutationFn: () =>
+      api<CreateCommunityResponse>('POST', '/api/v1/communities', {
+        name: name.trim(),
+        ...(description.trim() ? { description: description.trim() } : {}),
+      }),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ['communities'] })
+      onDone()
+      void navigate({ to: '/communities/$communityId', params: { communityId: res.communityId } })
+    },
+  })
+
+  return (
+    <form
+      className="card space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (name.trim()) create.mutate()
+      }}
+    >
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={t('communities.namePlaceholder')}
+        maxLength={80}
+        autoFocus
+      />
+      <input
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder={t('communities.descriptionPlaceholder')}
+        maxLength={500}
+      />
+      <button type="submit" className="btn-gold w-full" disabled={!name.trim() || create.isPending}>
+        {t('communities.create')}
+      </button>
+    </form>
+  )
+}
+
+function JoinPanel({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [code, setCode] = useState('')
+  const [scanning, setScanning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const accept = async (rawCode: string) => {
+    setError(null)
+    try {
+      const res = await api<AcceptCommunityInviteResponse>(
+        'POST',
+        '/api/v1/communities/invites/accept',
+        { code: rawCode.trim() },
+      )
+      void queryClient.invalidateQueries({ queryKey: ['communities'] })
+      onDone()
+      void navigate({
+        to: '/communities/$communityId',
+        params: { communityId: res.communityId },
+      })
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.code === 'already_member'
+          ? t('communities.alreadyMember')
+          : t('communities.invalidCode'),
+      )
+    }
+  }
+
+  return (
+    <div className="card space-y-3">
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void accept(code)
+        }}
+      >
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          placeholder={t('communities.codePlaceholder')}
+          maxLength={10}
+          className="text-center font-mono text-xl tracking-[0.3em]"
+          autoFocus
+          autoComplete="off"
+        />
+        {error && <p className="text-sm text-danger text-center">{error}</p>}
+        <button type="submit" className="btn-gold w-full" disabled={code.trim().length < 10}>
+          {t('communities.join')}
+        </button>
+      </form>
+      <button
+        type="button"
+        className="btn-quiet w-full text-sm"
+        onClick={() => setScanning((s) => !s)}
+      >
+        {scanning ? t('common.cancel') : t('communities.scan')}
+      </button>
+      {scanning && (
+        <QrScanner prefixes={[COMMUNITY_QR_PREFIX]} onCode={(payload) => void accept(payload)} />
+      )}
+    </div>
+  )
+}

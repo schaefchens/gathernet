@@ -59,6 +59,9 @@ function AppShell() {
               <span className="text-xs text-amber">{t('common.connecting')}</span>
             )}
             <PresenceSelector />
+            <Link to="/communities" className="text-sm text-ink-soft hover:text-ink">
+              {t('communities.title')}
+            </Link>
             <Link to="/settings" className="text-ink-soft hover:text-ink" aria-label="Settings">
               ⚙
             </Link>

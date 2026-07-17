@@ -12,6 +12,7 @@ import {
 } from '../lib/storage.ts'
 import { wsClient } from '../lib/ws-client.ts'
 import { chatStore } from './chat.ts'
+import { communityChatStore } from './community-chat.ts'
 
 export type SessionPhase = 'loading' | 'welcome' | 'locked' | 'unlocked'
 
@@ -139,6 +140,7 @@ async function startSession(
   setTokenProvider(() => useSession.getState().token)
   wsClient.start(() => useSession.getState().token)
   await chatStore.init(record)
+  await communityChatStore.init(record)
 }
 
 export const useSession = create<SessionState>((set, _get) => ({
@@ -259,6 +261,7 @@ export const useSession = create<SessionState>((set, _get) => ({
   lock() {
     wsClient.stop()
     chatStore.reset()
+    communityChatStore.reset()
     installCryptoBox(null)
     set({ phase: 'locked', token: null })
   },
@@ -266,6 +269,7 @@ export const useSession = create<SessionState>((set, _get) => ({
   async forgetDevice() {
     wsClient.stop()
     chatStore.reset()
+    communityChatStore.reset()
     await wipeAll()
     set({ phase: 'welcome', accountId: null, deviceId: null, displayName: null, token: null })
   },

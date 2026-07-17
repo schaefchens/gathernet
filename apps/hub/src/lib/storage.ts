@@ -9,8 +9,8 @@
  */
 
 const DB_NAME = 'gathernet'
-const DB_VERSION = 1
-const STORES = ['meta', 'secure', 'groups', 'kps', 'messages'] as const
+const DB_VERSION = 2
+const STORES = ['meta', 'secure', 'groups', 'kps', 'messages', 'channels'] as const
 type StoreName = (typeof STORES)[number]
 
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -161,6 +161,31 @@ export const groupStore = {
   },
   keys(): Promise<IDBValidKey[]> {
     return tx('groups', 'readonly', (s) => s.getAllKeys())
+  },
+}
+
+/**
+ * Per-channel MLS snapshots (community channels). A store DISTINCT from
+ * `groups` so the DM sync engine and the community sync engine never see each
+ * other's groups when enumerating keys — each engine owns exactly one of the
+ * two IndexedDB stores. Channel groupIds are globally unique hex all the same.
+ */
+export const channelStore = {
+  async get(channelId: string): Promise<Uint8Array | null> {
+    const sealed = await tx<Uint8Array | undefined>('channels', 'readonly', (s) => s.get(channelId))
+    if (!sealed) return null
+    return requireBox().open(sealed, `channel:${channelId}`)
+  },
+  put(channelId: string, snapshot: Uint8Array): Promise<unknown> {
+    return tx('channels', 'readwrite', (s) =>
+      s.put(requireBox().seal(snapshot, `channel:${channelId}`), channelId),
+    )
+  },
+  delete(channelId: string): Promise<unknown> {
+    return tx('channels', 'readwrite', (s) => s.delete(channelId))
+  },
+  keys(): Promise<IDBValidKey[]> {
+    return tx('channels', 'readonly', (s) => s.getAllKeys())
   },
 }
 
