@@ -29,6 +29,9 @@ interface EnrollmentInput {
   challenge: Buffer
   identitySig: Buffer
   deviceSig: Buffer
+  /** optional persistent ECIES receipt key (raw SPKI) + its device-key signature */
+  receiptPk?: Buffer
+  receiptPkSig?: Buffer
 }
 
 function decodeEnrollment(body: CreateAccountRequest | EnrollDeviceRequest): EnrollmentInput {
@@ -39,7 +42,19 @@ function decodeEnrollment(body: CreateAccountRequest | EnrollDeviceRequest): Enr
     challenge: Buffer.from(body.challenge, 'base64'),
     identitySig: Buffer.from(body.identitySig, 'base64'),
     deviceSig: Buffer.from(body.deviceSig, 'base64'),
+    ...(body.receiptPk ? { receiptPk: Buffer.from(body.receiptPk, 'base64') } : {}),
+    ...(body.receiptPkSig ? { receiptPkSig: Buffer.from(body.receiptPkSig, 'base64') } : {}),
   }
+}
+
+/** The receipt-key columns to persist, after validating the device-key signature. */
+function receiptColumns(input: EnrollmentInput, cert: DeviceCert) {
+  if (!input.receiptPk || !input.receiptPkSig) return { receiptPk: null, receiptPkSig: null }
+  const payload = sigPayload(SIG_DOMAIN.receiptKey, input.receiptPk)
+  if (!ed25519Verify(cert.devicePk, payload, input.receiptPkSig)) {
+    throw new ServiceError(401, 'receipt_sig_invalid')
+  }
+  return { receiptPk: input.receiptPk, receiptPkSig: input.receiptPkSig }
 }
 
 /**
@@ -90,6 +105,7 @@ export async function createAccount(db: Db, body: CreateAccountRequest) {
         cert: input.certBytes,
         certSig: input.certSig,
         name: cert.name,
+        ...receiptColumns(input, cert),
       })
     })
   } catch (err) {
@@ -126,6 +142,7 @@ export async function enrollDevice(db: Db, body: EnrollDeviceRequest) {
       cert: input.certBytes,
       certSig: input.certSig,
       name: cert.name,
+      ...receiptColumns(input, cert),
     })
   } catch (err) {
     if (isUniqueViolation(err)) throw new ServiceError(409, 'device_exists')

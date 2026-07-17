@@ -273,6 +273,15 @@ export const communityUpdatedMessage = z.object({
   }),
 })
 
+/** To a grantee account: a K_meta grant is available — a device lacking the key
+ *  can fetch + open it (cross-device sync). */
+export const communityKeyGrantsMessage = z.object({
+  type: z.literal('community.key_grants_available'),
+  payload: z.object({
+    communityId: communityIdSchema,
+  }),
+})
+
 export const communityChannelCreatedMessage = z.object({
   type: z.literal('community.channel_created'),
   payload: z.object({
@@ -382,6 +391,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   communityMemberRemovedMessage,
   communityRoleChangedMessage,
   communityUpdatedMessage,
+  communityKeyGrantsMessage,
   communityChannelCreatedMessage,
   communityChannelUpdatedMessage,
   communityChannelDeletedMessage,

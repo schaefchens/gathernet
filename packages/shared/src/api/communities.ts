@@ -3,6 +3,7 @@ import { CHANNEL_MESSAGE_TTL_DAYS, COMMUNITY_META_MAX_B64 } from '../constants.t
 import {
   accountIdSchema,
   communityIdSchema,
+  deviceIdSchema,
   groupIdSchema,
   inviteCodeSchema,
   mediaIdSchema,
@@ -276,6 +277,47 @@ export const setMutedRequestSchema = z.object({
   muted: z.boolean(),
 })
 
+/* ----------------------- K_meta cross-device grants ----------------------- */
+
+/**
+ * A community member device that can receive a K_meta grant. The caller
+ * authenticates `receiptPk` itself: verify `certSig` over `deviceCert` under the
+ * member's account identity (accountId = base58 identity pk), then verify
+ * `receiptPkSig` over `receiptPk` under the cert's device key. The server is
+ * never trusted for `receiptPk`.
+ */
+export const communityDeviceSchema = z.object({
+  accountId: accountIdSchema,
+  deviceId: deviceIdSchema,
+  deviceCert: z.base64(),
+  certSig: z.base64(),
+  receiptPk: z.base64(),
+  receiptPkSig: z.base64(),
+})
+
+export const communityDevicesResponseSchema = z.object({
+  keyEpoch: z.number().int().nonnegative(),
+  devices: z.array(communityDeviceSchema),
+})
+
+export const keyGrantSchema = z.object({
+  granteeDeviceId: deviceIdSchema,
+  /** eciesSeal(receiptPk, K_meta) */
+  sealedKMeta: z.base64(),
+  senderPkB64: z.base64(),
+})
+
+export const postKeyGrantsRequestSchema = z.object({
+  keyEpoch: z.number().int().nonnegative(),
+  grants: z.array(keyGrantSchema).min(1).max(500),
+})
+
+export const myKeyGrantResponseSchema = z.object({
+  keyEpoch: z.number().int().nonnegative(),
+  /** null when no grant exists for this device at the current epoch */
+  grant: z.object({ sealedKMeta: z.base64(), senderPkB64: z.base64() }).nullable(),
+})
+
 export const channelMembersResponseSchema = z.object({
   members: z.array(channelMemberSchema),
 })
@@ -312,4 +354,9 @@ export type SetModeratorRequest = z.infer<typeof setModeratorRequestSchema>
 export type ChannelMemberEntry = z.infer<typeof channelMemberSchema>
 export type ChannelMembersResponse = z.infer<typeof channelMembersResponseSchema>
 export type SetMutedRequest = z.infer<typeof setMutedRequestSchema>
+export type CommunityDevice = z.infer<typeof communityDeviceSchema>
+export type CommunityDevicesResponse = z.infer<typeof communityDevicesResponseSchema>
+export type KeyGrant = z.infer<typeof keyGrantSchema>
+export type PostKeyGrantsRequest = z.infer<typeof postKeyGrantsRequestSchema>
+export type MyKeyGrantResponse = z.infer<typeof myKeyGrantResponseSchema>
 export type SetMemberRoleRequest = z.infer<typeof setMemberRoleRequestSchema>

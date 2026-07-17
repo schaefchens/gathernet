@@ -5,13 +5,17 @@ import type {
   ChannelMemberRole,
   ChannelMyStatus,
   CommunityDetailResponse,
+  CommunityDevicesResponse,
   CommunityId,
   CommunityListItem,
   CreateChannelInviteRequest,
   CreateChannelRequest,
   CreateCommunityInviteRequest,
   CreateCommunityRequest,
+  DeviceId,
   GroupId,
+  MyKeyGrantResponse,
+  PostKeyGrantsRequest,
   ServerMessage,
   UpdateChannelRequest,
   UpdateCommunityRequest,
@@ -26,6 +30,7 @@ import {
   communities,
   communityChannels,
   communityInvites,
+  communityKeyGrants,
   communityMedia,
   communityMembers,
   devices,
@@ -1366,6 +1371,142 @@ export async function leaveCommunity(
     payload: { communityId: communityId as CommunityId, accountId: accountId as AccountId },
   }
   for (const acct of new Set(recipients)) registry.sendToAccount(acct, message)
+}
+
+/* --------------------- K_meta cross-device key grants --------------------- */
+
+/** Active-member active devices of a community that can receive a K_meta grant. */
+async function grantableDeviceRows(db: DbOrTx, communityId: string) {
+  return db
+    .select({
+      accountId: devices.accountId,
+      deviceId: devices.deviceId,
+      cert: devices.cert,
+      certSig: devices.certSig,
+      receiptPk: devices.receiptPk,
+      receiptPkSig: devices.receiptPkSig,
+    })
+    .from(communityMembers)
+    .innerJoin(devices, eq(devices.accountId, communityMembers.accountId))
+    .where(
+      and(
+        eq(communityMembers.communityId, communityId),
+        eq(communityMembers.status, 'active'),
+        eq(devices.status, 'active'),
+      ),
+    )
+}
+
+/**
+ * The active-member devices a grant may be sealed to. The caller authenticates
+ * each `receiptPk` itself (cert signature under the member identity, then
+ * `receiptPkSig` under the cert's device key) — the server is not trusted for it.
+ */
+export async function listCommunityDevices(
+  db: Db,
+  accountId: string,
+  communityId: string,
+): Promise<CommunityDevicesResponse> {
+  await requireActiveMembership(db, communityId, accountId)
+  const community = await db.query.communities.findFirst({
+    where: eq(communities.communityId, communityId),
+  })
+  if (!community) throw new ServiceError(404, 'community_not_found')
+  const rows = await grantableDeviceRows(db, communityId)
+  const list: CommunityDevicesResponse['devices'] = []
+  for (const r of rows) {
+    if (!r.receiptPk || !r.receiptPkSig) continue // device predates the feature
+    list.push({
+      accountId: r.accountId as AccountId,
+      deviceId: r.deviceId as DeviceId,
+      deviceCert: r.cert.toString('base64'),
+      certSig: r.certSig.toString('base64'),
+      receiptPk: r.receiptPk.toString('base64'),
+      receiptPkSig: r.receiptPkSig.toString('base64'),
+    })
+  }
+  return { keyEpoch: community.keyEpoch, devices: list }
+}
+
+/** Store K_meta grants (ciphertext only) for active-member devices. Idempotent. */
+export async function postKeyGrants(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  keyEpoch: number,
+  grants: PostKeyGrantsRequest['grants'],
+): Promise<void> {
+  await requireActiveMembership(db, communityId, accountId)
+  const community = await db.query.communities.findFirst({
+    where: eq(communities.communityId, communityId),
+  })
+  if (!community) throw new ServiceError(404, 'community_not_found')
+  if (keyEpoch !== community.keyEpoch) throw new ServiceError(409, 'key_epoch_stale')
+
+  // Only seal to devices that actually belong to active members — never leak
+  // K_meta to an outsider's device.
+  const allowed = new Set((await grantableDeviceRows(db, communityId)).map((r) => r.deviceId))
+  for (const g of grants) {
+    if (!allowed.has(g.granteeDeviceId)) throw new ServiceError(400, 'invalid_grantee')
+  }
+
+  await db
+    .insert(communityKeyGrants)
+    .values(
+      grants.map((g) => ({
+        communityId,
+        keyEpoch,
+        granteeDeviceId: g.granteeDeviceId,
+        sealedKMeta: bufOf(g.sealedKMeta),
+        senderPkB64: g.senderPkB64,
+        createdBy: accountId,
+      })),
+    )
+    .onConflictDoNothing()
+
+  const owners = await db
+    .select({ accountId: devices.accountId })
+    .from(devices)
+    .where(
+      inArray(
+        devices.deviceId,
+        grants.map((g) => g.granteeDeviceId),
+      ),
+    )
+  for (const acct of new Set(owners.map((o) => o.accountId))) {
+    registry.sendToAccount(acct, {
+      type: 'community.key_grants_available',
+      payload: { communityId: communityId as CommunityId },
+    })
+  }
+}
+
+/** The grant sealed to the caller's current device at the community's key epoch. */
+export async function myKeyGrant(
+  db: Db,
+  accountId: string,
+  deviceId: string,
+  communityId: string,
+): Promise<MyKeyGrantResponse> {
+  await requireActiveMembership(db, communityId, accountId)
+  const community = await db.query.communities.findFirst({
+    where: eq(communities.communityId, communityId),
+  })
+  if (!community) throw new ServiceError(404, 'community_not_found')
+  const row = await db.query.communityKeyGrants.findFirst({
+    where: and(
+      eq(communityKeyGrants.communityId, communityId),
+      eq(communityKeyGrants.keyEpoch, community.keyEpoch),
+      eq(communityKeyGrants.granteeDeviceId, deviceId),
+    ),
+  })
+  return {
+    keyEpoch: community.keyEpoch,
+    grant: row
+      ? { sealedKMeta: row.sealedKMeta.toString('base64'), senderPkB64: row.senderPkB64 }
+      : null,
+  }
 }
 
 /* -------------------------------- pruning --------------------------------- */

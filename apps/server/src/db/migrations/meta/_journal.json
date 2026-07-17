@@ -64,6 +64,13 @@
       "when": 1784305541951,
       "tag": "0008_sharp_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784309512747,
+      "tag": "0009_stiff_gladiator",
+      "breakpoints": true
     }
   ]
 }

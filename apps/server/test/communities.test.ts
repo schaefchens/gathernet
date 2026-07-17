@@ -1,4 +1,10 @@
 import { randomBytes } from 'node:crypto'
+import {
+  eciesOpen,
+  eciesSeal,
+  generateEciesKeypairExtractable,
+  importEciesPrivateKey,
+} from '@gathernet/shared'
 import type { FastifyInstance } from 'fastify'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
@@ -42,7 +48,7 @@ interface TestUser {
   identity: ReturnType<typeof generateEd25519>
 }
 
-async function createUser(displayName: string): Promise<TestUser> {
+async function createUser(displayName: string, receiptPkB64?: string): Promise<TestUser> {
   const identity = generateEd25519()
   const device = generateEd25519()
   const challengeRes = await app.inject({
@@ -50,7 +56,13 @@ async function createUser(displayName: string): Promise<TestUser> {
     url: '/api/v1/auth/challenge',
     payload: { purpose: 'enroll' },
   })
-  const { body } = buildEnrollment(identity, device, challengeRes.json().challenge, 'Browser')
+  const { body } = buildEnrollment(
+    identity,
+    device,
+    challengeRes.json().challenge,
+    'Browser',
+    receiptPkB64,
+  )
   const res = await app.inject({
     method: 'POST',
     url: '/api/v1/accounts',
@@ -59,6 +71,20 @@ async function createUser(displayName: string): Promise<TestUser> {
   expect(res.statusCode).toBe(201)
   const json = res.json()
   return { accountId: json.accountId, deviceId: json.deviceId, token: json.token, identity }
+}
+
+interface Receipt {
+  publicKeyB64: string
+  privateKeyPkcs8B64: string
+}
+
+/** A user whose device carries a persistent ECIES receipt key (for K_meta grants). */
+async function createUserWithReceipt(
+  displayName: string,
+): Promise<TestUser & { receipt: Receipt }> {
+  const receipt = await generateEciesKeypairExtractable()
+  const user = await createUser(displayName, receipt.publicKeyB64)
+  return { ...user, receipt }
 }
 
 function auth(user: TestUser) {
@@ -963,6 +989,118 @@ describe('community removal clears channel membership', () => {
     expect((await postJoin(leader, communityId, leadersChan)).json().status).toBe('active')
     const chan = await createChannel(leader, communityId)
     expect(chan).toBeTruthy()
+  })
+})
+
+describe('K_meta cross-device key grants', () => {
+  const devicesUrl = (id: string) => `/api/v1/communities/${id}/devices`
+  const grantsUrl = (id: string) => `/api/v1/communities/${id}/key-grants`
+
+  it('grants K_meta to a member device via an authenticated receipt key', async () => {
+    const owner = await createUserWithReceipt('OwnerKG')
+    const member = await createUserWithReceipt('MemberKG')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+
+    // The directory lists active-member devices with their receipt keys.
+    const dev = await app.inject({
+      method: 'GET',
+      url: devicesUrl(communityId),
+      headers: auth(owner),
+    })
+    expect(dev.statusCode).toBe(200)
+    expect(dev.json().keyEpoch).toBe(0)
+    const list = dev.json().devices as Array<{ deviceId: string; receiptPk: string }>
+    const memberDev = list.find((d) => d.deviceId === member.deviceId)
+    expect(memberDev?.receiptPk).toBe(member.receipt.publicKeyB64)
+
+    // Owner seals a K_meta to the member's receipt key and posts the grant.
+    const kMeta = randomBytes(32)
+    const sealed = await eciesSeal(member.receipt.publicKeyB64, new Uint8Array(kMeta))
+    const post = await app.inject({
+      method: 'POST',
+      url: grantsUrl(communityId),
+      headers: auth(owner),
+      payload: {
+        keyEpoch: 0,
+        grants: [
+          {
+            granteeDeviceId: member.deviceId,
+            sealedKMeta: sealed.sealedB64,
+            senderPkB64: sealed.senderPkB64,
+          },
+        ],
+      },
+    })
+    expect(post.statusCode).toBe(200)
+
+    // The member fetches + opens the grant and recovers the exact K_meta.
+    const mine = await app.inject({
+      method: 'GET',
+      url: `${grantsUrl(communityId)}/mine`,
+      headers: auth(member),
+    })
+    expect(mine.statusCode).toBe(200)
+    const grant = mine.json().grant as { sealedKMeta: string; senderPkB64: string } | null
+    expect(grant).not.toBeNull()
+    const priv = await importEciesPrivateKey(member.receipt.privateKeyPkcs8B64)
+    const opened = await eciesOpen(
+      priv,
+      // biome-ignore lint/style/noNonNullAssertion: asserted not-null above
+      grant!.senderPkB64,
+      // biome-ignore lint/style/noNonNullAssertion: asserted not-null above
+      grant!.sealedKMeta,
+      member.receipt.publicKeyB64,
+    )
+    expect(Buffer.from(opened)).toEqual(kMeta)
+
+    // Sealing to a device that isn't an active member is refused (no K_meta leak).
+    const stranger = await createUserWithReceipt('StrangerKG')
+    const bad = await app.inject({
+      method: 'POST',
+      url: grantsUrl(communityId),
+      headers: auth(owner),
+      payload: {
+        keyEpoch: 0,
+        grants: [
+          {
+            granteeDeviceId: stranger.deviceId,
+            sealedKMeta: sealed.sealedB64,
+            senderPkB64: sealed.senderPkB64,
+          },
+        ],
+      },
+    })
+    expect(bad.statusCode).toBe(400)
+
+    // A non-member cannot enumerate devices.
+    expect(
+      (await app.inject({ method: 'GET', url: devicesUrl(communityId), headers: auth(stranger) }))
+        .statusCode,
+    ).toBe(404)
+  })
+
+  it('a device without a receipt key is skipped and gets no grant', async () => {
+    const owner = await createUserWithReceipt('OwnerKG2')
+    const plain = await createUser('PlainKG2') // enrolled without a receipt key
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, plain)
+
+    const dev = await app.inject({
+      method: 'GET',
+      url: devicesUrl(communityId),
+      headers: auth(owner),
+    })
+    const ids = (dev.json().devices as Array<{ deviceId: string }>).map((d) => d.deviceId)
+    expect(ids).toContain(owner.deviceId)
+    expect(ids).not.toContain(plain.deviceId)
+
+    const mine = await app.inject({
+      method: 'GET',
+      url: `${grantsUrl(communityId)}/mine`,
+      headers: auth(plain),
+    })
+    expect(mine.json().grant).toBeNull()
   })
 })
 

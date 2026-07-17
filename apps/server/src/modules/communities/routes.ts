@@ -8,6 +8,7 @@ import {
   type GroupId,
   joinByCodeRequestSchema,
   postCommitRequestSchema,
+  postKeyGrantsRequestSchema,
   publishChannelGroupInfoRequestSchema,
   resolveJoinRequestSchema,
   setMemberRoleRequestSchema,
@@ -40,7 +41,10 @@ import {
   leaveCommunity,
   listChannelMembers,
   listCommunities,
+  listCommunityDevices,
   listCommunityInvites,
+  myKeyGrant,
+  postKeyGrants,
   publishChannelGroupInfo,
   removeMember,
   resolveJoinRequest,
@@ -205,6 +209,40 @@ export function registerCommunityRoutes(
       const body = uploadMediaRequestSchema.parse(request.body)
       reply.status(201)
       return uploadCommunityMedia(db, session.accountId, request.params.id, body.ciphertext)
+    },
+  )
+
+  /* ----------------------- K_meta cross-device grants --------------------- */
+
+  app.get<{ Params: { id: string } }>('/api/v1/communities/:id/devices', auth, async (request) => {
+    const session = requireSession(request)
+    return listCommunityDevices(db, session.accountId, request.params.id)
+  })
+
+  app.get<{ Params: { id: string } }>(
+    '/api/v1/communities/:id/key-grants/mine',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      return myKeyGrant(db, session.accountId, session.deviceId, request.params.id)
+    },
+  )
+
+  app.post<{ Params: { id: string } }>(
+    '/api/v1/communities/:id/key-grants',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = postKeyGrantsRequestSchema.parse(request.body)
+      await postKeyGrants(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        body.keyEpoch,
+        body.grants,
+      )
+      return { ok: true }
     },
   )
 

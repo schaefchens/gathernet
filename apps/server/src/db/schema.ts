@@ -42,6 +42,12 @@ export const devices = pgTable(
     /** canonical-CBOR DeviceCert as signed by the identity key */
     cert: bytea('cert').notNull(),
     certSig: bytea('cert_sig').notNull(),
+    /** persistent ECIES receipt public key (raw SPKI) — community K_meta grants
+     *  are sealed to it; authenticated by receiptPkSig under devicePk. Nullable:
+     *  devices enrolled before this feature simply can't receive grants. */
+    receiptPk: bytea('receipt_pk'),
+    /** Ed25519(devicePk, domain.receiptKey || receiptPk) */
+    receiptPkSig: bytea('receipt_pk_sig'),
     name: text('name').notNull(),
     status: deviceStatusEnum('status').notNull().default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -505,11 +511,42 @@ export const communities = pgTable('communities', {
   /** seal(K_meta, {name, description}) — server never sees plaintext */
   metaCiphertext: bytea('meta_ciphertext'),
   avatarMediaId: text('avatar_media_id'),
+  /** current K_meta epoch; bumped on rotation (Phase B). Grants + a client's
+   *  held key are matched to this. */
+  keyEpoch: integer('key_epoch').notNull().default(0),
   ownerAccountId: text('owner_account_id')
     .notNull()
     .references(() => accounts.accountId),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * Per-device K_meta grants: `sealedKMeta` = eciesSeal(device.receiptPk, K_meta),
+ * so any device can obtain the community's metadata key without a fresh invite.
+ * The server only relays ciphertext — it never sees K_meta.
+ */
+export const communityKeyGrants = pgTable(
+  'community_key_grants',
+  {
+    communityId: text('community_id')
+      .notNull()
+      .references(() => communities.communityId),
+    keyEpoch: integer('key_epoch').notNull(),
+    granteeDeviceId: text('grantee_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    sealedKMeta: bytea('sealed_kmeta').notNull(),
+    senderPkB64: text('sender_pk_b64').notNull(),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => accounts.accountId),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.communityId, t.keyEpoch, t.granteeDeviceId] }),
+    index('community_key_grants_grantee_idx').on(t.granteeDeviceId),
+  ],
+)
 
 export const communityMembers = pgTable(
   'community_members',

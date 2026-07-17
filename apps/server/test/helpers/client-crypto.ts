@@ -55,6 +55,8 @@ export interface EnrollmentBody {
   challenge: string
   identitySig: string
   deviceSig: string
+  receiptPk?: string
+  receiptPkSig?: string
 }
 
 export function buildEnrollment(
@@ -62,10 +64,22 @@ export function buildEnrollment(
   device: TestKeypair,
   challengeB64: string,
   deviceName: string,
+  /** optional persistent ECIES receipt public key (raw SPKI, base64) */
+  receiptPkB64?: string,
 ): { body: EnrollmentBody; deviceId: string } {
   const { certBytes, certSig, deviceId } = buildDeviceCert(identity, device, deviceName)
   const challenge = Buffer.from(challengeB64, 'base64')
   const domain = Buffer.from(SIG_DOMAIN.enroll, 'utf8')
+  const receipt = receiptPkB64
+    ? {
+        receiptPk: receiptPkB64,
+        receiptPkSig: sign(
+          device,
+          Buffer.from(SIG_DOMAIN.receiptKey, 'utf8'),
+          Buffer.from(receiptPkB64, 'base64'),
+        ).toString('base64'),
+      }
+    : {}
   return {
     deviceId,
     body: {
@@ -75,6 +89,7 @@ export function buildEnrollment(
       challenge: challengeB64,
       identitySig: sign(identity, domain, challenge, certBytes).toString('base64'),
       deviceSig: sign(device, domain, challenge, certBytes).toString('base64'),
+      ...receipt,
     },
   }
 }

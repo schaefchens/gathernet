@@ -10,6 +10,10 @@ export const SIG_DOMAIN = {
   enroll: 'gathernet-enroll-v1',
   auth: 'gathernet-auth-v1',
   revoke: 'gathernet-revoke-v1',
+  /** Ed25519(DK, domain.receiptKey || receiptPk) — binds the ECIES receipt key
+   *  to the device signing key, which the DeviceCert already binds to the
+   *  identity. Lets community K_meta grants be sealed to an authenticated key. */
+  receiptKey: 'gathernet-receipt-key-v1',
 } as const
 
 export const displayNameSchema = z.string().trim().min(1).max(64)
@@ -38,6 +42,10 @@ const enrollmentFields = {
   identitySig: z.base64(),
   /** base64 Ed25519(DK, domain.enroll || challenge || cert) */
   deviceSig: z.base64(),
+  /** base64 raw SPKI of the device's persistent ECIES receipt public key */
+  receiptPk: z.base64().optional(),
+  /** base64 Ed25519(DK, domain.receiptKey || receiptPk) */
+  receiptPkSig: z.base64().optional(),
 }
 
 export const createAccountRequestSchema = z.object({

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { eciesOpen, eciesSeal, generateEciesKeypair } from '../src/ecies.ts'
+import {
+  eciesOpen,
+  eciesSeal,
+  generateEciesKeypair,
+  generateEciesKeypairExtractable,
+  importEciesPrivateKey,
+} from '../src/ecies.ts'
 
 describe('ecies sealed box (grant key handoff)', () => {
   it('round-trips a 32-byte key', async () => {
@@ -36,6 +42,18 @@ describe('ecies sealed box (grant key handoff)', () => {
     await expect(
       eciesOpen(recipient.privateKey, senderPkB64, sealedB64, other.publicKeyB64),
     ).rejects.toThrow()
+  })
+
+  it('persists + re-imports an extractable receipt key and still opens', async () => {
+    // Simulates a device generating a persistent receipt keypair, storing the
+    // PKCS#8 private key, then re-importing it in a later session to open a grant.
+    const { publicKeyB64, privateKeyPkcs8B64 } = await generateEciesKeypairExtractable()
+    const key = crypto.getRandomValues(new Uint8Array(32))
+    const { sealedB64, senderPkB64 } = await eciesSeal(publicKeyB64, key)
+
+    const reimported = await importEciesPrivateKey(privateKeyPkcs8B64)
+    const opened = await eciesOpen(reimported, senderPkB64, sealedB64, publicKeyB64)
+    expect(Buffer.from(opened)).toEqual(Buffer.from(key))
   })
 
   it('rejects tampered ciphertext', async () => {

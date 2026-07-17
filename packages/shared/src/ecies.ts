@@ -30,6 +30,35 @@ export async function generateEciesKeypair(): Promise<EciesKeypair> {
   return { publicKeyB64: b64(spki), privateKey: pair.privateKey }
 }
 
+/**
+ * Like {@link generateEciesKeypair} but the private key is exported as PKCS#8
+ * so it can be persisted (e.g. sealed under a device master key) and re-imported
+ * across sessions with {@link importEciesPrivateKey}. Used for a device's
+ * long-lived "receipt" keypair that community K_meta grants are sealed to.
+ */
+export async function generateEciesKeypairExtractable(): Promise<{
+  publicKeyB64: string
+  privateKeyPkcs8B64: string
+}> {
+  const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
+    'deriveBits',
+  ])
+  const spki = new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey))
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey))
+  return { publicKeyB64: b64(spki), privateKeyPkcs8B64: b64(pkcs8) }
+}
+
+/** Re-import a PKCS#8 private key produced by {@link generateEciesKeypairExtractable}. */
+export async function importEciesPrivateKey(privateKeyPkcs8B64: string): Promise<WebCryptoKey> {
+  return crypto.subtle.importKey(
+    'pkcs8',
+    fromB64(privateKeyPkcs8B64) as BinaryData,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    false,
+    ['deriveBits'],
+  )
+}
+
 async function deriveAesKey(privateKey: WebCryptoKey, peerSpkiB64: string): Promise<WebCryptoKey> {
   const peerKey = await crypto.subtle.importKey(
     'spki',
