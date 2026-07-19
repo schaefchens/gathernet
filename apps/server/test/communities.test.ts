@@ -1231,6 +1231,34 @@ describe('K_meta rotation on removal (Phase B)', () => {
     ).toBe(404)
     await ownerWs.close()
   })
+
+  it('a member leaving also flags rotation (a leader rotates on next connect)', async () => {
+    const owner = await createUserWithReceipt('OwnerLeave')
+    const member = await createUserWithReceipt('MemberLeave')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+    // The leave surfaces in the list as rotationPending, so a leader's
+    // connect-time sweep (GET /communities) rotates without opening it.
+    expect((await detail(owner, communityId)).json().community.rotationPending).toBe(false)
+
+    const leave = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/leave`,
+      headers: auth(member),
+    })
+    expect(leave.statusCode).toBe(200)
+
+    expect((await detail(owner, communityId)).json().community.rotationPending).toBe(true)
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/v1/communities',
+      headers: auth(owner),
+    })
+    const item = (
+      list.json().communities as Array<{ communityId: string; rotationPending: boolean }>
+    ).find((c) => c.communityId === communityId)
+    expect(item?.rotationPending).toBe(true)
+  })
 })
 
 describe('disappearing messages + invite pruning', () => {

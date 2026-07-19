@@ -223,6 +223,7 @@ export async function listCommunities(db: Db, accountId: string): Promise<Commun
       metaCiphertext: communities.metaCiphertext,
       avatarMediaId: communities.avatarMediaId,
       keyEpoch: communities.keyEpoch,
+      rotationPending: communities.rotationPending,
       role: communityMembers.role,
       channelCount: sql<number>`(
         SELECT count(*)::int FROM community_channels cc
@@ -240,6 +241,7 @@ export async function listCommunities(db: Db, accountId: string): Promise<Commun
     metaCiphertext: b64(r.metaCiphertext),
     avatarMediaId: r.avatarMediaId,
     keyEpoch: r.keyEpoch,
+    rotationPending: r.rotationPending,
     myRole: r.role,
     channelCount: r.channelCount,
   }))

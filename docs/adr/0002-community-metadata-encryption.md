@@ -79,7 +79,13 @@ open, guarded by an in-memory `grantedTo` cache).
 
 **Rotation on member removal — IMPLEMENTED (Phase B).** Removing a member (or a
 member leaving) flags the community `rotationPending` and nudges remaining
-leaders (`community.rotation_needed`). A leader's client then mints a new K_meta,
+leaders (`community.rotation_needed`). A leader processes it three ways: on the
+live WS nudge, on opening the community, and on **WS (re)connect** — a
+connect-time sweep (`GET /communities` → rotate any pending community where the
+account is a leader). So a *removal* rotates immediately (the acting leader is
+online), and a *voluntary leave* rotates as soon as any leader device is simply
+connected to Gathernet — no need to open the community. A leader's client then
+mints a new K_meta,
 re-encrypts every community/channel `metaCiphertext` and re-seals avatar media
 under it, and posts all of it in one `POST /communities/:id/rotate` request. The
 server applies it atomically with a **compare-and-set on `keyEpoch`** (concurrent

@@ -87,6 +87,8 @@ export const communityListItemSchema = z.object({
   metaCiphertext: z.string().nullable(),
   avatarMediaId: z.string().nullable(),
   keyEpoch: z.number().int().nonnegative(),
+  /** true → a leader's client should rotate K_meta (re-encrypt metadata) */
+  rotationPending: z.boolean(),
   myRole: communityRoleSchema,
   channelCount: z.number().int().nonnegative(),
 })

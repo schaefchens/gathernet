@@ -7,7 +7,7 @@ import {
   type SnapshotStore,
   type SyncTransport,
 } from '@gathernet/mls-sync'
-import type { ChannelJoinInfoResponse, MailboxMessage } from '@gathernet/shared'
+import type { ChannelJoinInfoResponse, CommunityListItem, MailboxMessage } from '@gathernet/shared'
 import { create } from 'zustand'
 import { ApiError, api } from '../lib/api.ts'
 import {
@@ -206,10 +206,35 @@ class CommunityChatStore {
       }),
       wsClient.on('hello.ok', () => {
         void this.catchUpAll()
+        void this.sweepRotations()
       }),
     )
 
-    if (wsClient.status === 'connected') await this.catchUpAll()
+    if (wsClient.status === 'connected') {
+      await this.catchUpAll()
+      void this.sweepRotations()
+    }
+  }
+
+  /**
+   * On (re)connect, process any pending K_meta rotations for communities where
+   * this account is a leader — so simply having Gathernet open on any device is
+   * enough to rotate after a member left, without opening the community. Cheap:
+   * one list fetch; rotation only runs where `rotationPending` is set.
+   */
+  private async sweepRotations(): Promise<void> {
+    if (!this.record) return
+    let list: { communities: CommunityListItem[] }
+    try {
+      list = await api<{ communities: CommunityListItem[] }>('GET', '/api/v1/communities')
+    } catch {
+      return
+    }
+    for (const c of list.communities) {
+      if ((c.myRole === 'owner' || c.myRole === 'leader') && c.rotationPending) {
+        await this.rotateCommunity(c.communityId)
+      }
+    }
   }
 
   reset(): void {
