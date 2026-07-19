@@ -247,3 +247,67 @@ test('communities v2: K_meta syncs to a restored second device via receipt-key g
   await ctxB1.close()
   await ctxB2.close()
 })
+
+test('communities v2: removing a member rotates K_meta; remaining members re-key', async ({
+  browser,
+}) => {
+  const ctxA = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] })
+  const ctxB = await browser.newContext()
+  const ctxC = await browser.newContext()
+  const { page: alice } = await newUser(ctxA, 'Pastor Alice')
+  const { page: bob } = await newUser(ctxB, 'Member Bob')
+  const { page: carol } = await newUser(ctxC, 'Member Carol')
+  alice.on('dialog', (d) => void d.accept()) // the Remove confirm()
+
+  // Alice creates the community and grabs the K_meta invite link.
+  await alice.getByRole('link', { name: 'Communities' }).click()
+  await alice.getByRole('button', { name: 'Create community' }).first().click()
+  await alice.getByPlaceholder('Community name').fill('Grace Fellowship')
+  await alice.getByRole('button', { name: 'Create community' }).last().click()
+  await expect(alice.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+    timeout: 30_000,
+  })
+  await alice.getByRole('button', { name: 'Copy', exact: true }).click({ timeout: 20_000 })
+  const payload = await alice.evaluate(() => navigator.clipboard.readText())
+
+  // Bob + Carol join by link — both hold the epoch-0 K_meta.
+  for (const p of [bob, carol]) {
+    await p.getByRole('link', { name: 'Communities' }).click()
+    await p.getByRole('button', { name: 'Join with a code' }).click()
+    await p.getByPlaceholder('Invite code or link').fill(payload)
+    await p.getByRole('button', { name: 'Join', exact: true }).click()
+    await expect(p.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+      timeout: 30_000,
+    })
+  }
+
+  // Alice removes Carol → the server flags rotation + nudges Alice, whose client
+  // rotates K_meta (re-encrypts metadata under a new epoch, re-grants Alice+Bob).
+  await alice
+    .getByRole('listitem')
+    .filter({ hasText: 'Member Carol' })
+    .getByRole('button', { name: 'Remove' })
+    .click()
+
+  // Carol loses access to the community.
+  await expect(carol.getByRole('heading', { name: 'Grace Fellowship' })).toHaveCount(0, {
+    timeout: 30_000,
+  })
+  // Bob remains (this also gives the rotation time to complete).
+  await expect(bob.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+    timeout: 30_000,
+  })
+
+  // Alice renames the community. The new name is sealed under the NEW (post-
+  // rotation) key — so Bob can only read it if he re-keyed to the new epoch.
+  await alice.getByRole('button', { name: 'Community settings' }).click()
+  await alice.getByPlaceholder('Community name').fill('Rekeyed Fellowship')
+  await alice.getByRole('button', { name: 'Save' }).click()
+  await expect(bob.getByRole('heading', { name: 'Rekeyed Fellowship' })).toBeVisible({
+    timeout: 40_000,
+  })
+
+  await ctxA.close()
+  await ctxB.close()
+  await ctxC.close()
+})

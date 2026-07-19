@@ -77,11 +77,25 @@ format is untouched. Grants are demand-driven and rate-friendly (WS events and
 list views only *fetch*; sealing to others happens on an explicit community
 open, guarded by an in-memory `grantedTo` cache).
 
-**Rotation on member removal — still deferred (Phase B).** K_meta is not yet
-rotated when a member is removed, so a removed member who cached K_meta could
-decrypt directory metadata *if* they could fetch the ciphertext — but the server
-denies removed/left members, so directory forward-secrecy relies on server
-access control, not crypto. (Messages keep true MLS forward secrecy regardless.)
-The `communities.keyEpoch` column and the epoch in `community_key_grants` are
-already in place so Phase B (client-driven re-encryption under a new epoch +
-compare-and-set rotation) needs no further migration.
+**Rotation on member removal — IMPLEMENTED (Phase B).** Removing a member (or a
+member leaving) flags the community `rotationPending` and nudges remaining
+leaders (`community.rotation_needed`). A leader's client then mints a new K_meta,
+re-encrypts every community/channel `metaCiphertext` and re-seals avatar media
+under it, and posts all of it in one `POST /communities/:id/rotate` request. The
+server applies it atomically with a **compare-and-set on `keyEpoch`** (concurrent
+rotations lose → 409 and pick up the winner's key), swaps in the ciphertext,
+deletes stale-epoch grants, and installs new-epoch grants for the still-active
+member devices only (never the removed member). The server still sees only
+ciphertext — never the old or new K_meta.
+
+After rotation, a removed member's cached K_meta is cryptographically useless: it
+cannot decrypt new-epoch metadata, and they receive no new grant (and remain
+denied by access control). Remaining members re-key by fetching their new-epoch
+grant (K_meta is stored per-epoch client-side; the invite fragment now carries
+`<epoch>.<key>` so a joiner detects staleness). Messages keep MLS forward secrecy
+independently. Migration 0010 (`communities.rotationPending`).
+
+**Deferred:** rotation currently re-seals avatar image bytes; an optimization
+(wrap a per-media key inside the K_meta-sealed metadata so only small blobs are
+re-sealed) is noted but unbuilt. Large-community grant fan-out (>~300 devices)
+also remains future work.
