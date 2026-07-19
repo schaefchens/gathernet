@@ -16,6 +16,7 @@ import type {
   GroupId,
   MyKeyGrantResponse,
   PostKeyGrantsRequest,
+  RotateRequest,
   ServerMessage,
   UpdateChannelRequest,
   UpdateCommunityRequest,
@@ -221,6 +222,7 @@ export async function listCommunities(db: Db, accountId: string): Promise<Commun
       communityId: communities.communityId,
       metaCiphertext: communities.metaCiphertext,
       avatarMediaId: communities.avatarMediaId,
+      keyEpoch: communities.keyEpoch,
       role: communityMembers.role,
       channelCount: sql<number>`(
         SELECT count(*)::int FROM community_channels cc
@@ -237,6 +239,7 @@ export async function listCommunities(db: Db, accountId: string): Promise<Commun
     communityId: r.communityId as CommunityId,
     metaCiphertext: b64(r.metaCiphertext),
     avatarMediaId: r.avatarMediaId,
+    keyEpoch: r.keyEpoch,
     myRole: r.role,
     channelCount: r.channelCount,
   }))
@@ -344,6 +347,8 @@ export async function getCommunityDetail(
       communityId: community.communityId as CommunityId,
       metaCiphertext: b64(community.metaCiphertext),
       avatarMediaId: community.avatarMediaId,
+      keyEpoch: community.keyEpoch,
+      rotationPending: community.rotationPending,
       ownerAccountId: community.ownerAccountId as AccountId,
     },
     myRole: membership.role,
@@ -1306,6 +1311,29 @@ async function clearChannelMemberships(
     )
 }
 
+/**
+ * Flag the community for K_meta rotation and nudge remaining leaders. The
+ * server can't rotate (it never sees K_meta) — a leader's client does the
+ * re-encryption via `rotateCommunity`. The flag makes it durable: a leader that
+ * missed the WS event rotates the next time it opens the community.
+ */
+async function requestRotation(
+  db: Db,
+  registry: ConnectionRegistry,
+  communityId: string,
+): Promise<void> {
+  await db
+    .update(communities)
+    .set({ rotationPending: true })
+    .where(eq(communities.communityId, communityId))
+  for (const acct of await leaderAccountIds(db, communityId)) {
+    registry.sendToAccount(acct, {
+      type: 'community.rotation_needed',
+      payload: { communityId: communityId as CommunityId },
+    })
+  }
+}
+
 export async function removeMember(
   db: Db,
   registry: ConnectionRegistry,
@@ -1342,6 +1370,8 @@ export async function removeMember(
     payload: { communityId: communityId as CommunityId, accountId: targetAccountId as AccountId },
   }
   for (const acct of new Set(recipients)) registry.sendToAccount(acct, message)
+  // The removed member held K_meta — rotate it so their cached copy goes stale.
+  await requestRotation(db, registry, communityId)
 }
 
 export async function leaveCommunity(
@@ -1371,6 +1401,8 @@ export async function leaveCommunity(
     payload: { communityId: communityId as CommunityId, accountId: accountId as AccountId },
   }
   for (const acct of new Set(recipients)) registry.sendToAccount(acct, message)
+  // The departing member held K_meta — rotate it.
+  await requestRotation(db, registry, communityId)
 }
 
 /* --------------------- K_meta cross-device key grants --------------------- */
@@ -1506,6 +1538,117 @@ export async function myKeyGrant(
     grant: row
       ? { sealedKMeta: row.sealedKMeta.toString('base64'), senderPkB64: row.senderPkB64 }
       : null,
+  }
+}
+
+/**
+ * Apply a leader-driven K_meta rotation atomically. All metadata + media are
+ * re-encrypted client-side under a new key; the server bumps the epoch with a
+ * compare-and-set (concurrent rotations lose → 409), swaps in the ciphertext,
+ * drops stale grants, and installs the new-epoch grants for remaining devices.
+ * The server never sees K_meta.
+ */
+export async function rotateCommunity(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  input: RotateRequest,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  requireLeader(membership)
+  const newEpoch = input.fromEpoch + 1
+
+  const granteeAccounts = await db.transaction(async (tx) => {
+    // Compare-and-set the epoch: only one rotation from `fromEpoch` wins.
+    const bumped = await tx
+      .update(communities)
+      .set({
+        keyEpoch: newEpoch,
+        rotationPending: false,
+        metaCiphertext: input.community.metaCiphertext
+          ? bufOf(input.community.metaCiphertext)
+          : null,
+      })
+      .where(
+        and(eq(communities.communityId, communityId), eq(communities.keyEpoch, input.fromEpoch)),
+      )
+      .returning({ id: communities.communityId })
+    if (bumped.length === 0) throw new ServiceError(409, 'rotation_stale')
+
+    for (const ch of input.channels) {
+      await tx
+        .update(communityChannels)
+        .set({ metaCiphertext: ch.metaCiphertext ? bufOf(ch.metaCiphertext) : null })
+        .where(
+          and(
+            eq(communityChannels.channelId, ch.channelId),
+            eq(communityChannels.communityId, communityId),
+          ),
+        )
+    }
+    for (const m of input.media) {
+      await tx
+        .update(communityMedia)
+        .set({ ciphertext: bufOf(m.ciphertext) })
+        .where(
+          and(eq(communityMedia.mediaId, m.mediaId), eq(communityMedia.communityId, communityId)),
+        )
+    }
+
+    // Old-epoch grants (incl. any to the removed member) become useless — drop them.
+    await tx
+      .delete(communityKeyGrants)
+      .where(
+        and(
+          eq(communityKeyGrants.communityId, communityId),
+          lt(communityKeyGrants.keyEpoch, newEpoch),
+        ),
+      )
+
+    // Install new grants, but only for devices of still-active members.
+    const allowed = new Set((await grantableDeviceRows(tx, communityId)).map((r) => r.deviceId))
+    for (const g of input.grants) {
+      if (!allowed.has(g.granteeDeviceId)) throw new ServiceError(400, 'invalid_grantee')
+    }
+    if (input.grants.length > 0) {
+      await tx
+        .insert(communityKeyGrants)
+        .values(
+          input.grants.map((g) => ({
+            communityId,
+            keyEpoch: newEpoch,
+            granteeDeviceId: g.granteeDeviceId,
+            sealedKMeta: bufOf(g.sealedKMeta),
+            senderPkB64: g.senderPkB64,
+            createdBy: accountId,
+          })),
+        )
+        .onConflictDoNothing()
+    }
+
+    const owners = await tx
+      .select({ accountId: devices.accountId })
+      .from(devices)
+      .where(
+        inArray(
+          devices.deviceId,
+          input.grants.map((g) => g.granteeDeviceId),
+        ),
+      )
+    return new Set(owners.map((o) => o.accountId))
+  })
+
+  // Members refetch metadata (new epoch); grantees' other devices fetch the key.
+  await emitToMembers(db, registry, communityId, {
+    type: 'community.updated',
+    payload: { communityId: communityId as CommunityId },
+  })
+  for (const acct of granteeAccounts) {
+    registry.sendToAccount(acct, {
+      type: 'community.key_grants_available',
+      payload: { communityId: communityId as CommunityId },
+    })
   }
 }
 

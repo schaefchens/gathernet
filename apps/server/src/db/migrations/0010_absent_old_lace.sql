@@ -1,0 +1,1 @@
+ALTER TABLE "communities" ADD COLUMN "rotation_pending" boolean DEFAULT false NOT NULL;

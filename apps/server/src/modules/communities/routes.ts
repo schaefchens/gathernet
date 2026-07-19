@@ -11,6 +11,7 @@ import {
   postKeyGrantsRequestSchema,
   publishChannelGroupInfoRequestSchema,
   resolveJoinRequestSchema,
+  rotateRequestSchema,
   setMemberRoleRequestSchema,
   setModeratorRequestSchema,
   setMutedRequestSchema,
@@ -49,6 +50,7 @@ import {
   removeMember,
   resolveJoinRequest,
   revokeCommunityInvite,
+  rotateCommunity,
   setMemberRole,
   setModerator,
   setMuted,
@@ -245,6 +247,13 @@ export function registerCommunityRoutes(
       return { ok: true }
     },
   )
+
+  app.post<{ Params: { id: string } }>('/api/v1/communities/:id/rotate', auth, async (request) => {
+    const session = requireSession(request)
+    const body = rotateRequestSchema.parse(request.body)
+    await rotateCommunity(db, registry, session.accountId, request.params.id, body)
+    return { ok: true }
+  })
 
   app.post<{ Params: { id: string } }>(
     '/api/v1/communities/:id/invites',

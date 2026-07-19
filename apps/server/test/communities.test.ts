@@ -1104,6 +1104,135 @@ describe('K_meta cross-device key grants', () => {
   })
 })
 
+describe('K_meta rotation on removal (Phase B)', () => {
+  const rotateUrl = (id: string) => `/api/v1/communities/${id}/rotate`
+  const grantFor = async (u: TestUser & { receipt: Receipt }, kMeta: Buffer) => {
+    const s = await eciesSeal(u.receipt.publicKeyB64, new Uint8Array(kMeta))
+    return { granteeDeviceId: u.deviceId, sealedKMeta: s.sealedB64, senderPkB64: s.senderPkB64 }
+  }
+
+  it('bumps the epoch, re-grants remaining devices, and rejects a stale rotation', async () => {
+    const owner = await createUserWithReceipt('OwnerRot')
+    const member = await createUserWithReceipt('MemberRot')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+
+    const newKMeta = randomBytes(32)
+    const newMeta = sealed()
+    const rot = await app.inject({
+      method: 'POST',
+      url: rotateUrl(communityId),
+      headers: auth(owner),
+      payload: {
+        fromEpoch: 0,
+        community: { metaCiphertext: newMeta },
+        channels: [],
+        media: [],
+        grants: [await grantFor(owner, newKMeta), await grantFor(member, newKMeta)],
+      },
+    })
+    expect(rot.statusCode).toBe(200)
+
+    const d = await detail(owner, communityId)
+    expect(d.json().community.keyEpoch).toBe(1)
+    expect(d.json().community.rotationPending).toBe(false)
+    expect(d.json().community.metaCiphertext).toBe(newMeta)
+
+    // The remaining member recovers the NEW K_meta at epoch 1.
+    const mine = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/key-grants/mine`,
+      headers: auth(member),
+    })
+    expect(mine.json().keyEpoch).toBe(1)
+    const grant = mine.json().grant as { sealedKMeta: string; senderPkB64: string }
+    const priv = await importEciesPrivateKey(member.receipt.privateKeyPkcs8B64)
+    const opened = await eciesOpen(
+      priv,
+      grant.senderPkB64,
+      grant.sealedKMeta,
+      member.receipt.publicKeyB64,
+    )
+    expect(Buffer.from(opened)).toEqual(newKMeta)
+
+    // A second rotation from the now-stale fromEpoch=0 is refused (CAS).
+    const stale = await app.inject({
+      method: 'POST',
+      url: rotateUrl(communityId),
+      headers: auth(owner),
+      payload: {
+        fromEpoch: 0,
+        community: { metaCiphertext: sealed() },
+        channels: [],
+        media: [],
+        grants: [],
+      },
+    })
+    expect(stale.statusCode).toBe(409)
+    expect(stale.json().error).toBe('rotation_stale')
+  })
+
+  it('removal flags rotation + notifies leaders; rotating excludes the removed member', async () => {
+    const owner = await createUserWithReceipt('OwnerRot2')
+    const member = await createUserWithReceipt('MemberRot2')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+
+    const ownerWs = await TestWsClient.connect(port, owner.token)
+    const rm = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/members/${member.accountId}/remove`,
+      headers: auth(owner),
+    })
+    expect(rm.statusCode).toBe(200)
+    await ownerWs.waitFor((m) => m.type === 'community.rotation_needed')
+    expect((await detail(owner, communityId)).json().community.rotationPending).toBe(true)
+
+    // Sealing the new key to the removed member's device is refused (no leak).
+    const newKMeta = randomBytes(32)
+    const bad = await app.inject({
+      method: 'POST',
+      url: rotateUrl(communityId),
+      headers: auth(owner),
+      payload: {
+        fromEpoch: 0,
+        community: { metaCiphertext: sealed() },
+        channels: [],
+        media: [],
+        grants: [await grantFor(member, newKMeta)],
+      },
+    })
+    expect(bad.statusCode).toBe(400)
+
+    // Rotating with only the owner's grant succeeds and clears the flag.
+    const rot = await app.inject({
+      method: 'POST',
+      url: rotateUrl(communityId),
+      headers: auth(owner),
+      payload: {
+        fromEpoch: 0,
+        community: { metaCiphertext: sealed() },
+        channels: [],
+        media: [],
+        grants: [await grantFor(owner, newKMeta)],
+      },
+    })
+    expect(rot.statusCode).toBe(200)
+    expect((await detail(owner, communityId)).json().community.rotationPending).toBe(false)
+    // The removed member can't reach the community at all.
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/v1/communities/${communityId}/key-grants/mine`,
+          headers: auth(member),
+        })
+      ).statusCode,
+    ).toBe(404)
+    await ownerWs.close()
+  })
+})
+
 describe('disappearing messages + invite pruning', () => {
   it('prunes channel ciphertext past the per-channel TTL', async () => {
     const owner = await createUser('OwnerTTL')

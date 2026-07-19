@@ -86,6 +86,7 @@ export const communityListItemSchema = z.object({
   communityId: communityIdSchema,
   metaCiphertext: z.string().nullable(),
   avatarMediaId: z.string().nullable(),
+  keyEpoch: z.number().int().nonnegative(),
   myRole: communityRoleSchema,
   channelCount: z.number().int().nonnegative(),
 })
@@ -128,6 +129,9 @@ export const communityDetailResponseSchema = z.object({
     communityId: communityIdSchema,
     metaCiphertext: z.string().nullable(),
     avatarMediaId: z.string().nullable(),
+    keyEpoch: z.number().int().nonnegative(),
+    /** true → a leader's client should rotate K_meta (re-encrypt metadata) */
+    rotationPending: z.boolean(),
     ownerAccountId: accountIdSchema,
   }),
   myRole: communityRoleSchema,
@@ -318,6 +322,27 @@ export const myKeyGrantResponseSchema = z.object({
   grant: z.object({ sealedKMeta: z.base64(), senderPkB64: z.base64() }).nullable(),
 })
 
+/**
+ * K_meta rotation (member removal → forward secrecy). A leader's client
+ * generates a new K_meta, re-encrypts all metadata + media under it, and posts
+ * this in one shot. The server applies it atomically with a compare-and-set on
+ * `fromEpoch` (concurrent rotations lose and retry). The server sees only
+ * ciphertext — never the old or new K_meta.
+ */
+export const rotateRequestSchema = z.object({
+  fromEpoch: z.number().int().nonnegative(),
+  /** re-encrypted community metadata under the new key (null if none) */
+  community: z.object({ metaCiphertext: metaCiphertextSchema.nullable() }),
+  /** re-encrypted channel metadata under the new key */
+  channels: z.array(
+    z.object({ channelId: groupIdSchema, metaCiphertext: metaCiphertextSchema.nullable() }),
+  ),
+  /** re-sealed avatar media (ciphertext replaced in place, mediaId kept) */
+  media: z.array(z.object({ mediaId: mediaIdSchema, ciphertext: z.base64() })),
+  /** new-epoch grants sealed to every remaining active-member device */
+  grants: z.array(keyGrantSchema),
+})
+
 export const channelMembersResponseSchema = z.object({
   members: z.array(channelMemberSchema),
 })
@@ -359,4 +384,5 @@ export type CommunityDevicesResponse = z.infer<typeof communityDevicesResponseSc
 export type KeyGrant = z.infer<typeof keyGrantSchema>
 export type PostKeyGrantsRequest = z.infer<typeof postKeyGrantsRequestSchema>
 export type MyKeyGrantResponse = z.infer<typeof myKeyGrantResponseSchema>
+export type RotateRequest = z.infer<typeof rotateRequestSchema>
 export type SetMemberRoleRequest = z.infer<typeof setMemberRoleRequestSchema>

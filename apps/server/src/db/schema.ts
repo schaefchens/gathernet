@@ -511,9 +511,12 @@ export const communities = pgTable('communities', {
   /** seal(K_meta, {name, description}) — server never sees plaintext */
   metaCiphertext: bytea('meta_ciphertext'),
   avatarMediaId: text('avatar_media_id'),
-  /** current K_meta epoch; bumped on rotation (Phase B). Grants + a client's
-   *  held key are matched to this. */
+  /** current K_meta epoch; bumped on rotation. Grants + a client's held key
+   *  are matched to this. */
   keyEpoch: integer('key_epoch').notNull().default(0),
+  /** set when a member is removed/leaves; a leader's client then rotates K_meta
+   *  (re-encrypts metadata under a new epoch) and clears this. */
+  rotationPending: boolean('rotation_pending').notNull().default(false),
   ownerAccountId: text('owner_account_id')
     .notNull()
     .references(() => accounts.accountId),

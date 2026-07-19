@@ -282,6 +282,15 @@ export const communityKeyGrantsMessage = z.object({
   }),
 })
 
+/** To remaining community leaders: a member left/was removed → a leader's client
+ *  should rotate K_meta (re-encrypt metadata under a new epoch). */
+export const communityRotationNeededMessage = z.object({
+  type: z.literal('community.rotation_needed'),
+  payload: z.object({
+    communityId: communityIdSchema,
+  }),
+})
+
 export const communityChannelCreatedMessage = z.object({
   type: z.literal('community.channel_created'),
   payload: z.object({
@@ -392,6 +401,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   communityRoleChangedMessage,
   communityUpdatedMessage,
   communityKeyGrantsMessage,
+  communityRotationNeededMessage,
   communityChannelCreatedMessage,
   communityChannelUpdatedMessage,
   communityChannelDeletedMessage,
