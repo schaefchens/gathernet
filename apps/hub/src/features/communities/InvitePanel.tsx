@@ -4,7 +4,12 @@ import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../lib/api.ts'
-import { buildInvitePayload, COMMUNITY_INVITE_SCHEME, getKMeta } from '../../lib/community-keys.ts'
+import {
+  buildInvitePayload,
+  COMMUNITY_INVITE_SCHEME,
+  getKMeta,
+  getKMetaEpoch,
+} from '../../lib/community-keys.ts'
 
 function QrDisplay({ value }: { value: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -61,8 +66,9 @@ export function InvitePanel({ communityId }: { communityId: string }) {
     let cancelled = false
     void (async () => {
       const kMeta = await getKMeta(communityId)
+      const epoch = await getKMetaEpoch(communityId)
       const value = kMeta
-        ? buildInvitePayload(invite.code, kMeta)
+        ? buildInvitePayload(invite.code, kMeta, epoch)
         : `${COMMUNITY_INVITE_SCHEME}${invite.code}`
       if (!cancelled) setShareValue(value)
     })()

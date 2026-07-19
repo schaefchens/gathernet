@@ -59,6 +59,14 @@ wsClient.on('community.key_grants_available', (m) => {
   })
 })
 
+// A member left/was removed → a leader's client rotates K_meta (re-encrypts
+// metadata under a new epoch). Non-leaders and non-holders no-op.
+wsClient.on('community.rotation_needed', (m) => {
+  void communityChatStore.rotateCommunity(m.payload.communityId).then((rotated) => {
+    if (rotated) invalidateCommunity(m.payload.communityId)
+  })
+})
+
 const router = createRouter({ routeTree })
 
 declare module '@tanstack/react-router' {

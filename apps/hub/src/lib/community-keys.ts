@@ -17,6 +17,7 @@
 
 import {
   base58Encode,
+  type CommunityDetailResponse,
   type CommunityDevice,
   type CommunityDevicesResponse,
   eciesOpen,
@@ -25,7 +26,7 @@ import {
   type MyKeyGrantResponse,
   SIG_DOMAIN,
 } from '@gathernet/shared'
-import { api } from './api.ts'
+import { ApiError, api, apiBytes } from './api.ts'
 import { loadCrypto } from './mls.ts'
 import { type DeviceRecord, secureStore } from './storage.ts'
 
@@ -34,8 +35,8 @@ const META_AAD = new TextEncoder().encode('gathernet:community-meta:v1')
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
-/** In-memory K_meta cache (communityId → key), cleared on session reset. */
-const cache = new Map<string, Uint8Array>()
+/** In-memory K_meta cache (communityId → {key, epoch}), cleared on session reset. */
+const cache = new Map<string, { key: Uint8Array; epoch: number }>()
 
 /** Subscribers notified when a K_meta becomes available (so views re-decrypt). */
 const kMetaListeners = new Set<() => void>()
@@ -88,27 +89,42 @@ function fromB64Url(s: string): Uint8Array {
 
 /* --------------------------------- invites -------------------------------- */
 
-/** Build the shareable invite payload carrying K_meta in the fragment. */
-export function buildInvitePayload(code: string, kMeta: Uint8Array): string {
-  return `${COMMUNITY_INVITE_SCHEME}${code}#${toB64Url(kMeta)}`
+/**
+ * Build the shareable invite payload carrying K_meta + its epoch in the
+ * fragment: `gathernet:community:<code>#<epoch>.<k_meta_b64url>`. The epoch lets
+ * a joiner store the key at the right generation, so a later rotation is
+ * detected (stale → fetch a fresh grant) rather than the key being trusted
+ * blindly.
+ */
+export function buildInvitePayload(code: string, kMeta: Uint8Array, epoch: number): string {
+  return `${COMMUNITY_INVITE_SCHEME}${code}#${epoch}.${toB64Url(kMeta)}`
 }
 
 /**
  * Parse a scanned/pasted/typed invite. Accepts a bare code, a
- * `gathernet:community:<code>` string, or the full `…<code>#<k_meta>` payload.
- * `kMeta` is null when no fragment was present (manual code entry) — the join
- * still succeeds; only metadata decryption is unavailable until K_meta arrives.
+ * `gathernet:community:<code>` string, or the full `…<code>#<epoch>.<k_meta>`
+ * payload. `kMeta` is null when no fragment was present (manual code entry) —
+ * the join still succeeds; metadata decryption waits for a grant. `epoch`
+ * defaults to 0 for legacy fragments that carried only the key.
  */
-export function parseInvite(raw: string): { code: string; kMeta: Uint8Array | null } {
+export function parseInvite(raw: string): {
+  code: string
+  kMeta: Uint8Array | null
+  epoch: number
+} {
   let s = raw.trim()
   if (s.startsWith(COMMUNITY_INVITE_SCHEME)) s = s.slice(COMMUNITY_INVITE_SCHEME.length)
   const hash = s.indexOf('#')
-  if (hash === -1) return { code: normalizeCode(s), kMeta: null }
+  if (hash === -1) return { code: normalizeCode(s), kMeta: null, epoch: 0 }
   const code = normalizeCode(s.slice(0, hash))
+  const frag = s.slice(hash + 1)
+  const dot = frag.indexOf('.')
+  const [epochStr, keyStr] = dot === -1 ? ['0', frag] : [frag.slice(0, dot), frag.slice(dot + 1)]
   try {
-    return { code, kMeta: fromB64Url(s.slice(hash + 1)) }
+    const epoch = Number.parseInt(epochStr, 10)
+    return { code, kMeta: fromB64Url(keyStr), epoch: Number.isFinite(epoch) ? epoch : 0 }
   } catch {
-    return { code, kMeta: null }
+    return { code, kMeta: null, epoch: 0 }
   }
 }
 
@@ -124,18 +140,34 @@ function normalizeCode(raw: string): string {
 
 /* ------------------------------- persistence ------------------------------ */
 
-export async function rememberKMeta(communityId: string, kMeta: Uint8Array): Promise<void> {
-  cache.set(communityId, kMeta)
-  await secureStore.putCommunityKey(communityId, kMeta)
+/** Persist a K_meta for a community at a given epoch (a newer epoch wins). */
+export async function rememberKMeta(
+  communityId: string,
+  kMeta: Uint8Array,
+  epoch: number,
+): Promise<void> {
+  const existing = cache.get(communityId)
+  if (existing && existing.epoch > epoch) return // never regress to an older key
+  cache.set(communityId, { key: kMeta, epoch })
+  await secureStore.putCommunityKey(communityId, kMeta, epoch)
   for (const listener of kMetaListeners) listener()
 }
 
-export async function getKMeta(communityId: string): Promise<Uint8Array | null> {
+async function loadEntry(communityId: string): Promise<{ key: Uint8Array; epoch: number } | null> {
   const cached = cache.get(communityId)
   if (cached) return cached
   const stored = await secureStore.getCommunityKey(communityId)
   if (stored) cache.set(communityId, stored)
   return stored
+}
+
+export async function getKMeta(communityId: string): Promise<Uint8Array | null> {
+  return (await loadEntry(communityId))?.key ?? null
+}
+
+/** The epoch of the locally-held K_meta, or -1 if none. */
+export async function getKMetaEpoch(communityId: string): Promise<number> {
+  return (await loadEntry(communityId))?.epoch ?? -1
 }
 
 /** Clear the in-memory caches (session reset / lock). */
@@ -234,16 +266,17 @@ async function verifyPeerReceiptKey(d: CommunityDevice): Promise<string | null> 
   }
 }
 
-/** Seal our held K_meta to every other active-member device that lacks a grant. */
-async function grantToOthers(communityId: string, myDeviceId: string, kMeta: Uint8Array) {
-  const { keyEpoch, devices } = await api<CommunityDevicesResponse>(
-    'GET',
-    `/api/v1/communities/${communityId}/devices`,
-  )
+/** Verify + seal K_meta to a set of member devices, returning grant entries. */
+async function buildGrants(
+  devices: CommunityDevice[],
+  myDeviceId: string,
+  kMeta: Uint8Array,
+  skipGranted: ((deviceId: string) => boolean) | null,
+): Promise<{ granteeDeviceId: string; sealedKMeta: string; senderPkB64: string }[]> {
   const grants: { granteeDeviceId: string; sealedKMeta: string; senderPkB64: string }[] = []
   for (const d of devices) {
     if (d.deviceId === myDeviceId) continue
-    if (grantedTo.has(`${communityId}:${d.deviceId}`)) continue
+    if (skipGranted?.(d.deviceId)) continue
     const receiptPk = await verifyPeerReceiptKey(d)
     if (!receiptPk) continue
     const sealed = await eciesSeal(receiptPk, kMeta)
@@ -253,29 +286,53 @@ async function grantToOthers(communityId: string, myDeviceId: string, kMeta: Uin
       senderPkB64: sealed.senderPkB64,
     })
   }
+  return grants
+}
+
+/** Seal our held K_meta to every other active-member device that lacks a grant. */
+async function grantToOthers(communityId: string, record: DeviceRecord): Promise<void> {
+  const kMeta = await getKMeta(communityId)
+  const localEpoch = await getKMetaEpoch(communityId)
+  if (!kMeta) return
+  const { keyEpoch, devices } = await api<CommunityDevicesResponse>(
+    'GET',
+    `/api/v1/communities/${communityId}/devices`,
+  )
+  // Only grant the CURRENT-epoch key — never seal a stale key to others.
+  if (localEpoch !== keyEpoch) return
+  const grants = await buildGrants(devices, record.deviceId, kMeta, (id) =>
+    grantedTo.has(`${communityId}:${keyEpoch}:${id}`),
+  )
   if (grants.length === 0) return
   try {
     await api('POST', `/api/v1/communities/${communityId}/key-grants`, { keyEpoch, grants })
-    for (const g of grants) grantedTo.add(`${communityId}:${g.granteeDeviceId}`)
+    for (const g of grants) grantedTo.add(`${communityId}:${keyEpoch}:${g.granteeDeviceId}`)
   } catch {
     // epoch race / offline — a later sync retries
   }
 }
 
 /**
- * FETCH-ONLY: if this device lacks K_meta, try to open a grant sealed to its
- * receipt key. Never seals to others, so it can't cascade — safe to call from
- * WS-event handlers and list views. Returns true iff K_meta was newly obtained.
+ * FETCH-ONLY: obtain a grant for this device if the server's key epoch is newer
+ * than ours (initial fetch, or after a rotation). Never seals to others, so it
+ * can't cascade — safe from WS-event handlers and list views. `knownEpoch` (the
+ * community's current epoch, if the caller already has it) skips the network
+ * round-trip when we're already current. Returns true iff K_meta advanced.
  */
-export async function fetchKMetaGrant(communityId: string, record: DeviceRecord): Promise<boolean> {
-  if (await getKMeta(communityId)) return false
+export async function fetchKMetaGrant(
+  communityId: string,
+  record: DeviceRecord,
+  knownEpoch?: number,
+): Promise<boolean> {
   if (!record.receiptPk || !record.receiptPrivPkcs8) return false
+  const localEpoch = await getKMetaEpoch(communityId)
+  if (knownEpoch !== undefined && localEpoch >= knownEpoch) return false
   try {
     const res = await api<MyKeyGrantResponse>(
       'GET',
       `/api/v1/communities/${communityId}/key-grants/mine`,
     )
-    if (!res.grant) return false
+    if (localEpoch >= res.keyEpoch || !res.grant) return false
     const priv = await importEciesPrivateKey(toStdB64(record.receiptPrivPkcs8))
     const opened = await eciesOpen(
       priv,
@@ -283,7 +340,7 @@ export async function fetchKMetaGrant(communityId: string, record: DeviceRecord)
       res.grant.sealedKMeta,
       record.receiptPk,
     )
-    await rememberKMeta(communityId, opened)
+    await rememberKMeta(communityId, opened, res.keyEpoch)
     return true
   } catch {
     return false // no grant yet / offline
@@ -292,15 +349,99 @@ export async function fetchKMetaGrant(communityId: string, record: DeviceRecord)
 
 /**
  * Full sync for one community, driven by an explicit community open (bounded).
- * Fetches this device's grant if it lacks K_meta; if it then holds K_meta,
- * seals it to member devices that don't have it yet. Returns true iff K_meta
- * was newly obtained. `grantToOthers` is the only path that issues grants, and
- * it's rate-friendly: the `grantedTo` cache means no re-seals, and it runs only
- * on navigation — never from WS events (which are fetch-only).
+ * Fetches this device's grant if its key is stale/missing; if it then holds the
+ * current key, seals it to member devices that don't have it yet. `grantToOthers`
+ * is the only proactive grant path and runs only on navigation (never from WS
+ * events), so it can't cascade.
  */
-export async function syncKeyGrants(communityId: string, record: DeviceRecord): Promise<boolean> {
-  const obtained = await fetchKMetaGrant(communityId, record)
-  const kMeta = await getKMeta(communityId)
-  if (kMeta) await grantToOthers(communityId, record.deviceId, kMeta).catch(() => {})
+export async function syncKeyGrants(
+  communityId: string,
+  record: DeviceRecord,
+  knownEpoch?: number,
+): Promise<boolean> {
+  const obtained = await fetchKMetaGrant(communityId, record, knownEpoch)
+  await grantToOthers(communityId, record).catch(() => {})
   return obtained
+}
+
+/**
+ * K_meta rotation (forward secrecy after a member leaves). A leader's client
+ * mints a new key, re-encrypts all metadata + avatars under it, and posts it in
+ * one shot; the server applies it with a compare-and-set on the epoch. Returns
+ * true iff this client performed the rotation. Safe no-op for non-leaders, when
+ * nothing is pending, or when this device doesn't hold the current key.
+ */
+export async function rotateCommunity(communityId: string, record: DeviceRecord): Promise<boolean> {
+  const detail = await api<CommunityDetailResponse>('GET', `/api/v1/communities/${communityId}`)
+  if (!detail.community.rotationPending) return false
+  if (detail.myRole !== 'owner' && detail.myRole !== 'leader') return false
+
+  const fromEpoch = detail.community.keyEpoch
+  const oldKMeta = await getKMeta(communityId)
+  if (!oldKMeta || (await getKMetaEpoch(communityId)) !== fromEpoch) {
+    // We don't hold the current key — fetch it; a later trigger rotates.
+    await fetchKMetaGrant(communityId, record, fromEpoch)
+    return false
+  }
+  const newEpoch = fromEpoch + 1
+  const newKMeta = generateKMeta()
+
+  let communityMeta: string | null = null
+  if (detail.community.metaCiphertext) {
+    const obj = await openMeta<CommunityMeta>(oldKMeta, detail.community.metaCiphertext)
+    communityMeta = obj ? await sealMeta(newKMeta, obj) : detail.community.metaCiphertext
+  }
+  const channels: { channelId: string; metaCiphertext: string | null }[] = []
+  for (const ch of detail.channels) {
+    if (!ch.metaCiphertext) {
+      channels.push({ channelId: ch.channelId, metaCiphertext: null })
+      continue
+    }
+    const obj = await openMeta<ChannelMeta>(oldKMeta, ch.metaCiphertext)
+    channels.push({
+      channelId: ch.channelId,
+      metaCiphertext: obj ? await sealMeta(newKMeta, obj) : ch.metaCiphertext,
+    })
+  }
+
+  const mediaIds = new Set<string>()
+  if (detail.community.avatarMediaId) mediaIds.add(detail.community.avatarMediaId)
+  for (const ch of detail.channels) if (ch.avatarMediaId) mediaIds.add(ch.avatarMediaId)
+  const media: { mediaId: string; ciphertext: string }[] = []
+  for (const mediaId of mediaIds) {
+    try {
+      const plain = await openMedia(
+        oldKMeta,
+        await apiBytes(`/api/v1/communities/media/${mediaId}`),
+      )
+      if (plain) media.push({ mediaId, ciphertext: await sealMedia(newKMeta, plain) })
+    } catch {
+      // media unreadable — leave it (a stale avatar is cosmetic)
+    }
+  }
+
+  const { devices } = await api<CommunityDevicesResponse>(
+    'GET',
+    `/api/v1/communities/${communityId}/devices`,
+  )
+  const grants = await buildGrants(devices, record.deviceId, newKMeta, null)
+
+  try {
+    await api('POST', `/api/v1/communities/${communityId}/rotate`, {
+      fromEpoch,
+      community: { metaCiphertext: communityMeta },
+      channels,
+      media,
+      grants,
+    })
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      // Another leader rotated first — just pick up the new key.
+      await fetchKMetaGrant(communityId, record, newEpoch)
+    }
+    return false
+  }
+  await rememberKMeta(communityId, newKMeta, newEpoch)
+  for (const g of grants) grantedTo.add(`${communityId}:${newEpoch}:${g.granteeDeviceId}`)
+  return true
 }

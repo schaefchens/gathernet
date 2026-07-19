@@ -75,20 +75,27 @@ function CommunityDetailScreen() {
     void queryClient.invalidateQueries({ queryKey: ['communities'] })
   }
 
-  // Cross-device K_meta sync: fetch a grant if this device lacks the key (and
-  // seed grants to other member devices). If the key arrives, re-decrypt views.
+  // K_meta sync + rotation. Fetch our grant if the key is stale/missing; seed
+  // grants to other member devices; and, if a member left and we're a leader,
+  // rotate K_meta (re-encrypt metadata under a new epoch). Re-decrypt on change.
+  const keyEpoch = detail?.community.keyEpoch
+  const rotationPending = detail?.community.rotationPending ?? false
   useEffect(() => {
+    if (keyEpoch === undefined) return
     let cancelled = false
-    void communityChatStore.syncKeyGrants(communityId).then((obtained) => {
-      if (obtained && !cancelled) {
+    void (async () => {
+      const obtained = await communityChatStore.syncKeyGrants(communityId, keyEpoch)
+      const rotated =
+        rotationPending && isLeader ? await communityChatStore.rotateCommunity(communityId) : false
+      if ((obtained || rotated) && !cancelled) {
         void queryClient.invalidateQueries({ queryKey: ['community', communityId] })
         void queryClient.invalidateQueries({ queryKey: ['communities'] })
       }
-    })
+    })()
     return () => {
       cancelled = true
     }
-  }, [communityId, queryClient])
+  }, [communityId, keyEpoch, rotationPending, isLeader, queryClient])
 
   const deleteChannel = useMutation({
     mutationFn: (channelId: string) =>

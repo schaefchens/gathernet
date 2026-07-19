@@ -154,15 +154,23 @@ export const secureStore = {
    * sealed under the DMK. Stored in the `secure` store under a `kmeta:<id>` key
    * (no DB-version bump needed — the store has no fixed keyPath).
    */
-  async getCommunityKey(communityId: string): Promise<Uint8Array | null> {
+  async getCommunityKey(communityId: string): Promise<{ key: Uint8Array; epoch: number } | null> {
     const sealed = await tx<Uint8Array | undefined>('secure', 'readonly', (s) =>
       s.get(`kmeta:${communityId}`),
     )
-    return sealed ? requireBox().open(sealed, `secure:kmeta:${communityId}`) : null
+    if (!sealed) return null
+    const plain = requireBox().open(sealed, `secure:kmeta:${communityId}`)
+    // New format: 4-byte LE epoch prefix + key. Legacy (Phase A): bare key ⇒ epoch 0.
+    if (plain.length <= 32) return { key: plain, epoch: 0 }
+    const epoch = new DataView(plain.buffer, plain.byteOffset, 4).getUint32(0, true)
+    return { key: plain.subarray(4), epoch }
   },
-  putCommunityKey(communityId: string, key: Uint8Array): Promise<unknown> {
+  putCommunityKey(communityId: string, key: Uint8Array, epoch: number): Promise<unknown> {
+    const buf = new Uint8Array(4 + key.length)
+    new DataView(buf.buffer).setUint32(0, epoch, true)
+    buf.set(key, 4)
     return tx('secure', 'readwrite', (s) =>
-      s.put(requireBox().seal(key, `secure:kmeta:${communityId}`), `kmeta:${communityId}`),
+      s.put(requireBox().seal(buf, `secure:kmeta:${communityId}`), `kmeta:${communityId}`),
     )
   },
 }

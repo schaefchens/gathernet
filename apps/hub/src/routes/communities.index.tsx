@@ -53,7 +53,7 @@ function CommunitiesScreen() {
     void (async () => {
       let any = false
       for (const c of list) {
-        if (await communityChatStore.fetchKeyGrant(c.communityId)) any = true
+        if (await communityChatStore.fetchKeyGrant(c.communityId, c.keyEpoch)) any = true
       }
       if (any && !cancelled) void queryClient.invalidateQueries({ queryKey: ['communities'] })
     })()
@@ -159,7 +159,7 @@ function CreatePanel({ onDone }: { onDone: () => void }) {
       const res = await api<CreateCommunityResponse>('POST', '/api/v1/communities', {
         metaCiphertext,
       })
-      await rememberKMeta(res.communityId, kMeta)
+      await rememberKMeta(res.communityId, kMeta, 0)
       return res
     },
     onSuccess: (res) => {
@@ -207,14 +207,14 @@ function JoinPanel({ onDone }: { onDone: () => void }) {
 
   const accept = async (raw: string) => {
     setError(null)
-    const { code: parsedCode, kMeta } = parseInvite(raw)
+    const { code: parsedCode, kMeta, epoch } = parseInvite(raw)
     try {
       const res = await api<AcceptCommunityInviteResponse>(
         'POST',
         '/api/v1/communities/invites/accept',
         { code: parsedCode },
       )
-      if (kMeta) await rememberKMeta(res.communityId, kMeta)
+      if (kMeta) await rememberKMeta(res.communityId, kMeta, epoch)
       void queryClient.invalidateQueries({ queryKey: ['communities'] })
       onDone()
       void navigate({
