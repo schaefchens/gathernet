@@ -77,11 +77,15 @@ async function addChannel(
     title: string
     joinPolicy?: 'open' | 'request'
     postPolicy?: 'everyone' | 'moderators'
+    encryptionMode?: 'mls' | 'group_key'
   },
 ): Promise<void> {
   await page.getByRole('button', { name: 'Add channel' }).click()
   if (opts.emoji) await page.getByPlaceholder('Emoji').fill(opts.emoji)
   await page.getByPlaceholder('Channel title').fill(opts.title)
+  if (opts.encryptionMode) {
+    await page.getByLabel('Channel type').selectOption(opts.encryptionMode)
+  }
   if (opts.joinPolicy) await page.getByLabel('Who can join').selectOption(opts.joinPolicy)
   if (opts.postPolicy) await page.getByLabel('Who can post').selectOption(opts.postPolicy)
   await page.getByRole('button', { name: 'Create channel' }).click()
@@ -188,6 +192,62 @@ test('communities v2: encrypted metadata, K_meta out-of-band, open + request joi
   await aliceAnnounce.fill('Service at 10am')
   await alice.getByRole('button', { name: 'Send', exact: true }).click()
   await expect(bob.getByText('Service at 10am')).toBeVisible({ timeout: 40_000 })
+
+  await ctxA.close()
+  await ctxB.close()
+})
+
+test('mega-communities: group_key channel — scalable channel, bidirectional E2EE, coexists with mls', async ({
+  browser,
+}) => {
+  const ctxA = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] })
+  const ctxB = await browser.newContext()
+  const { page: alice } = await newUser(ctxA, 'Pastor Alice')
+  const { page: bob } = await newUser(ctxB, 'Member Bob')
+
+  await alice.getByRole('link', { name: 'Communities' }).click()
+  await alice.getByRole('button', { name: 'Create community' }).first().click()
+  await alice.getByPlaceholder('Community name').fill('Mega Church')
+  await alice.getByRole('button', { name: 'Create community' }).last().click()
+  await expect(alice.getByRole('heading', { name: 'Mega Church' })).toBeVisible({ timeout: 30_000 })
+
+  // A SCALABLE (group_key) channel — no MLS group; content sealed under K_channel.
+  await addChannel(alice, { emoji: '📣', title: 'general', encryptionMode: 'group_key' })
+  // ...alongside a normal (mls) channel, proving the two modes coexist.
+  await addChannel(alice, { title: 'elders' })
+
+  await alice.getByRole('button', { name: 'Copy', exact: true }).click({ timeout: 20_000 })
+  const payload = await alice.evaluate(() => navigator.clipboard.readText())
+
+  // Bob joins the community by link (K_meta decrypts the metadata).
+  await bob.getByRole('link', { name: 'Communities' }).click()
+  await bob.getByRole('button', { name: 'Join with a code' }).click()
+  await bob.getByPlaceholder('Invite code or link').fill(payload)
+  await bob.getByRole('button', { name: 'Join', exact: true }).click()
+  await expect(bob.getByRole('heading', { name: 'Mega Church' })).toBeVisible({ timeout: 30_000 })
+
+  // Bob opens + joins the group_key channel — no external-join; he fetches K_channel.
+  await bob.getByRole('button', { name: /general/ }).click()
+  await bob.getByRole('button', { name: 'Join', exact: true }).click()
+
+  // Alice opens the channel + posts. Opening tops up Bob's K_channel grant; the
+  // message is sealed under K_channel and carries Alice's Ed25519 sender signature.
+  await alice.getByRole('button', { name: /general/ }).click()
+  const aliceInput = alice.getByPlaceholder('Message…')
+  await expect(aliceInput).toBeEnabled({ timeout: 40_000 })
+  await aliceInput.fill('Grace and peace to the whole congregation')
+  await alice.getByRole('button', { name: 'Send', exact: true }).click()
+  // Bob obtains the grant, verifies the sender, and decrypts — proving group_key E2EE.
+  await expect(bob.getByText('Grace and peace to the whole congregation')).toBeVisible({
+    timeout: 60_000,
+  })
+
+  // Bob replies under the shared key; Alice reads it (bidirectional).
+  const bobInput = bob.getByPlaceholder('Message…')
+  await expect(bobInput).toBeEnabled({ timeout: 40_000 })
+  await bobInput.fill('And also with you')
+  await bob.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(alice.getByText('And also with you')).toBeVisible({ timeout: 60_000 })
 
   await ctxA.close()
   await ctxB.close()
