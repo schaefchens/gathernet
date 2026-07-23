@@ -67,6 +67,22 @@ wsClient.on('community.rotation_needed', (m) => {
   })
 })
 
+// A member left/was removed from a group_key channel → a manager's client mints
+// a new K_channel epoch. The server addressed this only to managers; a
+// non-holder / stale-epoch client no-ops (best effort).
+wsClient.on('community.channel_key_grants_available', (m) => {
+  void communityChatStore
+    .fetchChannelKey(m.payload.communityId, m.payload.channelId)
+    .then(() => invalidateCommunity(m.payload.communityId))
+})
+wsClient.on('community.channel_rotation_needed', (m) => {
+  void communityChatStore.rotateChannelForEvent(m.payload.communityId, m.payload.channelId)
+})
+// A member joined/changed in a group_key channel → a manager tops up their grant.
+wsClient.on('community.channel_member_changed', (m) => {
+  void communityChatStore.syncChannelGrants(m.payload.communityId, m.payload.channelId)
+})
+
 const router = createRouter({ routeTree })
 
 declare module '@tanstack/react-router' {

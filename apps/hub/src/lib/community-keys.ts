@@ -68,13 +68,13 @@ export function generateKMeta(): Uint8Array {
 
 /* ------------------------------- base64(url) ------------------------------ */
 
-function toStdB64(bytes: Uint8Array): string {
+export function toStdB64(bytes: Uint8Array): string {
   let s = ''
   for (const b of bytes) s += String.fromCharCode(b)
   return btoa(s)
 }
 
-function fromStdB64(s: string): Uint8Array {
+export function fromStdB64(s: string): Uint8Array {
   return Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 }
 
@@ -238,12 +238,15 @@ function concat(...parts: Uint8Array[]): Uint8Array {
 const grantedTo = new Set<string>()
 
 /**
- * Authenticate a peer device's receipt key WITHOUT trusting the server: the
- * DeviceCert must be signed by the claimed account identity (accountId = base58
- * identity pk), and `receiptPk` must be signed by the cert's device key. Returns
- * the verified receipt SPKI (base64) or null.
+ * Authenticate a peer device's DeviceCert WITHOUT trusting the server: the cert
+ * must be signed by the claimed account identity (accountId = base58 identity
+ * pk). Returns the cert's device public key + accountId, or null. This is the
+ * root of client-side sender authentication — a group_key channel message's
+ * Ed25519 signature is verified under the returned `devicePk`.
  */
-async function verifyPeerReceiptKey(d: CommunityDevice): Promise<string | null> {
+export async function verifyDeviceCert(
+  d: Pick<CommunityDevice, 'accountId' | 'deviceCert' | 'certSig'>,
+): Promise<{ devicePk: Uint8Array; accountId: string } | null> {
   try {
     const mls = await loadCrypto()
     const cert = fromStdB64(d.deviceCert)
@@ -254,9 +257,25 @@ async function verifyPeerReceiptKey(d: CommunityDevice): Promise<string | null> 
       concat(encoder.encode(SIG_DOMAIN.deviceCert), cert),
       fromStdB64(d.certSig),
     )
-    if (!certOk) return null
+    return certOk ? { devicePk, accountId: d.accountId } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Authenticate a peer device's receipt key WITHOUT trusting the server: the
+ * DeviceCert must be signed by the claimed account identity, and `receiptPk`
+ * must be signed by the cert's device key. Returns the verified receipt SPKI
+ * (base64) or null.
+ */
+export async function verifyPeerReceiptKey(d: CommunityDevice): Promise<string | null> {
+  const verified = await verifyDeviceCert(d)
+  if (!verified) return null
+  try {
+    const mls = await loadCrypto()
     const receiptOk = mls.ed25519Verify(
-      devicePk,
+      verified.devicePk,
       concat(encoder.encode(SIG_DOMAIN.receiptKey), fromStdB64(d.receiptPk)),
       fromStdB64(d.receiptPkSig),
     )

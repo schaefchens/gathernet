@@ -1,5 +1,6 @@
 import type {
   ChannelAccess,
+  ChannelEncryptionMode,
   ChannelJoinPolicy,
   ChannelPostPolicy,
   ChannelVisibility,
@@ -67,6 +68,10 @@ export function ChannelSettingsForm({
   const [visibility, setVisibility] = useState<ChannelVisibility>(channel?.visibility ?? 'listed')
   const [joinPolicy, setJoinPolicy] = useState<ChannelJoinPolicy>(channel?.joinPolicy ?? 'open')
   const [postPolicy, setPostPolicy] = useState<ChannelPostPolicy>(channel?.postPolicy ?? 'everyone')
+  // Encryption mode is fixed at creation (no migration between modes).
+  const [encryptionMode, setEncryptionMode] = useState<ChannelEncryptionMode>(
+    channel?.encryptionMode ?? 'mls',
+  )
   const [ttl, setTtl] = useState<number>(channel?.messageTtlDays ?? 30)
   const [avatarMediaId, setAvatarMediaId] = useState<string | null>(channel?.avatarMediaId ?? null)
   const [busy, setBusy] = useState(false)
@@ -96,10 +101,16 @@ export function ChannelSettingsForm({
             joinPolicy,
             postPolicy,
             messageTtlDays: ttl,
+            encryptionMode,
           },
         )
-        // The creator's first act: publish epoch-0 GroupInfo so members can join.
-        await communityChatStore.bootstrapChannel(res.channelId).catch((err) => {
+        // The creator's first act: establish the channel's key material. mls →
+        // publish epoch-0 GroupInfo; group_key → mint + grant K_channel.
+        const bootstrap =
+          encryptionMode === 'group_key'
+            ? communityChatStore.bootstrapGroupKey(communityId, res.channelId)
+            : communityChatStore.bootstrapChannel(res.channelId)
+        await bootstrap.catch((err) => {
           console.error('channel bootstrap failed', err)
         })
         onDone(res.channelId)
@@ -161,6 +172,25 @@ export function ChannelSettingsForm({
         />
         <p className="text-[11px] text-ink-faint">{t('communities.markdownHint')}</p>
       </div>
+
+      {mode === 'create' && (
+        <label className="block space-y-1">
+          <span className="text-xs text-ink-soft">{t('communities.encryptionMode.label')}</span>
+          <select
+            className={SELECT_CLASS}
+            value={encryptionMode}
+            onChange={(e) => setEncryptionMode(e.target.value as ChannelEncryptionMode)}
+          >
+            <option value="mls">{t('communities.encryptionMode.mls')}</option>
+            <option value="group_key">{t('communities.encryptionMode.groupKey')}</option>
+          </select>
+          <p className="text-[11px] text-ink-faint">
+            {encryptionMode === 'mls'
+              ? t('communities.encryptionMode.mlsHint')
+              : t('communities.encryptionMode.groupKeyHint')}
+          </p>
+        </label>
+      )}
 
       <label className="block space-y-1">
         <span className="text-xs text-ink-soft">{t('communities.access.label')}</span>

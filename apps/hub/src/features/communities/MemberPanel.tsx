@@ -1,6 +1,12 @@
-import type { AssignableRole, CommunityMember, CommunityRole } from '@gathernet/shared'
+import type {
+  AssignableRole,
+  CommunityMember,
+  CommunityMembersPageResponse,
+  CommunityRole,
+} from '@gathernet/shared'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../lib/api.ts'
 
@@ -8,7 +14,10 @@ interface MemberPanelProps {
   communityId: string
   myRole: CommunityRole
   myAccountId: string | null
+  /** first page of members (server-bounded); the rest load on demand */
   members: CommunityMember[]
+  /** total active members — a mega-community may far exceed the first page */
+  memberCount: number
 }
 
 const ROLE_BADGE: Record<CommunityRole, string> = {
@@ -17,12 +26,41 @@ const ROLE_BADGE: Record<CommunityRole, string> = {
   member: 'text-ink-soft border-edge',
 }
 
-export function MemberPanel({ communityId, myRole, myAccountId, members }: MemberPanelProps) {
+export function MemberPanel({
+  communityId,
+  myRole,
+  myAccountId,
+  members,
+  memberCount,
+}: MemberPanelProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const isOwner = myRole === 'owner'
   const isLeader = myRole === 'owner' || myRole === 'leader'
+
+  // Extra pages loaded on demand beyond the detail's first page.
+  const [extra, setExtra] = useState<CommunityMember[]>([])
+  const [loadingMore, setLoadingMore] = useState(false)
+  const roster = [...members, ...extra]
+  const hasMore = roster.length < memberCount
+
+  const loadMore = async () => {
+    if (loadingMore || roster.length === 0) return
+    setLoadingMore(true)
+    try {
+      const after = roster[roster.length - 1]?.accountId
+      const page = await api<CommunityMembersPageResponse>(
+        'GET',
+        `/api/v1/communities/${communityId}/members?after=${after}`,
+      )
+      setExtra((prev) => [...prev, ...page.members])
+    } catch {
+      // transient — the button stays for a retry
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['community', communityId] })
@@ -49,9 +87,12 @@ export function MemberPanel({ communityId, myRole, myAccountId, members }: Membe
 
   return (
     <section className="card space-y-3">
-      <h2 className="font-medium text-ink-soft">{t('communities.members')}</h2>
+      <h2 className="font-medium text-ink-soft">
+        {t('communities.members')}
+        <span className="ml-1 text-xs text-ink-faint">({memberCount})</span>
+      </h2>
       <ul className="space-y-2">
-        {members.map((member) => {
+        {roster.map((member) => {
           const isSelf = member.accountId === myAccountId
           const canRemove =
             !isSelf &&
@@ -113,6 +154,17 @@ export function MemberPanel({ communityId, myRole, myAccountId, members }: Membe
           )
         })}
       </ul>
+
+      {hasMore && (
+        <button
+          type="button"
+          className="btn-quiet w-full text-xs"
+          disabled={loadingMore}
+          onClick={() => void loadMore()}
+        >
+          {t('communities.loadMoreMembers', { count: memberCount - roster.length })}
+        </button>
+      )}
 
       {myRole !== 'owner' && (
         <button

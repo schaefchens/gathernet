@@ -191,6 +191,7 @@
     "noChannels": "No channels yet.",
     "selectChannel": "Select a channel to start chatting.",
     "members": "Members",
+    "loadMoreMembers": "Load more ({{count}} more)",
     "you": "you",
     "addChannel": "Add channel",
     "createChannel": "Create channel",
@@ -278,6 +279,13 @@
       "label": "Who can post",
       "everyone": "All members",
       "moderators": "Only moderators"
+    },
+    "encryptionMode": {
+      "label": "Channel type",
+      "mls": "Small — strongest privacy",
+      "groupKey": "Scalable — large channel",
+      "mlsHint": "Best for small or sensitive channels: per-message forward secrecy and instant removal. Recommended.",
+      "groupKeyHint": "For big channels (thousands to 100k). Slightly weaker per-message forward secrecy; can't be changed later."
     },
     "readOnlyHint": "Only moderators can post in this channel.",
     "mute": "Mute",

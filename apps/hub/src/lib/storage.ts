@@ -175,6 +175,43 @@ export const secureStore = {
   },
 }
 
+/**
+ * Per-(channel, epoch) content keys (K_channel) for group_key channels. A device
+ * holds a small window of recent epochs (old messages stay under their old key
+ * until the channel TTL expires them), so keys are stored one-per-epoch under a
+ * `kchan:<channelId>:<epoch>` key in the `secure` store — letting stale epochs be
+ * pruned individually. Sealed under the DMK like everything else here.
+ */
+export const channelKeyStore = {
+  async get(channelId: string, epoch: number): Promise<Uint8Array | null> {
+    const sealed = await tx<Uint8Array | undefined>('secure', 'readonly', (s) =>
+      s.get(`kchan:${channelId}:${epoch}`),
+    )
+    return sealed ? requireBox().open(sealed, `secure:kchan:${channelId}:${epoch}`) : null
+  },
+  put(channelId: string, epoch: number, key: Uint8Array): Promise<unknown> {
+    return tx('secure', 'readwrite', (s) =>
+      s.put(
+        requireBox().seal(key, `secure:kchan:${channelId}:${epoch}`),
+        `kchan:${channelId}:${epoch}`,
+      ),
+    )
+  },
+  delete(channelId: string, epoch: number): Promise<unknown> {
+    return tx('secure', 'readwrite', (s) => s.delete(`kchan:${channelId}:${epoch}`))
+  },
+  /** Epochs of this channel's keys currently held on disk (ascending). */
+  async epochs(channelId: string): Promise<number[]> {
+    const keys = await tx<IDBValidKey[]>('secure', 'readonly', (s) => s.getAllKeys())
+    const prefix = `kchan:${channelId}:`
+    return keys
+      .filter((k): k is string => typeof k === 'string' && k.startsWith(prefix))
+      .map((k) => Number(k.slice(prefix.length)))
+      .filter((n) => Number.isFinite(n))
+      .sort((a, b) => a - b)
+  },
+}
+
 /** Per-group MLS snapshots. */
 export const groupStore = {
   async get(groupId: string): Promise<Uint8Array | null> {

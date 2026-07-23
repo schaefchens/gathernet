@@ -228,6 +228,7 @@ function CommunityDetailScreen() {
             myRole={detail.myRole}
             myAccountId={myAccountId}
             members={detail.members}
+            memberCount={detail.memberCount}
           />
 
           {isLeader && <InvitePanel communityId={communityId} />}
