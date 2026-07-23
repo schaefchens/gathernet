@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type {
   AccountId,
+  ChannelDevicesResponse,
   ChannelJoinInfoResponse,
   ChannelMemberRole,
   ChannelMyStatus,
@@ -8,25 +9,37 @@ import type {
   CommunityDevicesResponse,
   CommunityId,
   CommunityListItem,
+  CommunityMembersPageResponse,
   CreateChannelInviteRequest,
   CreateChannelRequest,
   CreateCommunityInviteRequest,
   CreateCommunityRequest,
   DeviceId,
   GroupId,
+  MyChannelKeyGrantResponse,
   MyKeyGrantResponse,
+  PostChannelKeyGrantsRequest,
   PostKeyGrantsRequest,
+  RotateChannelRequest,
   RotateRequest,
   ServerMessage,
   UpdateChannelRequest,
   UpdateCommunityRequest,
 } from '@gathernet/shared'
-import { COMMUNITY_MEDIA_MAX_BYTES, INVITE_CODE_LENGTH } from '@gathernet/shared'
+import {
+  COMMUNITY_MEDIA_MAX_BYTES,
+  COMMUNITY_MEMBER_PAGE_SIZE,
+  GROUP_KEY_BROADCAST_MAX_MEMBERS,
+  GROUP_KEY_DISCUSSION_MAX_MEMBERS,
+  INVITE_CODE_LENGTH,
+} from '@gathernet/shared'
 import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import {
   accounts,
   channelInvites,
+  channelKeyEpochs,
+  channelKeyGrants,
   channelMembers,
   communities,
   communityChannels,
@@ -224,6 +237,11 @@ export async function listCommunities(db: Db, accountId: string): Promise<Commun
       avatarMediaId: communities.avatarMediaId,
       keyEpoch: communities.keyEpoch,
       rotationPending: communities.rotationPending,
+      channelRotationPending: sql<boolean>`EXISTS (
+        SELECT 1 FROM community_channels cc
+        WHERE cc.community_id = ${communities.communityId}
+          AND cc.encryption_mode = 'group_key' AND cc.rotation_pending = true
+      )`,
       role: communityMembers.role,
       channelCount: sql<number>`(
         SELECT count(*)::int FROM community_channels cc
@@ -242,6 +260,7 @@ export async function listCommunities(db: Db, accountId: string): Promise<Commun
     avatarMediaId: r.avatarMediaId,
     keyEpoch: r.keyEpoch,
     rotationPending: r.rotationPending,
+    channelRotationPending: r.channelRotationPending,
     myRole: r.role,
     channelCount: r.channelCount,
   }))
@@ -264,19 +283,28 @@ export async function getCommunityDetail(
   })
   if (!community) throw new ServiceError(404, 'community_not_found')
 
+  // First page only — a mega-community can have 100k members. The rest are
+  // paged via GET …/members. Ordered by accountId so the page boundary is
+  // stable and lines up with the paginated endpoint.
   const memberRows = await db
     .select({
       accountId: communityMembers.accountId,
       role: communityMembers.role,
       displayName: accounts.displayName,
-      joinedAt: communityMembers.joinedAt,
     })
     .from(communityMembers)
     .innerJoin(accounts, eq(accounts.accountId, communityMembers.accountId))
     .where(
       and(eq(communityMembers.communityId, communityId), eq(communityMembers.status, 'active')),
     )
-    .orderBy(asc(communityMembers.joinedAt))
+    .orderBy(asc(communityMembers.accountId))
+    .limit(COMMUNITY_MEMBER_PAGE_SIZE)
+  const [memberCountRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(communityMembers)
+    .where(
+      and(eq(communityMembers.communityId, communityId), eq(communityMembers.status, 'active')),
+    )
 
   const isLeader = isLeaderRole(membership.role)
   const channelRows = await db
@@ -290,6 +318,9 @@ export async function getCommunityDetail(
       postPolicy: communityChannels.postPolicy,
       messageTtlDays: communityChannels.messageTtlDays,
       position: communityChannels.position,
+      encryptionMode: communityChannels.encryptionMode,
+      channelKeyEpoch: communityChannels.keyEpoch,
+      channelRotationPending: communityChannels.rotationPending,
       currentEpoch: groups.currentEpoch,
       groupInfo: groups.groupInfo,
       myStatus: channelMembers.status,
@@ -339,8 +370,12 @@ export async function getCommunityDetail(
         muted: c.myMuted ?? false,
         joined: c.joined,
         currentEpoch: c.currentEpoch,
-        // GroupInfo is released only to active channel members.
-        groupInfo: myStatus === 'active' ? b64(c.groupInfo) : null,
+        // GroupInfo is released only to active members, and only for mls channels
+        // (group_key channels have no MLS group / GroupInfo).
+        groupInfo: myStatus === 'active' && c.encryptionMode === 'mls' ? b64(c.groupInfo) : null,
+        encryptionMode: c.encryptionMode,
+        keyEpoch: c.channelKeyEpoch,
+        rotationPending: c.channelRotationPending,
       }
     })
 
@@ -359,7 +394,47 @@ export async function getCommunityDetail(
       displayName: m.displayName,
       role: m.role,
     })),
+    memberCount: memberCountRow?.count ?? memberRows.length,
     channels,
+  }
+}
+
+/**
+ * Paginated active-member roster (any active member may read it, for chat name
+ * resolution / member browsing). Ordered by accountId; `after` = last accountId.
+ */
+export async function listCommunityMembers(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  after?: string,
+  limit?: number,
+): Promise<CommunityMembersPageResponse> {
+  await requireActiveMembership(db, communityId, accountId)
+  const pageSize = Math.min(limit ?? COMMUNITY_MEMBER_PAGE_SIZE, 500)
+  const conds = [
+    eq(communityMembers.communityId, communityId),
+    eq(communityMembers.status, 'active'),
+  ]
+  if (after) conds.push(gt(communityMembers.accountId, after))
+  const rows = await db
+    .select({
+      accountId: communityMembers.accountId,
+      role: communityMembers.role,
+      displayName: accounts.displayName,
+    })
+    .from(communityMembers)
+    .innerJoin(accounts, eq(accounts.accountId, communityMembers.accountId))
+    .where(and(...conds))
+    .orderBy(asc(communityMembers.accountId))
+    .limit(pageSize)
+  return {
+    members: rows.map((m) => ({
+      accountId: m.accountId as AccountId,
+      displayName: m.displayName,
+      role: m.role,
+    })),
+    nextCursor: rows.length === pageSize ? (rows[rows.length - 1]?.accountId ?? null) : null,
   }
 }
 
@@ -570,6 +645,7 @@ export async function createChannel(
       joinPolicy: input.joinPolicy,
       postPolicy: input.postPolicy,
       messageTtlDays: input.messageTtlDays,
+      encryptionMode: input.encryptionMode,
       position,
     })
     // The creator is the channel's first active member and its first moderator.
@@ -711,15 +787,20 @@ export async function publishChannelGroupInfo(
 function joinInfo(
   channelId: string,
   status: ChannelMyStatus,
-  access: ChannelRow['access'],
+  channel: Pick<ChannelRow, 'access' | 'encryptionMode' | 'keyEpoch' | 'communityId'>,
   group: GroupRow,
 ): ChannelJoinInfoResponse {
   return {
     channelId: channelId as GroupId,
+    communityId: channel.communityId as CommunityId,
     status,
-    access,
-    groupInfo: status === 'active' ? b64(group.groupInfo) : null,
+    access: channel.access,
+    // mls: GroupInfo released only to active members. group_key: no MLS group.
+    groupInfo:
+      status === 'active' && channel.encryptionMode === 'mls' ? b64(group.groupInfo) : null,
     epoch: group.currentEpoch,
+    encryptionMode: channel.encryptionMode,
+    keyEpoch: channel.keyEpoch,
   }
 }
 
@@ -743,6 +824,28 @@ async function activateChannelMember(
       target: [channelMembers.channelId, channelMembers.accountId],
       set: { status: 'active' },
     })
+}
+
+/**
+ * Enforce the membership ceiling for group_key channels before activating a NEW
+ * member. mls channels are bounded by the device cap in postCommit instead;
+ * this is a no-op for them. Broadcast (moderators-post) tolerates many more
+ * readers than discussion (everyone-post). Best-effort under races — the caps
+ * are soft ceilings, not a security boundary.
+ */
+async function enforceGroupKeyMemberCap(db: DbOrTx, channel: ChannelRow): Promise<void> {
+  if (channel.encryptionMode !== 'group_key') return
+  const cap =
+    channel.postPolicy === 'moderators'
+      ? GROUP_KEY_BROADCAST_MAX_MEMBERS
+      : GROUP_KEY_DISCUSSION_MAX_MEMBERS
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(channelMembers)
+    .where(
+      and(eq(channelMembers.channelId, channel.channelId), eq(channelMembers.status, 'active')),
+    )
+  if ((row?.count ?? 0) >= cap) throw new ServiceError(409, 'channel_full')
 }
 
 /**
@@ -770,14 +873,15 @@ export async function joinChannel(
     where: and(eq(channelMembers.channelId, channelId), eq(channelMembers.accountId, accountId)),
   })
 
-  if (existing?.status === 'active') return joinInfo(channelId, 'active', channel.access, group)
-  if (existing?.status === 'pending') return joinInfo(channelId, 'pending', channel.access, group)
+  if (existing?.status === 'active') return joinInfo(channelId, 'active', channel, group)
+  if (existing?.status === 'pending') return joinInfo(channelId, 'pending', channel, group)
 
   if (existing?.status === 'invited') {
     if (!eligible) throw new ServiceError(403, 'channel_forbidden')
+    await enforceGroupKeyMemberCap(db, channel)
     await activateChannelMember(db, channelId, accountId)
     await announceChannelMember(db, registry, communityId, channelId, accountId, 'active', 'member')
-    return joinInfo(channelId, 'active', channel.access, group)
+    return joinInfo(channelId, 'active', channel, group)
   }
 
   // Fresh join (no row, or a previously-removed row).
@@ -785,9 +889,10 @@ export async function joinChannel(
   if (channel.visibility === 'unlisted') throw new ServiceError(404, 'channel_not_found')
 
   if (channel.joinPolicy === 'open') {
+    await enforceGroupKeyMemberCap(db, channel)
     await activateChannelMember(db, channelId, accountId)
     await announceChannelMember(db, registry, communityId, channelId, accountId, 'active', 'member')
-    return joinInfo(channelId, 'active', channel.access, group)
+    return joinInfo(channelId, 'active', channel, group)
   }
 
   // request policy → pending, notify managers.
@@ -810,7 +915,7 @@ export async function joinChannel(
     },
   }
   for (const acct of managers) registry.sendToAccount(acct, message)
-  return joinInfo(channelId, 'pending', channel.access, group)
+  return joinInfo(channelId, 'pending', channel, group)
 }
 
 /** Join an unlisted (or listed) channel via a per-channel invite code. */
@@ -852,6 +957,7 @@ export async function joinChannelByCode(
     }
     // Code respects the channel's join policy.
     if (channel.joinPolicy === 'open') {
+      await enforceGroupKeyMemberCap(tx, channel)
       await activateChannelMember(tx, channel.channelId, accountId)
     } else {
       await tx
@@ -882,7 +988,7 @@ export async function joinChannelByCode(
       },
     }
     for (const acct of managers) registry.sendToAccount(acct, message)
-    return joinInfo(channel.channelId, 'pending', channel.access, group)
+    return joinInfo(channel.channelId, 'pending', channel, group)
   }
   await announceChannelMember(
     db,
@@ -893,7 +999,7 @@ export async function joinChannelByCode(
     'active',
     'member',
   )
-  return joinInfo(channel.channelId, 'active', channel.access, group)
+  return joinInfo(channel.channelId, 'active', channel, group)
 }
 
 /** Moderator/leader accepts or declines a pending join request. */
@@ -907,7 +1013,7 @@ export async function resolveJoinRequest(
   action: 'accept' | 'decline',
 ): Promise<void> {
   const membership = await requireActiveMembership(db, communityId, actorAccountId)
-  await loadChannel(db, communityId, channelId)
+  const channel = await loadChannel(db, communityId, channelId)
   await requireChannelManager(db, channelId, membership)
 
   const target = await db.query.channelMembers.findFirst({
@@ -932,6 +1038,7 @@ export async function resolveJoinRequest(
     return
   }
 
+  await enforceGroupKeyMemberCap(db, channel)
   await activateChannelMember(db, channelId, targetAccountId)
   const group = await loadGroup(db, channelId)
   registry.sendToAccount(targetAccountId, {
@@ -1162,6 +1269,11 @@ export async function kickFromChannel(
     'member',
     [targetAccountId],
   )
+  // group_key channel: the kicked member held K_channel — rotate it stale.
+  const channel = await loadChannel(db, communityId, channelId)
+  if (channel.encryptionMode === 'group_key') {
+    await requestChannelRotation(db, registry, communityId, channelId)
+  }
 }
 
 /** Broadcast a channel membership change to those entitled to see it. */
@@ -1200,12 +1312,27 @@ export async function listChannelMembers(
   actorAccountId: string,
   communityId: string,
   channelId: string,
-): Promise<
-  Array<{ accountId: string; displayName: string; status: string; role: string; muted: boolean }>
-> {
+  after?: string,
+  limit?: number,
+): Promise<{
+  members: Array<{
+    accountId: string
+    displayName: string
+    status: string
+    role: string
+    muted: boolean
+  }>
+  nextCursor: string | null
+}> {
   const membership = await requireActiveMembership(db, communityId, actorAccountId)
   await loadChannel(db, communityId, channelId)
   await requireChannelManager(db, channelId, membership)
+  const pageSize = Math.min(limit ?? COMMUNITY_MEMBER_PAGE_SIZE, 500)
+  const conds = [
+    eq(channelMembers.channelId, channelId),
+    inArray(channelMembers.status, ['active', 'pending', 'invited']),
+  ]
+  if (after) conds.push(gt(channelMembers.accountId, after))
   const rows = await db
     .select({
       accountId: channelMembers.accountId,
@@ -1216,14 +1343,13 @@ export async function listChannelMembers(
     })
     .from(channelMembers)
     .innerJoin(accounts, eq(accounts.accountId, channelMembers.accountId))
-    .where(
-      and(
-        eq(channelMembers.channelId, channelId),
-        inArray(channelMembers.status, ['active', 'pending', 'invited']),
-      ),
-    )
-    .orderBy(asc(channelMembers.joinedAt))
-  return rows
+    .where(and(...conds))
+    .orderBy(asc(channelMembers.accountId))
+    .limit(pageSize)
+  return {
+    members: rows,
+    nextCursor: rows.length === pageSize ? (rows[rows.length - 1]?.accountId ?? null) : null,
+  }
 }
 
 export async function getChannelJoinInfo(
@@ -1241,15 +1367,15 @@ export async function getChannelJoinInfo(
     where: and(eq(channelMembers.channelId, channelId), eq(channelMembers.accountId, accountId)),
   })
   const status = normalizeStatus(row?.status ?? null)
-  if (status === 'active') return joinInfo(channelId, 'active', channel.access, group)
+  if (status === 'active') return joinInfo(channelId, 'active', channel, group)
   if (status === 'pending' || status === 'invited') {
-    return joinInfo(channelId, status, channel.access, group)
+    return joinInfo(channelId, status, channel, group)
   }
   // Not involved: only eligible members may see a channel exists at all.
   if (!satisfiesChannelAccess(membership, channel.access)) {
     throw new ServiceError(403, 'channel_forbidden')
   }
-  return joinInfo(channelId, 'none', channel.access, group)
+  return joinInfo(channelId, 'none', channel, group)
 }
 
 /* ---------------------------------- roles --------------------------------- */
@@ -1288,17 +1414,34 @@ export async function setMemberRole(
   })
 }
 
-/** Clear a member's channel memberships across a community (community exit). */
+/**
+ * Clear a member's channel memberships across a community (community exit).
+ * Returns the group_key channels the member was ACTIVE in, flagged for
+ * rotation — a removed member's cached K_channel must go stale (a manager's
+ * client rotates). mls channels rotate via the client's own removeMembers commit.
+ */
 async function clearChannelMemberships(
   db: DbOrTx,
   communityId: string,
   accountId: string,
-): Promise<void> {
+): Promise<string[]> {
   const channelIds = await db
     .select({ channelId: communityChannels.channelId })
     .from(communityChannels)
     .where(eq(communityChannels.communityId, communityId))
-  if (channelIds.length === 0) return
+  if (channelIds.length === 0) return []
+  const activeGroupKey = await db
+    .select({ channelId: channelMembers.channelId })
+    .from(channelMembers)
+    .innerJoin(communityChannels, eq(communityChannels.channelId, channelMembers.channelId))
+    .where(
+      and(
+        eq(channelMembers.accountId, accountId),
+        eq(channelMembers.status, 'active'),
+        eq(communityChannels.communityId, communityId),
+        eq(communityChannels.encryptionMode, 'group_key'),
+      ),
+    )
   await db
     .update(channelMembers)
     .set({ status: 'removed', role: 'member' })
@@ -1311,6 +1454,54 @@ async function clearChannelMemberships(
         eq(channelMembers.accountId, accountId),
       ),
     )
+  const gkIds = activeGroupKey.map((r) => r.channelId)
+  if (gkIds.length > 0) {
+    await db
+      .update(communityChannels)
+      .set({ rotationPending: true })
+      .where(inArray(communityChannels.channelId, gkIds))
+  }
+  return gkIds
+}
+
+/**
+ * Flag a group_key channel for K_channel rotation and nudge its managers. The
+ * server can't rotate (never sees K_channel) — a manager's client mints the new
+ * epoch. Durable flag + WS nudge, mirroring requestRotation for K_meta.
+ */
+async function requestChannelRotation(
+  db: DbOrTx,
+  registry: ConnectionRegistry,
+  communityId: string,
+  channelId: string,
+): Promise<void> {
+  await db
+    .update(communityChannels)
+    .set({ rotationPending: true })
+    .where(eq(communityChannels.channelId, channelId))
+  for (const acct of await channelManagerAccountIds(db, communityId, channelId)) {
+    registry.sendToAccount(acct, {
+      type: 'community.channel_rotation_needed',
+      payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+    })
+  }
+}
+
+/** Nudge managers of the given (already-flagged) group_key channels to rotate. */
+async function notifyChannelRotations(
+  db: DbOrTx,
+  registry: ConnectionRegistry,
+  communityId: string,
+  channelIds: string[],
+): Promise<void> {
+  for (const channelId of channelIds) {
+    for (const acct of await channelManagerAccountIds(db, communityId, channelId)) {
+      registry.sendToAccount(acct, {
+        type: 'community.channel_rotation_needed',
+        payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+      })
+    }
+  }
 }
 
 /**
@@ -1355,7 +1546,7 @@ export async function removeMember(
 
   // Capture recipients before the removal so the removed user is notified too.
   const recipients = await activeMemberAccountIds(db, communityId)
-  await db.transaction(async (tx) => {
+  const gkChannels = await db.transaction(async (tx) => {
     await tx
       .update(communityMembers)
       .set({ status: 'removed', leftAt: new Date() })
@@ -1365,7 +1556,7 @@ export async function removeMember(
           eq(communityMembers.accountId, targetAccountId),
         ),
       )
-    await clearChannelMemberships(tx, communityId, targetAccountId)
+    return clearChannelMemberships(tx, communityId, targetAccountId)
   })
   const message: ServerMessage = {
     type: 'community.member_removed',
@@ -1374,6 +1565,8 @@ export async function removeMember(
   for (const acct of new Set(recipients)) registry.sendToAccount(acct, message)
   // The removed member held K_meta — rotate it so their cached copy goes stale.
   await requestRotation(db, registry, communityId)
+  // ...and K_channel for every group_key channel they were in.
+  await notifyChannelRotations(db, registry, communityId, gkChannels)
 }
 
 export async function leaveCommunity(
@@ -1386,7 +1579,7 @@ export async function leaveCommunity(
   if (membership.role === 'owner') throw new ServiceError(400, 'owner_cannot_leave')
 
   const recipients = await activeMemberAccountIds(db, communityId)
-  await db.transaction(async (tx) => {
+  const gkChannels = await db.transaction(async (tx) => {
     await tx
       .update(communityMembers)
       .set({ status: 'left', leftAt: new Date() })
@@ -1396,7 +1589,7 @@ export async function leaveCommunity(
           eq(communityMembers.accountId, accountId),
         ),
       )
-    await clearChannelMemberships(tx, communityId, accountId)
+    return clearChannelMemberships(tx, communityId, accountId)
   })
   const message: ServerMessage = {
     type: 'community.member_left',
@@ -1405,13 +1598,25 @@ export async function leaveCommunity(
   for (const acct of new Set(recipients)) registry.sendToAccount(acct, message)
   // The departing member held K_meta — rotate it.
   await requestRotation(db, registry, communityId)
+  // ...and K_channel for every group_key channel they were in.
+  await notifyChannelRotations(db, registry, communityId, gkChannels)
 }
 
 /* --------------------- K_meta cross-device key grants --------------------- */
 
 /** Active-member active devices of a community that can receive a K_meta grant. */
-async function grantableDeviceRows(db: DbOrTx, communityId: string) {
-  return db
+async function grantableDeviceRows(
+  db: DbOrTx,
+  communityId: string,
+  page?: { after?: string; limit: number },
+) {
+  const conds = [
+    eq(communityMembers.communityId, communityId),
+    eq(communityMembers.status, 'active'),
+    eq(devices.status, 'active'),
+  ]
+  if (page?.after) conds.push(gt(devices.deviceId, page.after))
+  const q = db
     .select({
       accountId: devices.accountId,
       deviceId: devices.deviceId,
@@ -1422,13 +1627,10 @@ async function grantableDeviceRows(db: DbOrTx, communityId: string) {
     })
     .from(communityMembers)
     .innerJoin(devices, eq(devices.accountId, communityMembers.accountId))
-    .where(
-      and(
-        eq(communityMembers.communityId, communityId),
-        eq(communityMembers.status, 'active'),
-        eq(devices.status, 'active'),
-      ),
-    )
+    .where(and(...conds))
+  // Paginated (grant fan-out) vs full list (grantee validation in postKeyGrants).
+  if (page) return q.orderBy(asc(devices.deviceId)).limit(page.limit)
+  return q
 }
 
 /**
@@ -1440,13 +1642,19 @@ export async function listCommunityDevices(
   db: Db,
   accountId: string,
   communityId: string,
+  after?: string,
+  limit?: number,
 ): Promise<CommunityDevicesResponse> {
   await requireActiveMembership(db, communityId, accountId)
   const community = await db.query.communities.findFirst({
     where: eq(communities.communityId, communityId),
   })
   if (!community) throw new ServiceError(404, 'community_not_found')
-  const rows = await grantableDeviceRows(db, communityId)
+  const pageSize = Math.min(limit ?? 500, 500)
+  const rows = await grantableDeviceRows(db, communityId, {
+    ...(after ? { after } : {}),
+    limit: pageSize,
+  })
   const list: CommunityDevicesResponse['devices'] = []
   for (const r of rows) {
     if (!r.receiptPk || !r.receiptPkSig) continue // device predates the feature
@@ -1459,7 +1667,9 @@ export async function listCommunityDevices(
       receiptPkSig: r.receiptPkSig.toString('base64'),
     })
   }
-  return { keyEpoch: community.keyEpoch, devices: list }
+  // Cursor advances by the raw device page (some rows may be filtered above).
+  const nextCursor = rows.length === pageSize ? (rows[rows.length - 1]?.deviceId ?? null) : null
+  return { keyEpoch: community.keyEpoch, devices: list, nextCursor }
 }
 
 /** Store K_meta grants (ciphertext only) for active-member devices. Idempotent. */
@@ -1654,7 +1864,312 @@ export async function rotateCommunity(
   }
 }
 
+/* --------------------- K_channel (group_key) grants ----------------------- */
+
+/** Active devices of a channel's active members (grant fan-out), optionally paged. */
+async function grantableChannelDeviceRows(
+  db: DbOrTx,
+  channelId: string,
+  page?: { after?: string; limit: number },
+) {
+  const conds = [
+    eq(channelMembers.channelId, channelId),
+    eq(channelMembers.status, 'active'),
+    eq(devices.status, 'active'),
+  ]
+  if (page?.after) conds.push(gt(devices.deviceId, page.after))
+  const q = db
+    .select({
+      accountId: devices.accountId,
+      deviceId: devices.deviceId,
+      cert: devices.cert,
+      certSig: devices.certSig,
+      receiptPk: devices.receiptPk,
+      receiptPkSig: devices.receiptPkSig,
+    })
+    .from(channelMembers)
+    .innerJoin(devices, eq(devices.accountId, channelMembers.accountId))
+    .where(and(...conds))
+  if (page) return q.orderBy(asc(devices.deviceId)).limit(page.limit)
+  return q
+}
+
+/** Assert `deviceId` belongs to `accountId` (the minter binds its own device). */
+async function requireOwnDevice(db: DbOrTx, accountId: string, deviceId: string): Promise<void> {
+  const dev = await db.query.devices.findFirst({
+    where: and(eq(devices.deviceId, deviceId), eq(devices.accountId, accountId)),
+  })
+  if (!dev) throw new ServiceError(400, 'invalid_minter')
+}
+
+/**
+ * Devices a K_channel grant may be sealed to = the channel's active-member
+ * devices. Manager-only (the bounded granter set) — this also keeps a plain
+ * member from enumerating a 100k-device list. Paginated for grant fan-out.
+ */
+export async function listChannelDevices(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  after?: string,
+  limit?: number,
+): Promise<ChannelDevicesResponse> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  const channel = await loadChannel(db, communityId, channelId)
+  await requireChannelManager(db, channelId, membership)
+  const pageSize = Math.min(limit ?? 500, 500)
+  const rows = await grantableChannelDeviceRows(db, channelId, {
+    ...(after ? { after } : {}),
+    limit: pageSize,
+  })
+  const list: ChannelDevicesResponse['devices'] = []
+  for (const r of rows) {
+    if (!r.receiptPk || !r.receiptPkSig) continue
+    list.push({
+      accountId: r.accountId as AccountId,
+      deviceId: r.deviceId as DeviceId,
+      deviceCert: r.cert.toString('base64'),
+      certSig: r.certSig.toString('base64'),
+      receiptPk: r.receiptPk.toString('base64'),
+      receiptPkSig: r.receiptPkSig.toString('base64'),
+    })
+  }
+  const nextCursor = rows.length === pageSize ? (rows[rows.length - 1]?.deviceId ?? null) : null
+  return { keyEpoch: channel.keyEpoch, devices: list, nextCursor }
+}
+
+/**
+ * Store K_channel grants (ciphertext only) sealed to active-member devices.
+ * Manager-only. Idempotent. The optional epoch `commitment` (authenticated
+ * minter signature over SHA256(channelId‖epoch‖K_channel)) is upserted once per
+ * epoch so grantees can detect a partition (two keys for one epoch).
+ */
+export async function postChannelKeyGrants(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  input: PostChannelKeyGrantsRequest,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  const channel = await loadChannel(db, communityId, channelId)
+  await requireChannelManager(db, channelId, membership)
+  if (channel.encryptionMode !== 'group_key') throw new ServiceError(400, 'not_group_key')
+  if (input.keyEpoch !== channel.keyEpoch) throw new ServiceError(409, 'key_epoch_stale')
+
+  // Only seal to devices of active channel members — never leak K_channel.
+  const allowed = new Set((await grantableChannelDeviceRows(db, channelId)).map((r) => r.deviceId))
+  for (const g of input.grants) {
+    if (!allowed.has(g.granteeDeviceId)) throw new ServiceError(400, 'invalid_grantee')
+  }
+
+  await db.transaction(async (tx) => {
+    if (input.commitment) {
+      await requireOwnDevice(tx, accountId, input.commitment.minterDeviceId)
+      await tx
+        .insert(channelKeyEpochs)
+        .values({
+          channelId,
+          keyEpoch: input.keyEpoch,
+          keyCommitment: bufOf(input.commitment.keyCommitment),
+          minterDeviceId: input.commitment.minterDeviceId,
+          minterSig: bufOf(input.commitment.minterSig),
+        })
+        .onConflictDoNothing()
+    }
+    await tx
+      .insert(channelKeyGrants)
+      .values(
+        input.grants.map((g) => ({
+          channelId,
+          keyEpoch: input.keyEpoch,
+          granteeDeviceId: g.granteeDeviceId,
+          sealedKey: bufOf(g.sealedKey),
+          senderPkB64: g.senderPkB64,
+          createdBy: accountId,
+        })),
+      )
+      .onConflictDoNothing()
+  })
+
+  await notifyChannelGrantees(db, registry, communityId, channelId, input.grants)
+}
+
+/** The K_channel grant + epoch commitment for the caller's device at the current epoch. */
+export async function myChannelKeyGrant(
+  db: Db,
+  accountId: string,
+  deviceId: string,
+  communityId: string,
+  channelId: string,
+): Promise<MyChannelKeyGrantResponse> {
+  await requireActiveMembership(db, communityId, accountId)
+  const channel = await loadChannel(db, communityId, channelId)
+  // Only an active channel member may fetch the key (a removed member is denied).
+  const chanMem = await db.query.channelMembers.findFirst({
+    where: and(eq(channelMembers.channelId, channelId), eq(channelMembers.accountId, accountId)),
+  })
+  if (chanMem?.status !== 'active') throw new ServiceError(403, 'not_a_member')
+
+  const row = await db.query.channelKeyGrants.findFirst({
+    where: and(
+      eq(channelKeyGrants.channelId, channelId),
+      eq(channelKeyGrants.keyEpoch, channel.keyEpoch),
+      eq(channelKeyGrants.granteeDeviceId, deviceId),
+    ),
+  })
+  const commit = await db.query.channelKeyEpochs.findFirst({
+    where: and(
+      eq(channelKeyEpochs.channelId, channelId),
+      eq(channelKeyEpochs.keyEpoch, channel.keyEpoch),
+    ),
+  })
+  return {
+    keyEpoch: channel.keyEpoch,
+    grant: row
+      ? { sealedKey: row.sealedKey.toString('base64'), senderPkB64: row.senderPkB64 }
+      : null,
+    commitment: commit
+      ? {
+          keyCommitment: commit.keyCommitment.toString('base64'),
+          minterDeviceId: commit.minterDeviceId as DeviceId,
+          minterSig: commit.minterSig.toString('base64'),
+        }
+      : null,
+  }
+}
+
+/**
+ * Rotate a group_key channel to a fresh K_channel epoch (member removed/left, or
+ * periodic PCS refresh). Manager-only. Unlike K_meta rotation, messages are NOT
+ * re-encrypted — old messages stay under their old epoch and expire by TTL, so
+ * OLD-epoch grants are KEPT (a still-active device restoring history needs them;
+ * a removed member is denied by access control). A compare-and-set on the
+ * channel `keyEpoch` serialises concurrent rotations.
+ */
+export async function rotateChannel(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  input: RotateChannelRequest,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  const channel = await loadChannel(db, communityId, channelId)
+  await requireChannelManager(db, channelId, membership)
+  if (channel.encryptionMode !== 'group_key') throw new ServiceError(400, 'not_group_key')
+  const newEpoch = input.fromEpoch + 1
+
+  await db.transaction(async (tx) => {
+    const bumped = await tx
+      .update(communityChannels)
+      .set({ keyEpoch: newEpoch, rotationPending: false })
+      .where(
+        and(
+          eq(communityChannels.channelId, channelId),
+          eq(communityChannels.keyEpoch, input.fromEpoch),
+        ),
+      )
+      .returning({ id: communityChannels.channelId })
+    if (bumped.length === 0) throw new ServiceError(409, 'rotation_stale')
+
+    await requireOwnDevice(tx, accountId, input.commitment.minterDeviceId)
+    await tx
+      .insert(channelKeyEpochs)
+      .values({
+        channelId,
+        keyEpoch: newEpoch,
+        keyCommitment: bufOf(input.commitment.keyCommitment),
+        minterDeviceId: input.commitment.minterDeviceId,
+        minterSig: bufOf(input.commitment.minterSig),
+      })
+      .onConflictDoNothing()
+
+    // New-epoch grants — only for devices of still-active members (never the removed one).
+    const allowed = new Set(
+      (await grantableChannelDeviceRows(tx, channelId)).map((r) => r.deviceId),
+    )
+    for (const g of input.grants) {
+      if (!allowed.has(g.granteeDeviceId)) throw new ServiceError(400, 'invalid_grantee')
+    }
+    if (input.grants.length > 0) {
+      await tx
+        .insert(channelKeyGrants)
+        .values(
+          input.grants.map((g) => ({
+            channelId,
+            keyEpoch: newEpoch,
+            granteeDeviceId: g.granteeDeviceId,
+            sealedKey: bufOf(g.sealedKey),
+            senderPkB64: g.senderPkB64,
+            createdBy: accountId,
+          })),
+        )
+        .onConflictDoNothing()
+    }
+  })
+
+  await notifyChannelGrantees(db, registry, communityId, channelId, input.grants)
+}
+
+/** Nudge grantee accounts that a K_channel grant is waiting for one of their devices. */
+async function notifyChannelGrantees(
+  db: DbOrTx,
+  registry: ConnectionRegistry,
+  communityId: string,
+  channelId: string,
+  grants: Array<{ granteeDeviceId: string }>,
+): Promise<void> {
+  if (grants.length === 0) return
+  const owners = await db
+    .select({ accountId: devices.accountId })
+    .from(devices)
+    .where(
+      inArray(
+        devices.deviceId,
+        grants.map((g) => g.granteeDeviceId),
+      ),
+    )
+  for (const acct of new Set(owners.map((o) => o.accountId))) {
+    registry.sendToAccount(acct, {
+      type: 'community.channel_key_grants_available',
+      payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+    })
+  }
+}
+
 /* -------------------------------- pruning --------------------------------- */
+
+/**
+ * Housekeeping: drop K_channel grants + epoch commitments for old epochs whose
+ * messages have all expired (per-channel TTL). Kept while any message at that
+ * epoch survives so a restoring device can still read un-expired history.
+ */
+export async function pruneChannelKeyGrants(db: Db): Promise<number> {
+  const grantsDeleted = await db.execute(sql`
+    DELETE FROM channel_key_grants g
+    USING community_channels cc
+    WHERE g.channel_id = cc.channel_id
+      AND g.key_epoch < cc.key_epoch
+      AND NOT EXISTS (
+        SELECT 1 FROM mls_messages m WHERE m.group_id = g.channel_id AND m.epoch = g.key_epoch
+      )
+  `)
+  await db.execute(sql`
+    DELETE FROM channel_key_epochs e
+    USING community_channels cc
+    WHERE e.channel_id = cc.channel_id
+      AND e.key_epoch < cc.key_epoch
+      AND NOT EXISTS (
+        SELECT 1 FROM channel_key_grants g
+        WHERE g.channel_id = e.channel_id AND g.key_epoch = e.key_epoch
+      )
+  `)
+  return grantsDeleted.rowCount ?? 0
+}
 
 /** Housekeeping: delete expired or revoked community invites. */
 export async function pruneCommunityInvites(db: Db): Promise<number> {

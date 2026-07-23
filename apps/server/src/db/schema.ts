@@ -496,6 +496,14 @@ export const channelAccessEnum = pgEnum('channel_access', ['members', 'leaders']
 export const channelVisibilityEnum = pgEnum('channel_visibility', ['listed', 'unlisted'])
 export const channelJoinPolicyEnum = pgEnum('channel_join_policy', ['open', 'request'])
 export const channelPostPolicyEnum = pgEnum('channel_post_policy', ['everyone', 'moderators'])
+/**
+ * How a channel's messages are encrypted. 'mls' = one MLS group (per-message
+ * forward secrecy, immediate removal) — the default, best for small/sensitive
+ * channels. 'group_key' = a shared per-channel content key K_channel (epoch'd,
+ * ECIES-granted per device) — scales to broadcast (100k) / large discussion
+ * (10k) channels that MLS cannot. DMs and rooms are always MLS.
+ */
+export const channelEncryptionModeEnum = pgEnum('channel_encryption_mode', ['mls', 'group_key'])
 export const channelMemberStatusEnum = pgEnum('channel_member_status', [
   'active',
   'pending',
@@ -593,6 +601,13 @@ export const communityChannels = pgTable(
     postPolicy: channelPostPolicyEnum('post_policy').notNull().default('everyone'),
     /** disappearing-message window in days (server prunes; clients also prune locally) */
     messageTtlDays: integer('message_ttl_days').notNull().default(30),
+    /** mls (default, small/sensitive) vs group_key (scalable). @see channelEncryptionModeEnum */
+    encryptionMode: channelEncryptionModeEnum('encryption_mode').notNull().default('mls'),
+    /** group_key only: current K_channel epoch (grants + held keys match this). Unused for mls. */
+    keyEpoch: integer('key_epoch').notNull().default(0),
+    /** group_key only: set when a member is removed/leaves; a manager's client
+     *  then mints a new K_channel epoch (re-grants remaining devices) and clears this. */
+    rotationPending: boolean('rotation_pending').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('community_channels_community_idx').on(t.communityId)],
@@ -643,6 +658,62 @@ export const channelInvites = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('channel_invites_channel_idx').on(t.channelId)],
+)
+
+/**
+ * Per-device K_channel grants for group_key channels: `sealedKey` =
+ * eciesSeal(device.receiptPk, K_channel[keyEpoch]). Mirrors community_key_grants
+ * but channel-scoped and minted only by a bounded granter set (channel
+ * moderators / community leaders), lazily as members join. The server relays
+ * ciphertext only — it never sees K_channel. The authenticated epoch-key
+ * commitment (fork detection) lives in channel_key_epochs.
+ */
+export const channelKeyGrants = pgTable(
+  'channel_key_grants',
+  {
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => communityChannels.channelId),
+    keyEpoch: integer('key_epoch').notNull(),
+    granteeDeviceId: text('grantee_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    sealedKey: bytea('sealed_key').notNull(),
+    senderPkB64: text('sender_pk_b64').notNull(),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => accounts.accountId),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.channelId, t.keyEpoch, t.granteeDeviceId] }),
+    index('channel_key_grants_grantee_idx').on(t.granteeDeviceId),
+  ],
+)
+
+/**
+ * Authenticated per-epoch commitment to a group_key channel's K_channel:
+ * `keyCommitment` = SHA256(domain ‖ channelId ‖ keyEpoch ‖ K_channel), signed by
+ * an authorized minter device (`minterSig`). A grantee recomputes the commitment
+ * from its opened grant and checks it here — detecting a server or malicious
+ * member handing different keys to different members (channel partition). One row
+ * per epoch (server-enforced), so no two keys can claim the same epoch.
+ */
+export const channelKeyEpochs = pgTable(
+  'channel_key_epochs',
+  {
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => communityChannels.channelId),
+    keyEpoch: integer('key_epoch').notNull(),
+    keyCommitment: bytea('key_commitment').notNull(),
+    minterDeviceId: text('minter_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    minterSig: bytea('minter_sig').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.channelId, t.keyEpoch] })],
 )
 
 /** Encrypted media (community + channel avatars); ciphertext = seal(K_meta, imageBytes). */

@@ -10,7 +10,12 @@ import type {
   PostCommitRequest,
   UploadKeyPackagesRequest,
 } from '@gathernet/shared'
-import { KEY_PACKAGE_TTL_DAYS, MAILBOX_RETENTION_DAYS, ROOM_MAX_DEVICES } from '@gathernet/shared'
+import {
+  KEY_PACKAGE_TTL_DAYS,
+  MAILBOX_RETENTION_DAYS,
+  MLS_CHANNEL_MAX_DEVICES,
+  ROOM_MAX_DEVICES,
+} from '@gathernet/shared'
 import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import {
@@ -430,12 +435,14 @@ export async function postCommit(
     const adds = new Set<string>(body.memberChanges.adds)
     if ((firstCommit || senderJoins) && !adds.has(deviceId)) adds.add(deviceId)
 
-    // Rooms: hard cap on active MLS leaves.
-    if (isRoom) {
+    // Hard cap on active MLS leaves. Applies to rooms and to mls channels;
+    // group_key channels have no MLS group so they never reach postCommit.
+    if (isRoom || isChannel) {
       const leavesAfter = new Set(memberDevices)
       for (const removeId of body.memberChanges.removes) leavesAfter.delete(removeId)
       for (const addId of adds) leavesAfter.add(addId)
-      if (leavesAfter.size > ROOM_MAX_DEVICES) {
+      const cap = isRoom ? ROOM_MAX_DEVICES : MLS_CHANNEL_MAX_DEVICES
+      if (leavesAfter.size > cap) {
         throw new ServiceError(409, 'device_limit')
       }
     }
@@ -551,7 +558,7 @@ export async function postMessage(
   epoch: number,
   payloadB64: string,
 ): Promise<MessageFanout> {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const locked = await tx.execute(
       sql`SELECT kind, current_epoch, last_seq FROM groups WHERE group_id = ${groupId} FOR UPDATE`,
     )
@@ -559,6 +566,57 @@ export async function postMessage(
       | { kind: string; current_epoch: number; last_seq: number }
       | undefined
     if (!group) throw new ServiceError(404, 'group_not_found')
+
+    // group_key channels have no MLS leaves: authorize the sender via its
+    // account's channel_members row, skip the MLS epoch ratchet (the opaque
+    // payload carries its own K_channel epoch), and enumerate recipients
+    // AFTER this write lock (a broadcast channel can have 100k members).
+    if (group.kind === 'channel') {
+      const channel = await tx.query.communityChannels.findFirst({
+        where: eq(communityChannels.channelId, groupId),
+      })
+      if (channel?.encryptionMode === 'group_key') {
+        const dev = await tx.query.devices.findFirst({ where: eq(devices.deviceId, deviceId) })
+        if (!dev) throw new ServiceError(403, 'not_a_member')
+        const membership = await tx.query.communityMembers.findFirst({
+          where: and(
+            eq(communityMembers.communityId, channel.communityId),
+            eq(communityMembers.accountId, dev.accountId),
+          ),
+        })
+        const chanMem = await tx.query.channelMembers.findFirst({
+          where: and(
+            eq(channelMembers.channelId, groupId),
+            eq(channelMembers.accountId, dev.accountId),
+          ),
+        })
+        if (
+          !satisfiesChannelAccess(membership ?? undefined, channel.access) ||
+          chanMem?.status !== 'active'
+        ) {
+          throw new ServiceError(403, 'not_a_member')
+        }
+        if (chanMem.muted) throw new ServiceError(403, 'muted')
+        if (channel.postPolicy === 'moderators') {
+          const isManager =
+            membership?.role === 'owner' ||
+            membership?.role === 'leader' ||
+            chanMem.role === 'moderator'
+          if (!isManager) throw new ServiceError(403, 'read_only_channel')
+        }
+        const seq = group.last_seq + 1
+        await tx.update(groups).set({ lastSeq: seq }).where(eq(groups.groupId, groupId))
+        await tx.insert(mlsMessages).values({
+          groupId,
+          seq,
+          kind: 'application',
+          epoch,
+          senderDevice: deviceId,
+          payload: Buffer.from(payloadB64, 'base64'),
+        })
+        return { mode: 'group_key' as const, channelId: groupId, seq, epoch }
+      }
+    }
 
     const members = await tx
       .select()
@@ -629,13 +687,50 @@ export async function postMessage(
     })
 
     return {
+      mode: 'mls' as const,
       seq,
       epoch,
       recipients: members.map((m) => m.deviceId).filter((d) => d !== deviceId),
       senderDevice: deviceId,
-      payload: payloadB64,
     }
   })
+
+  // Recipient enumeration for group_key happens outside the write lock.
+  const recipients =
+    result.mode === 'group_key'
+      ? await activeChannelMemberDevices(db, result.channelId, deviceId)
+      : result.recipients
+  return {
+    seq: result.seq,
+    epoch: result.epoch,
+    recipients,
+    senderDevice: deviceId,
+    payload: payloadB64,
+  }
+}
+
+/**
+ * Active devices of a group_key channel's active members (message fan-out),
+ * excluding the sender's own device. Read outside the post write lock. At true
+ * broadcast scale this is superseded by the pull+nudge fan-out (Stage 6).
+ */
+async function activeChannelMemberDevices(
+  db: Db,
+  channelId: string,
+  exceptDeviceId: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ deviceId: devices.deviceId })
+    .from(channelMembers)
+    .innerJoin(devices, eq(devices.accountId, channelMembers.accountId))
+    .where(
+      and(
+        eq(channelMembers.channelId, channelId),
+        eq(channelMembers.status, 'active'),
+        eq(devices.status, 'active'),
+      ),
+    )
+  return rows.map((r) => r.deviceId).filter((d) => d !== exceptDeviceId)
 }
 
 export async function listMessages(
@@ -744,6 +839,7 @@ export async function helloInfo(
     .select({ count: sql<number>`count(*)::int` })
     .from(welcomes)
     .where(eq(welcomes.recipientDevice, deviceId))
+  // MLS groups (DMs, rooms, mls channels): pending counted from the device's leaves.
   const pendingMessages = await db.execute(sql`
     SELECT COALESCE(SUM(g.last_seq - COALESCE(c.acked_seq, 0)), 0)::int AS pending
     FROM group_members gm
@@ -751,11 +847,24 @@ export async function helloInfo(
     LEFT JOIN mls_cursors c ON c.group_id = gm.group_id AND c.device_id = gm.device_id
     WHERE gm.device_id = ${deviceId} AND gm.removed_epoch IS NULL
   `)
+  // group_key channels have no leaves: pending counted from the account's active
+  // channel_members rows (per-device cursor).
+  const pendingGroupKey = await db.execute(sql`
+    SELECT COALESCE(SUM(g.last_seq - COALESCE(c.acked_seq, 0)), 0)::int AS pending
+    FROM devices d
+    JOIN channel_members cm ON cm.account_id = d.account_id AND cm.status = 'active'
+    JOIN community_channels cc ON cc.channel_id = cm.channel_id AND cc.encryption_mode = 'group_key'
+    JOIN groups g ON g.group_id = cm.channel_id
+    LEFT JOIN mls_cursors c ON c.group_id = cm.channel_id AND c.device_id = d.device_id
+    WHERE d.device_id = ${deviceId}
+  `)
+  const leafPending = Number((pendingMessages.rows[0] as { pending?: number })?.pending ?? 0)
+  const groupKeyPending = Number((pendingGroupKey.rows[0] as { pending?: number })?.pending ?? 0)
   return {
     kpRemaining,
     pending: {
       welcomes: welcomeCount[0]?.count ?? 0,
-      messages: Number((pendingMessages.rows[0] as { pending?: number })?.pending ?? 0),
+      messages: leafPending + groupKeyPending,
     },
   }
 }
@@ -776,18 +885,30 @@ export async function pruneChannelMessages(db: Db): Promise<number> {
   return result.rowCount ?? 0
 }
 
-/** Delete fully-acked or expired mailbox rows. Run periodically. */
+/**
+ * Delete fully-acked or expired mailbox rows. Run periodically. The all-acked
+ * fast-path only applies to groups that HAVE MLS leaves (DMs, rooms, mls
+ * channels); group_key channels have no group_members, so the `NOT EXISTS`
+ * clause would be vacuously true and delete their messages instantly — they are
+ * pruned by age here (and by the per-channel TTL in pruneChannelMessages).
+ */
 export async function pruneMailbox(db: Db): Promise<number> {
   const result = await db.execute(sql`
     DELETE FROM mls_messages m
     WHERE m.created_at < now() - make_interval(days => ${MAILBOX_RETENTION_DAYS})
-       OR NOT EXISTS (
-         SELECT 1 FROM group_members gm
-         WHERE gm.group_id = m.group_id
-           AND gm.removed_epoch IS NULL
-           AND gm.device_id <> m.sender_device
-           AND COALESCE((SELECT c.acked_seq FROM mls_cursors c
-                         WHERE c.group_id = gm.group_id AND c.device_id = gm.device_id), 0) < m.seq
+       OR (
+         EXISTS (
+           SELECT 1 FROM group_members gm0
+           WHERE gm0.group_id = m.group_id AND gm0.removed_epoch IS NULL
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM group_members gm
+           WHERE gm.group_id = m.group_id
+             AND gm.removed_epoch IS NULL
+             AND gm.device_id <> m.sender_device
+             AND COALESCE((SELECT c.acked_seq FROM mls_cursors c
+                           WHERE c.group_id = gm.group_id AND c.device_id = gm.device_id), 0) < m.seq
+         )
        )
   `)
   return result.rowCount ?? 0

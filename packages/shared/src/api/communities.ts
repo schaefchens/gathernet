@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import { CHANNEL_MESSAGE_TTL_DAYS, COMMUNITY_META_MAX_B64 } from '../constants.ts'
+import {
+  CHANNEL_KEY_GRANT_BATCH_MAX,
+  CHANNEL_MESSAGE_TTL_DAYS,
+  COMMUNITY_META_MAX_B64,
+} from '../constants.ts'
 import {
   accountIdSchema,
   communityIdSchema,
@@ -43,6 +47,15 @@ export type ChannelJoinPolicy = z.infer<typeof channelJoinPolicySchema>
 /** everyone = any active member posts; moderators = read-only for non-mods. */
 export const channelPostPolicySchema = z.enum(['everyone', 'moderators'])
 export type ChannelPostPolicy = z.infer<typeof channelPostPolicySchema>
+
+/**
+ * mls = one MLS group per channel (per-message forward secrecy, immediate
+ * removal), the default for small/sensitive channels. group_key = a shared
+ * per-channel K_channel (epoch'd, ECIES-granted per device) for large
+ * broadcast/discussion channels MLS cannot scale to.
+ */
+export const channelEncryptionModeSchema = z.enum(['mls', 'group_key'])
+export type ChannelEncryptionMode = z.infer<typeof channelEncryptionModeSchema>
 
 /** The caller's own membership state in a channel, for directory rendering. */
 export const channelMyStatusSchema = z.enum(['active', 'pending', 'invited', 'none'])
@@ -89,6 +102,8 @@ export const communityListItemSchema = z.object({
   keyEpoch: z.number().int().nonnegative(),
   /** true → a leader's client should rotate K_meta (re-encrypt metadata) */
   rotationPending: z.boolean(),
+  /** true → some group_key channel here needs K_channel rotation (fetch detail) */
+  channelRotationPending: z.boolean(),
   myRole: communityRoleSchema,
   channelCount: z.number().int().nonnegative(),
 })
@@ -101,6 +116,19 @@ export const communityMemberSchema = z.object({
   accountId: accountIdSchema,
   displayName: z.string(),
   role: communityRoleSchema,
+})
+
+/** Cursor pagination for large rosters/device lists. `after` = last id seen. */
+export const paginationQuerySchema = z.object({
+  after: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+})
+export type PaginationQuery = z.infer<typeof paginationQuerySchema>
+
+/** A page of community members; `nextCursor` null when the roster is exhausted. */
+export const communityMembersPageResponseSchema = z.object({
+  members: z.array(communityMemberSchema),
+  nextCursor: z.string().nullable(),
 })
 
 export const communityChannelSchema = z.object({
@@ -119,11 +147,17 @@ export const communityChannelSchema = z.object({
   myRole: channelMemberRoleSchema,
   /** whether the caller is muted here (read-only regardless of postPolicy) */
   muted: z.boolean(),
-  /** at least one of the caller's devices holds an active MLS leaf */
+  /** at least one of the caller's devices holds an active MLS leaf (mls channels only) */
   joined: z.boolean(),
   currentEpoch: z.number().int().nonnegative(),
-  /** base64 latest GroupInfo — released only to active channel members */
+  /** base64 latest GroupInfo — released only to active mls-channel members; null for group_key */
   groupInfo: z.base64().nullable(),
+  /** mls vs group_key */
+  encryptionMode: channelEncryptionModeSchema,
+  /** group_key only: current K_channel epoch the client must hold to read/write */
+  keyEpoch: z.number().int().nonnegative(),
+  /** group_key only: true → a manager's client should rotate K_channel */
+  rotationPending: z.boolean(),
 })
 
 export const communityDetailResponseSchema = z.object({
@@ -137,7 +171,10 @@ export const communityDetailResponseSchema = z.object({
     ownerAccountId: accountIdSchema,
   }),
   myRole: communityRoleSchema,
+  /** first page of active members (≤ COMMUNITY_MEMBER_PAGE_SIZE); page the rest via GET …/members */
   members: z.array(communityMemberSchema),
+  /** total active-member count (members may be a truncated first page) */
+  memberCount: z.number().int().nonnegative(),
   channels: z.array(communityChannelSchema),
 })
 
@@ -195,6 +232,8 @@ export const createChannelRequestSchema = z.object({
   joinPolicy: channelJoinPolicySchema.default('open'),
   postPolicy: channelPostPolicySchema.default('everyone'),
   messageTtlDays: messageTtlDaysSchema.default(30),
+  /** mls (default) vs group_key. group_key channels publish no MLS GroupInfo. */
+  encryptionMode: channelEncryptionModeSchema.default('mls'),
 })
 
 export const createChannelResponseSchema = z.object({
@@ -226,12 +265,17 @@ export const publishChannelGroupInfoRequestSchema = z.object({
 /** Response for join/join-by-code and GET channel: current state + join keys. */
 export const channelJoinInfoResponseSchema = z.object({
   channelId: groupIdSchema,
+  communityId: communityIdSchema,
   /** the caller's channel-membership state after the call */
   status: channelMyStatusSchema,
   access: channelAccessSchema,
-  /** released only when status='active' */
+  /** mls: released only when status='active'. group_key: always null (no MLS group). */
   groupInfo: z.base64().nullable(),
+  /** mls channel epoch (0 for group_key) */
   epoch: z.number().int().nonnegative(),
+  encryptionMode: channelEncryptionModeSchema,
+  /** group_key only: the K_channel epoch the caller must fetch a grant for */
+  keyEpoch: z.number().int().nonnegative(),
 })
 
 export const joinByCodeRequestSchema = z.object({
@@ -304,6 +348,8 @@ export const communityDeviceSchema = z.object({
 export const communityDevicesResponseSchema = z.object({
   keyEpoch: z.number().int().nonnegative(),
   devices: z.array(communityDeviceSchema),
+  /** null when all grantable devices have been returned; else pass as `after` */
+  nextCursor: z.string().nullable(),
 })
 
 export const keyGrantSchema = z.object({
@@ -347,6 +393,71 @@ export const rotateRequestSchema = z.object({
 
 export const channelMembersResponseSchema = z.object({
   members: z.array(channelMemberSchema),
+  /** null when the roster is exhausted; else pass as `after` */
+  nextCursor: z.string().nullable(),
+})
+
+/* ------------------------ K_channel (group_key) grants -------------------- */
+
+/**
+ * K_channel distribution for group_key channels. Mirrors the K_meta grant flow
+ * (per-device ECIES receipt-key seals) but scoped to a channel and minted only
+ * by an authorized granter set (channel moderators / community leaders). Each
+ * epoch carries an authenticated `commitment` = SHA256(domain ‖ channelId ‖
+ * epoch ‖ K_channel) signed by the minter device, so a grantee can prove the
+ * key it opened is the one authority published (fork/partition detection).
+ */
+export const channelKeyCommitmentSchema = z.object({
+  /** base64 SHA-256(domain ‖ channelId ‖ keyEpoch ‖ K_channel) */
+  keyCommitment: z.base64(),
+  /** device that minted this epoch's key (resolve its cert via GET …/channels/:id/devices) */
+  minterDeviceId: deviceIdSchema,
+  /** base64 Ed25519(minterDeviceKey, domain ‖ channelId ‖ keyEpoch ‖ keyCommitment) */
+  minterSig: z.base64(),
+})
+
+/** Devices eligible for a K_channel grant = the channel's active-member devices. */
+export const channelDevicesResponseSchema = z.object({
+  keyEpoch: z.number().int().nonnegative(),
+  devices: z.array(communityDeviceSchema),
+  /** null when all grantable devices have been returned; else pass as `after` */
+  nextCursor: z.string().nullable(),
+})
+
+export const channelKeyGrantSchema = z.object({
+  granteeDeviceId: deviceIdSchema,
+  /** eciesSeal(receiptPk, K_channel[keyEpoch]) */
+  sealedKey: z.base64(),
+  senderPkB64: z.base64(),
+})
+
+export const postChannelKeyGrantsRequestSchema = z.object({
+  keyEpoch: z.number().int().nonnegative(),
+  /** required the first time an epoch is seen; ignored (idempotent) afterwards */
+  commitment: channelKeyCommitmentSchema.optional(),
+  grants: z.array(channelKeyGrantSchema).min(1).max(CHANNEL_KEY_GRANT_BATCH_MAX),
+})
+
+export const myChannelKeyGrantResponseSchema = z.object({
+  keyEpoch: z.number().int().nonnegative(),
+  /** null when no grant exists for this device at the current epoch */
+  grant: z.object({ sealedKey: z.base64(), senderPkB64: z.base64() }).nullable(),
+  /** the authenticated epoch commitment; null until a minter has published it */
+  commitment: channelKeyCommitmentSchema.nullable(),
+})
+
+/**
+ * Rotate a group_key channel to a fresh K_channel epoch (member removed/left, or
+ * periodic PCS refresh). Unlike K_meta rotation, messages are NOT re-encrypted —
+ * old messages stay under their old epoch and expire at the channel TTL. The
+ * server applies a compare-and-set on the channel `keyEpoch`. `grants` is an
+ * initial batch (at least the minter's own devices); the client tops up the
+ * remaining member devices via postChannelKeyGrants at the new epoch.
+ */
+export const rotateChannelRequestSchema = z.object({
+  fromEpoch: z.number().int().nonnegative(),
+  commitment: channelKeyCommitmentSchema,
+  grants: z.array(channelKeyGrantSchema).min(1).max(CHANNEL_KEY_GRANT_BATCH_MAX),
 })
 
 /* ---------------------------------- roles --------------------------------- */
@@ -360,6 +471,7 @@ export type CreateCommunityResponse = z.infer<typeof createCommunityResponseSche
 export type UpdateCommunityRequest = z.infer<typeof updateCommunityRequestSchema>
 export type CommunityListItem = z.infer<typeof communityListItemSchema>
 export type CommunityMember = z.infer<typeof communityMemberSchema>
+export type CommunityMembersPageResponse = z.infer<typeof communityMembersPageResponseSchema>
 export type CommunityChannel = z.infer<typeof communityChannelSchema>
 export type CommunityDetailResponse = z.infer<typeof communityDetailResponseSchema>
 export type UploadMediaRequest = z.infer<typeof uploadMediaRequestSchema>
@@ -388,3 +500,9 @@ export type PostKeyGrantsRequest = z.infer<typeof postKeyGrantsRequestSchema>
 export type MyKeyGrantResponse = z.infer<typeof myKeyGrantResponseSchema>
 export type RotateRequest = z.infer<typeof rotateRequestSchema>
 export type SetMemberRoleRequest = z.infer<typeof setMemberRoleRequestSchema>
+export type ChannelKeyCommitment = z.infer<typeof channelKeyCommitmentSchema>
+export type ChannelDevicesResponse = z.infer<typeof channelDevicesResponseSchema>
+export type ChannelKeyGrant = z.infer<typeof channelKeyGrantSchema>
+export type PostChannelKeyGrantsRequest = z.infer<typeof postChannelKeyGrantsRequestSchema>
+export type MyChannelKeyGrantResponse = z.infer<typeof myChannelKeyGrantResponseSchema>
+export type RotateChannelRequest = z.infer<typeof rotateChannelRequestSchema>

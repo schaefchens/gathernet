@@ -28,6 +28,20 @@ export const CHANNEL_MESSAGE_TTL_DEFAULT_DAYS = 30
 /** Sealed metadata blob cap (title+emoji+markdown description, base64). */
 export const COMMUNITY_META_MAX_B64 = 8192
 
+/**
+ * Channel scaling caps. 'mls' channels stay small (one MLS leaf per device,
+ * O(N) client state); 'group_key' channels scale via a shared K_channel.
+ * Broadcast (moderators-post) tolerates far more readers than discussion
+ * (everyone-post), which must rotate K_channel on removal.
+ */
+export const MLS_CHANNEL_MAX_DEVICES = 128
+export const GROUP_KEY_DISCUSSION_MAX_MEMBERS = 10_000
+export const GROUP_KEY_BROADCAST_MAX_MEMBERS = 100_000
+/** Max K_channel grants per POST; the client loops to cover larger channels. */
+export const CHANNEL_KEY_GRANT_BATCH_MAX = 1000
+/** Roster page size for paginated community/channel member listings. */
+export const COMMUNITY_MEMBER_PAGE_SIZE = 100
+
 /** MLS key package pool per device. */
 export const KEY_PACKAGE_TARGET = 50
 export const KEY_PACKAGE_REPLENISH_BELOW = 20

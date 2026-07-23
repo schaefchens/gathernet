@@ -7,10 +7,13 @@ import {
   type DeviceId,
   type GroupId,
   joinByCodeRequestSchema,
+  paginationQuerySchema,
+  postChannelKeyGrantsRequestSchema,
   postCommitRequestSchema,
   postKeyGrantsRequestSchema,
   publishChannelGroupInfoRequestSchema,
   resolveJoinRequestSchema,
+  rotateChannelRequestSchema,
   rotateRequestSchema,
   setMemberRoleRequestSchema,
   setModeratorRequestSchema,
@@ -40,16 +43,21 @@ import {
   joinChannelByCode,
   kickFromChannel,
   leaveCommunity,
+  listChannelDevices,
   listChannelMembers,
   listCommunities,
   listCommunityDevices,
   listCommunityInvites,
+  listCommunityMembers,
+  myChannelKeyGrant,
   myKeyGrant,
+  postChannelKeyGrants,
   postKeyGrants,
   publishChannelGroupInfo,
   removeMember,
   resolveJoinRequest,
   revokeCommunityInvite,
+  rotateChannel,
   rotateCommunity,
   setMemberRole,
   setModerator,
@@ -196,6 +204,12 @@ export function registerCommunityRoutes(
     return getCommunityDetail(db, session.accountId, request.params.id)
   })
 
+  app.get<{ Params: { id: string } }>('/api/v1/communities/:id/members', auth, async (request) => {
+    const session = requireSession(request)
+    const { after, limit } = paginationQuerySchema.parse(request.query)
+    return listCommunityMembers(db, session.accountId, request.params.id, after, limit)
+  })
+
   app.patch<{ Params: { id: string } }>('/api/v1/communities/:id', auth, async (request) => {
     const session = requireSession(request)
     const body = updateCommunityRequestSchema.parse(request.body)
@@ -218,7 +232,8 @@ export function registerCommunityRoutes(
 
   app.get<{ Params: { id: string } }>('/api/v1/communities/:id/devices', auth, async (request) => {
     const session = requireSession(request)
-    return listCommunityDevices(db, session.accountId, request.params.id)
+    const { after, limit } = paginationQuerySchema.parse(request.query)
+    return listCommunityDevices(db, session.accountId, request.params.id, after, limit)
   })
 
   app.get<{ Params: { id: string } }>(
@@ -254,6 +269,76 @@ export function registerCommunityRoutes(
     await rotateCommunity(db, registry, session.accountId, request.params.id, body)
     return { ok: true }
   })
+
+  /* ------------------- K_channel (group_key) grants --------------------- */
+
+  app.get<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/devices',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const { after, limit } = paginationQuerySchema.parse(request.query)
+      return listChannelDevices(
+        db,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        after,
+        limit,
+      )
+    },
+  )
+
+  app.get<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/key-grants/mine',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      return myChannelKeyGrant(
+        db,
+        session.accountId,
+        session.deviceId,
+        request.params.id,
+        request.params.channelId,
+      )
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/key-grants',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = postChannelKeyGrantsRequestSchema.parse(request.body)
+      await postChannelKeyGrants(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        body,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/rotate',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = rotateChannelRequestSchema.parse(request.body)
+      await rotateChannel(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        body,
+      )
+      return { ok: true }
+    },
+  )
 
   app.post<{ Params: { id: string } }>(
     '/api/v1/communities/:id/invites',
@@ -357,13 +442,15 @@ export function registerCommunityRoutes(
     auth,
     async (request) => {
       const session = requireSession(request)
-      const members = await listChannelMembers(
+      const { after, limit } = paginationQuerySchema.parse(request.query)
+      return listChannelMembers(
         db,
         session.accountId,
         request.params.id,
         request.params.channelId,
+        after,
+        limit,
       )
-      return { members }
     },
   )
 

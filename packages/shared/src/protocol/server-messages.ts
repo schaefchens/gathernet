@@ -291,6 +291,26 @@ export const communityRotationNeededMessage = z.object({
   }),
 })
 
+/** To a grantee account: a K_channel grant is available for a group_key channel —
+ *  a device lacking the current channel key can fetch + open it. */
+export const channelKeyGrantsMessage = z.object({
+  type: z.literal('community.channel_key_grants_available'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+  }),
+})
+
+/** To a group_key channel's managers: a member left/was removed → a manager's
+ *  client should rotate K_channel (mint a new epoch, re-grant remaining devices). */
+export const channelRotationNeededMessage = z.object({
+  type: z.literal('community.channel_rotation_needed'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+  }),
+})
+
 export const communityChannelCreatedMessage = z.object({
   type: z.literal('community.channel_created'),
   payload: z.object({
@@ -402,6 +422,8 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   communityUpdatedMessage,
   communityKeyGrantsMessage,
   communityRotationNeededMessage,
+  channelKeyGrantsMessage,
+  channelRotationNeededMessage,
   communityChannelCreatedMessage,
   communityChannelUpdatedMessage,
   communityChannelDeletedMessage,

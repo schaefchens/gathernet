@@ -14,6 +14,15 @@ export const SIG_DOMAIN = {
    *  to the device signing key, which the DeviceCert already binds to the
    *  identity. Lets community K_meta grants be sealed to an authenticated key. */
   receiptKey: 'gathernet-receipt-key-v1',
+  /** App-layer group_key channel signatures — signed + verified in the Hub via
+   *  the ed25519Sign/ed25519Verify facade (NOT produced by the crate). A
+   *  per-message sender signature restores the sender authenticity MLS gave for
+   *  free once a channel shares one content key. */
+  channelMsg: 'gathernet-channel-msg-v1',
+  /** Ed25519(minterDK, domain.channelKeyCommit || channelId || epoch || H(K_channel))
+   *  — authenticates which key an authorised minter published for an epoch, so a
+   *  grantee can detect a partition (two keys claiming one epoch). */
+  channelKeyCommit: 'gathernet-channel-key-commit-v1',
 } as const
 
 export const displayNameSchema = z.string().trim().min(1).max(64)

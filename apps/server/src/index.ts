@@ -3,7 +3,11 @@ import { loadConfig } from './config.ts'
 import { createDb, createPool, runMigrations } from './db/index.ts'
 import { pruneGrantCodes } from './modules/apps/grant-codes.ts'
 import { pruneExpiredChallenges } from './modules/auth/challenges.ts'
-import { pruneChannelInvites, pruneCommunityInvites } from './modules/communities/service.ts'
+import {
+  pruneChannelInvites,
+  pruneChannelKeyGrants,
+  pruneCommunityInvites,
+} from './modules/communities/service.ts'
 import { pruneChannelMessages, pruneMailbox } from './modules/delivery/service.ts'
 import { pruneRooms } from './modules/rooms/service.ts'
 
@@ -21,6 +25,7 @@ async function runJobs(): Promise<void> {
     await pruneGrantCodes(db)
     await pruneChannelMessages(db)
     await pruneMailbox(db)
+    await pruneChannelKeyGrants(db)
     await pruneRooms(db)
     await pruneCommunityInvites(db)
     await pruneChannelInvites(db)
