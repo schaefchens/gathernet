@@ -36,6 +36,7 @@ import {
   fetchKMetaGrant,
   forgetKMetaCache,
   fromStdB64,
+  getKMetaEpoch,
   getPinnedOwner,
   issueCapabilities,
   makeCapFetcher,
@@ -758,9 +759,13 @@ class CommunityChatStore {
     const engine = this.engine
     if (!engine || this.groupKey.has(channelId) || !engine.hasGroup(channelId)) return true
     const ownerAccountId = await getPinnedOwner(communityId)
-    if (!ownerAccountId) {
+    // The epoch pin must come from LOCALLY-held key material, never the relay: our
+    // held K_meta epoch is monotonic + commitment-verified. With no pinned owner or
+    // no held K_meta we can't verify → legacy trust (same degradation as K_meta).
+    const expectedEpoch = await getKMetaEpoch(communityId)
+    if (!ownerAccountId || expectedEpoch < 0) {
       this.clearUntrusted(channelId)
-      return true // no pinned owner → cannot verify (legacy/degraded, same as K_meta)
+      return true
     }
     let devices: CommunityDevicesResponse['devices']
     try {
@@ -775,7 +780,14 @@ class CommunityChatStore {
     let trusted = true
     for (const leaf of engine.members(channelId)) {
       if (
-        !(await accountHoldsCap(COMMUNITY_SCOPE, leaf.accountId, ownerAccountId, resolve, getCap))
+        !(await accountHoldsCap(
+          COMMUNITY_SCOPE,
+          leaf.accountId,
+          ownerAccountId,
+          resolve,
+          getCap,
+          expectedEpoch,
+        ))
       ) {
         trusted = false
         break
