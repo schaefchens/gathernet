@@ -53,9 +53,12 @@ reconstructing the AAD/signature, so a cross-channel replay fails verification.
   list) and verify it under its account identity; check `senderDeviceId ==
   SHA256(devicePk)[:16]`; verify `sig` under `devicePk`; open `ct` under
   `K_channel[epoch]`; dedup by monotonic `senderSeq`. The server's `senderDevice`
-  field is never trusted. The `senderSeq`/`prevSenderHash` chain gives per-sender
-  replay/reorder detection (cross-sender total order stays unauthenticated —
-  inherent to a group key).
+  field is never trusted. Replays are rejected by a **persisted per-(channel,
+  sender) high-water `senderSeq`** (survives reloads, so a signed old envelope
+  re-inserted at a fresh server seq is dropped). `prevSenderHash` is signed into
+  every message (bound, tamper-evident) and enables per-sender gap/reorder
+  *detection*, but continuity is not yet enforced on receive — a future hardening.
+  Cross-sender total order is unauthenticated, inherent to a group key.
 
 ### Key distribution + epoch commitment
 

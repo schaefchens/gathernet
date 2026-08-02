@@ -411,6 +411,13 @@ export async function fetchChannelKeyGrant(
     )
     if (!res.grant) return false
     if (await getKChannel(channelId, res.keyEpoch)) return false // already held
+    // A commitment is REQUIRED to trust the key. An ECIES seal to a *public*
+    // receipt key carries no authenticity over WHICH key was sealed — anyone
+    // (incl. a compromised server) can seal an arbitrary key to it. Without the
+    // authenticated epoch commitment this would be a silent key-substitution
+    // hole (the victim would then send under a server-chosen key). A grant is
+    // always published together with its commitment, so absence ⇒ untrusted.
+    if (!res.commitment) return false
     const priv = await importEciesPrivateKey(toStdB64(record.receiptPrivPkcs8))
     const opened = await eciesOpen(
       priv,
@@ -419,10 +426,8 @@ export async function fetchChannelKeyGrant(
       record.receiptPk,
     )
     // Integrity + anti-partition + anti-substitution (see verifyCommitment).
-    if (res.commitment) {
-      if (!(await verifyCommitment(communityId, channelId, res.keyEpoch, opened, res.commitment))) {
-        return false
-      }
+    if (!(await verifyCommitment(communityId, channelId, res.keyEpoch, opened, res.commitment))) {
+      return false
     }
     await rememberKChannel(channelId, res.keyEpoch, opened)
     return true
@@ -434,8 +439,8 @@ export async function fetchChannelKeyGrant(
 /**
  * Seal a held K_channel to every active-member device of the channel (a bounded
  * granter set — managers only, server-enforced) and publish the epoch
- * commitment. Idempotent per (channel, epoch, device). Stage 4 posts a single
- * batch; the chunking loop for >CHANNEL_KEY_GRANT_BATCH_MAX arrives in Stage 5.
+ * commitment. Pages the device list and posts grants in bounded batches;
+ * idempotent per (channel, epoch, device) via the `granted` set.
  */
 export async function grantChannelKey(
   communityId: string,
@@ -477,7 +482,11 @@ export async function grantChannelKey(
         return // epoch race / offline — retry later
       }
     }
-    after = page.nextCursor ?? undefined
+    // Guard against a buggy/malicious server returning a non-advancing cursor
+    // (which would spin this loop hammering the endpoint indefinitely).
+    const next = page.nextCursor ?? undefined
+    if (next !== undefined && next === after) return
+    after = next
   } while (after)
 }
 

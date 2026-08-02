@@ -1735,4 +1735,84 @@ describe('group_key channels (mega-community scale)', () => {
     expect(after?.rotationPending).toBe(false)
     expect(after?.keyEpoch).toBe(1)
   })
+
+  it('kicking a subscribed member evicts their delivery subscription (no more nudges)', async () => {
+    const owner = await createUser('GKEvictOwner')
+    const member = await createUser('GKEvictMember')
+    const communityId = await createCommunity(owner)
+    const channelId = await createGroupKeyChannel(owner, communityId)
+    await addMember(owner, communityId, member)
+    await postJoin(member, communityId, channelId)
+
+    const ownerWs = await TestWsClient.connect(port, owner.token)
+    const memberWs = await TestWsClient.connect(port, member.token)
+    try {
+      const subId = memberWs.send('channel.subscribe', { channelId })
+      await memberWs.waitFor((m) => m.type === 'ack' && 'replyTo' in m && m.replyTo === subId)
+
+      // While subscribed, a post nudges the member.
+      ownerWs.send('chat.send', { groupId: channelId, epoch: 0, ciphertext: fakeB64(48) })
+      await memberWs.waitFor((m) => m.type === 'channel.updated')
+
+      // Kick the member → their subscription is dropped server-side.
+      const kick = await app.inject({
+        method: 'POST',
+        url: `/api/v1/communities/${communityId}/channels/${channelId}/kick/${member.accountId}`,
+        headers: auth(owner),
+      })
+      expect(kick.statusCode).toBe(200)
+
+      // A further post no longer reaches the ex-member (no activity-metadata leak).
+      ownerWs.send('chat.send', { groupId: channelId, epoch: 0, ciphertext: fakeB64(48) })
+      await memberWs.expectSilence((m) => m.type === 'channel.updated')
+    } finally {
+      await ownerWs.close()
+      await memberWs.close()
+    }
+  })
+
+  it('leaders-access channel: a demoted member can no longer fetch K_channel', async () => {
+    const owner = await createUserWithReceipt('GKAccOwner')
+    const leader = await createUserWithReceipt('GKAccLeader')
+    const communityId = await createCommunity(owner)
+    const channelId = await createGroupKeyChannel(owner, communityId, { access: 'leaders' })
+    await addMember(owner, communityId, leader)
+    // Promote to leader so they're eligible to join the leaders-only channel.
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/members/${leader.accountId}/role`,
+      headers: auth(owner),
+      payload: { role: 'leader' },
+    })
+    expect((await postJoin(leader, communityId, channelId)).json().status).toBe('active')
+    const mineUrl = `/api/v1/communities/${communityId}/channels/${channelId}/key-grants/mine`
+    expect((await app.inject({ method: 'GET', url: mineUrl, headers: auth(leader) })).statusCode).toBe(
+      200,
+    )
+
+    // Demote back to member: still an active channel member, but no longer access-eligible.
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/members/${leader.accountId}/role`,
+      headers: auth(owner),
+      payload: { role: 'member' },
+    })
+    const denied = await app.inject({ method: 'GET', url: mineUrl, headers: auth(leader) })
+    expect(denied.statusCode).toBe(403)
+
+    // And a manager can't seal K_channel to the now-ineligible device.
+    const s = await eciesSeal(leader.receipt.publicKeyB64, new Uint8Array(randomBytes(32)))
+    const leak = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/key-grants`,
+      headers: auth(owner),
+      payload: {
+        keyEpoch: 0,
+        grants: [
+          { granteeDeviceId: leader.deviceId, sealedKey: s.sealedB64, senderPkB64: s.senderPkB64 },
+        ],
+      },
+    })
+    expect(leak.statusCode).toBe(400)
+  })
 })

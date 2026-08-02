@@ -175,8 +175,10 @@ class CommunityChatStore {
     string,
     Map<string, { devicePk: Uint8Array; accountId: string } | null>
   >()
-  /** Last senderSeq accepted per `channelId:senderDeviceId` — best-effort replay guard. */
-  private lastSenderSeq = new Map<string, number>()
+  /** `communityId:deviceId` sender ids not found in the member-device list — cached
+   *  so a server injecting random unknown ids can't force an O(members) refetch +
+   *  re-verify per frame. Cleared on reconnect so genuinely-new devices resolve. */
+  private unresolvedSenders = new Set<string>()
 
   async init(record: DeviceRecord): Promise<void> {
     this.crypto = await loadCrypto()
@@ -254,6 +256,9 @@ class CommunityChatStore {
         }
       }),
       wsClient.on('hello.ok', () => {
+        // Drop cached sender lookups so devices added while we were offline resolve.
+        this.senderCerts.clear()
+        this.unresolvedSenders.clear()
         this.resubscribeChannels()
         void this.catchUpAll()
         void this.sweepRotations()
@@ -375,7 +380,7 @@ class CommunityChatStore {
     this.ready = new Set()
     this.groupKey = new Map()
     this.senderCerts = new Map()
-    this.lastSenderSeq = new Map()
+    this.unresolvedSenders = new Set()
     forgetKMetaCache()
     forgetChannelKeyCache()
     useCommunityChat.setState({ channels: {}, messages: {} })
@@ -429,6 +434,10 @@ class CommunityChatStore {
   ): Promise<{ devicePk: Uint8Array; accountId: string } | null> {
     const cached = this.senderCerts.get(communityId)
     if (cached?.has(deviceId)) return cached.get(deviceId) ?? null
+    // A device id we already looked up and didn't find → don't refetch the whole
+    // list again (bounds an inject-random-ids amplification DoS). Cleared on
+    // reconnect so a genuinely-new device gets resolved.
+    if (this.unresolvedSenders.has(`${communityId}:${deviceId}`)) return null
     try {
       const { devices } = await api<CommunityDevicesResponse>(
         'GET',
@@ -437,7 +446,9 @@ class CommunityChatStore {
       const map = new Map<string, { devicePk: Uint8Array; accountId: string } | null>()
       for (const d of devices) map.set(d.deviceId, await verifyChannelSender(d))
       this.senderCerts.set(communityId, map)
-      return map.get(deviceId) ?? null
+      const resolved = map.get(deviceId) ?? null
+      if (!map.has(deviceId)) this.unresolvedSenders.add(`${communityId}:${deviceId}`)
+      return resolved
     } catch {
       return null
     }
@@ -445,10 +456,10 @@ class CommunityChatStore {
 
   /**
    * Ordered mailbox catch-up for a group_key channel: fetch ciphertext after the
-   * cursor, decrypt + verify each in seq order, store, ack. Stops at the first
-   * message whose K_channel epoch we don't hold yet (a later run resumes from the
-   * unchanged cursor once the key arrives) so no gap is skipped. Used both for
-   * reconnect and as the handler for a live `chat.message` nudge.
+   * cursor, decrypt + verify each in seq order, store, ack. Malformed frames and
+   * old-epoch history (never grantable) are skipped; it stalls (leaving the
+   * cursor put) only on a current/in-flight epoch we don't hold yet, resuming
+   * once the grant arrives. Used both for reconnect and as the live-nudge handler.
    */
   private async catchUpGroupKey(channelId: string, communityId: string): Promise<void> {
     const after = this.cursor(channelId)
@@ -490,7 +501,16 @@ class CommunityChatStore {
       await fetchChannelKeyGrant(communityId, channelId, this.record).catch(() => {})
       key = await getKChannel(channelId, epoch)
     }
-    if (!key) return false // key not available yet
+    if (!key) {
+      // An epoch OLDER than any we hold will never be granted (forward secrecy):
+      // a late joiner is granted only the current epoch, so retained history
+      // under old epochs is undecryptable forever. Skip it (advance) instead of
+      // stalling the whole channel behind it. Only wait for a current/in-flight
+      // epoch, where a grant may still arrive.
+      const held = await latestHeldEpoch(channelId)
+      if (held !== null && epoch < held) return true
+      return false
+    }
     const opened = await openChannelMessage({
       payloadB64: m.payload,
       key,
@@ -499,10 +519,12 @@ class CommunityChatStore {
       resolveSender: (id) => this.resolveSender(communityId, id),
     })
     if (opened) {
-      const sk = `${channelId}:${opened.senderDeviceId}`
-      const seen = this.lastSenderSeq.get(sk) ?? -1
+      // Persisted per-(channel,sender) high-water senderSeq — survives reloads so
+      // a compromised server can't replay a signed old envelope at a fresh seq.
+      const seqKey = `gn.gkss.${channelId}.${opened.senderDeviceId}`
+      const seen = Number(localStorage.getItem(seqKey) ?? '-1')
       if (opened.senderSeq > seen) {
-        this.lastSenderSeq.set(sk, opened.senderSeq)
+        localStorage.setItem(seqKey, String(opened.senderSeq))
         const stored: StoredMessage = {
           groupId: channelId,
           seq: m.seq,
@@ -575,13 +597,13 @@ class CommunityChatStore {
   ): Promise<void> {
     const record = this.record
     if (!record) throw new Error('locked')
-    // Send under the newest epoch we hold (rotation may have advanced it).
+    // Pick up any rotation FIRST — latestHeldEpoch reflects only what we hold, so
+    // without this a sender that missed a rotation would seal under the OLD epoch
+    // (the key a removed member still has), letting them read post-removal
+    // messages. fetchChannelKeyGrant advances us to the server's current epoch.
+    await fetchChannelKeyGrant(gk.communityId, channelId, record).catch(() => {})
     const epoch = (await latestHeldEpoch(channelId)) ?? gk.keyEpoch
-    let key = await getKChannel(channelId, epoch)
-    if (!key) {
-      await fetchChannelKeyGrant(gk.communityId, channelId, record).catch(() => {})
-      key = await getKChannel(channelId, epoch)
-    }
+    const key = await getKChannel(channelId, epoch)
     if (!key) throw new Error('no_channel_key')
 
     const ts = Date.now()
@@ -612,7 +634,7 @@ class CommunityChatStore {
     localStorage.setItem(seqStoreKey, String(senderSeq))
     localStorage.setItem(hashStoreKey, toStdB64(nextHash))
     // Our own echo (fanned back to our other devices) must not double-store.
-    this.lastSenderSeq.set(`${channelId}:${record.deviceId}`, senderSeq)
+    localStorage.setItem(`gn.gkss.${channelId}.${record.deviceId}`, String(senderSeq))
     if (seq > this.cursor(channelId)) this.setCursor(channelId, seq)
 
     const stored: StoredMessage = {

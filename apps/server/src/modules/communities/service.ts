@@ -1286,9 +1286,11 @@ export async function kickFromChannel(
     'member',
     [targetAccountId],
   )
-  // group_key channel: the kicked member held K_channel — rotate it stale.
+  // group_key channel: the kicked member held K_channel — rotate it stale, and
+  // drop their delivery subscription so they stop seeing post activity.
   const channel = await loadChannel(db, communityId, channelId)
   if (channel.encryptionMode === 'group_key') {
+    registry.evictAccountFromChannel(targetAccountId, channelId)
     await requestChannelRotation(db, registry, communityId, channelId)
   }
 }
@@ -1582,7 +1584,8 @@ export async function removeMember(
   for (const acct of new Set(recipients)) registry.sendToAccount(acct, message)
   // The removed member held K_meta — rotate it so their cached copy goes stale.
   await requestRotation(db, registry, communityId)
-  // ...and K_channel for every group_key channel they were in.
+  // ...and K_channel for every group_key channel they were in; drop their subs.
+  for (const channelId of gkChannels) registry.evictAccountFromChannel(targetAccountId, channelId)
   await notifyChannelRotations(db, registry, communityId, gkChannels)
 }
 
@@ -1615,7 +1618,8 @@ export async function leaveCommunity(
   for (const acct of new Set(recipients)) registry.sendToAccount(acct, message)
   // The departing member held K_meta — rotate it.
   await requestRotation(db, registry, communityId)
-  // ...and K_channel for every group_key channel they were in.
+  // ...and K_channel for every group_key channel they were in; drop their subs.
+  for (const channelId of gkChannels) registry.evictAccountFromChannel(accountId, channelId)
   await notifyChannelRotations(db, registry, communityId, gkChannels)
 }
 
@@ -1883,17 +1887,36 @@ export async function rotateCommunity(
 
 /* --------------------- K_channel (group_key) grants ----------------------- */
 
-/** Active devices of a channel's active members (grant fan-out), optionally paged. */
-async function grantableChannelDeviceRows(
-  db: DbOrTx,
-  channelId: string,
-  page?: { after?: string; limit: number },
-) {
+type GrantableChannel = Pick<ChannelRow, 'channelId' | 'communityId' | 'access'>
+
+/**
+ * WHERE conditions for a device that may hold a K_channel grant: an active
+ * device of an active channel member whose community membership also satisfies
+ * the channel's access level ('leaders' channels admit only owner/leader) — the
+ * SAME guard the message path enforces (satisfiesChannelAccess), so the key path
+ * can't leak K_channel to a device the message path would deny.
+ */
+function grantableChannelConds(channel: GrantableChannel) {
   const conds = [
-    eq(channelMembers.channelId, channelId),
+    eq(channelMembers.channelId, channel.channelId),
     eq(channelMembers.status, 'active'),
     eq(devices.status, 'active'),
+    eq(communityMembers.communityId, channel.communityId),
+    eq(communityMembers.status, 'active'),
   ]
+  if (channel.access === 'leaders') {
+    conds.push(inArray(communityMembers.role, ['owner', 'leader']))
+  }
+  return conds
+}
+
+/** Active, access-eligible devices of a channel's members (grant fan-out), optionally paged. */
+async function grantableChannelDeviceRows(
+  db: DbOrTx,
+  channel: GrantableChannel,
+  page?: { after?: string; limit: number },
+) {
+  const conds = grantableChannelConds(channel)
   if (page?.after) conds.push(gt(devices.deviceId, page.after))
   const q = db
     .select({
@@ -1906,9 +1929,28 @@ async function grantableChannelDeviceRows(
     })
     .from(channelMembers)
     .innerJoin(devices, eq(devices.accountId, channelMembers.accountId))
+    .innerJoin(communityMembers, eq(communityMembers.accountId, channelMembers.accountId))
     .where(and(...conds))
   if (page) return q.orderBy(asc(devices.deviceId)).limit(page.limit)
   return q
+}
+
+/**
+ * The set of device ids a grant may be sealed to — a lightweight deviceId-only
+ * projection for validating a POST's grantees, so a single grant request doesn't
+ * materialise every member device's cert/receipt BLOBs just to build a Set.
+ */
+async function eligibleChannelDeviceIds(
+  db: DbOrTx,
+  channel: GrantableChannel,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({ deviceId: devices.deviceId })
+    .from(channelMembers)
+    .innerJoin(devices, eq(devices.accountId, channelMembers.accountId))
+    .innerJoin(communityMembers, eq(communityMembers.accountId, channelMembers.accountId))
+    .where(and(...grantableChannelConds(channel)))
+  return new Set(rows.map((r) => r.deviceId))
 }
 
 /** Assert `deviceId` belongs to `accountId` (the minter binds its own device). */
@@ -1936,7 +1978,7 @@ export async function listChannelDevices(
   const channel = await loadChannel(db, communityId, channelId)
   await requireChannelManager(db, channelId, membership)
   const pageSize = Math.min(limit ?? 500, 500)
-  const rows = await grantableChannelDeviceRows(db, channelId, {
+  const rows = await grantableChannelDeviceRows(db, channel, {
     ...(after ? { after } : {}),
     limit: pageSize,
   })
@@ -1976,8 +2018,8 @@ export async function postChannelKeyGrants(
   if (channel.encryptionMode !== 'group_key') throw new ServiceError(400, 'not_group_key')
   if (input.keyEpoch !== channel.keyEpoch) throw new ServiceError(409, 'key_epoch_stale')
 
-  // Only seal to devices of active channel members — never leak K_channel.
-  const allowed = new Set((await grantableChannelDeviceRows(db, channelId)).map((r) => r.deviceId))
+  // Only seal to access-eligible devices of active channel members — never leak K_channel.
+  const allowed = await eligibleChannelDeviceIds(db, channel)
   for (const g of input.grants) {
     if (!allowed.has(g.granteeDeviceId)) throw new ServiceError(400, 'invalid_grantee')
   }
@@ -2022,13 +2064,17 @@ export async function myChannelKeyGrant(
   communityId: string,
   channelId: string,
 ): Promise<MyChannelKeyGrantResponse> {
-  await requireActiveMembership(db, communityId, accountId)
+  const membership = await requireActiveMembership(db, communityId, accountId)
   const channel = await loadChannel(db, communityId, channelId)
-  // Only an active channel member may fetch the key (a removed member is denied).
+  // Only an active channel member may fetch the key (a removed member is denied),
+  // and only if their community role satisfies the channel's access level — the
+  // same guard the message path enforces (parity: no key to a device that can't read).
   const chanMem = await db.query.channelMembers.findFirst({
     where: and(eq(channelMembers.channelId, channelId), eq(channelMembers.accountId, accountId)),
   })
-  if (chanMem?.status !== 'active') throw new ServiceError(403, 'not_a_member')
+  if (chanMem?.status !== 'active' || !satisfiesChannelAccess(membership, channel.access)) {
+    throw new ServiceError(403, 'not_a_member')
+  }
 
   const row = await db.query.channelKeyGrants.findFirst({
     where: and(
@@ -2105,10 +2151,8 @@ export async function rotateChannel(
       })
       .onConflictDoNothing()
 
-    // New-epoch grants — only for devices of still-active members (never the removed one).
-    const allowed = new Set(
-      (await grantableChannelDeviceRows(tx, channelId)).map((r) => r.deviceId),
-    )
+    // New-epoch grants — only for access-eligible devices of still-active members.
+    const allowed = await eligibleChannelDeviceIds(tx, channel)
     for (const g of input.grants) {
       if (!allowed.has(g.granteeDeviceId)) throw new ServiceError(400, 'invalid_grantee')
     }
