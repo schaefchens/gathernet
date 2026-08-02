@@ -39,6 +39,7 @@ import {
   getKMetaEpoch,
   getPinnedOwner,
   issueCapabilities,
+  issueChannelModCaps,
   makeCapFetcher,
   makeDeviceResolver,
   pinCommunityOwner,
@@ -1017,6 +1018,31 @@ class CommunityChatStore {
   ): Promise<void> {
     if (!this.record) return
     await issueCapabilities(communityId, epoch, myRole, this.record).catch(() => {})
+  }
+
+  /** Owner/leader: issue channel-moderator caps (the group_key rotation-minter authority). */
+  async issueChannelModCaps(
+    communityId: string,
+    channelIds: string[],
+    epoch: number,
+    myRole: 'owner' | 'leader' | 'member',
+  ): Promise<void> {
+    if (!this.record || channelIds.length === 0) return
+    await issueChannelModCaps(communityId, channelIds, epoch, myRole, this.record).catch(() => {})
+  }
+
+  /**
+   * Issue a channel-moderator cap for one channel at the locally-held community
+   * epoch — called by a leader/owner right after promoting a moderator, so the new
+   * moderator can mint a trusted rotation immediately (not only after the next sweep).
+   */
+  async issueChannelModCapNow(communityId: string, channelId: string): Promise<void> {
+    if (!this.record) return
+    const epoch = await getKMetaEpoch(communityId)
+    if (epoch < 0) return
+    await issueChannelModCaps(communityId, [channelId], epoch, 'leader', this.record).catch(
+      () => {},
+    )
   }
 
   /** Forget a locally-held channel (e.g. after it was deleted server-side). */

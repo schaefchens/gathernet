@@ -82,6 +82,10 @@ function CommunityDetailScreen() {
   const rotationPending = detail?.community.rotationPending ?? false
   const myRole = detail?.myRole
   const root = detail?.community.root ?? null
+  const groupKeyKey = channels
+    .filter((c) => c.encryptionMode === 'group_key')
+    .map((c) => c.channelId)
+    .join(',')
   useEffect(() => {
     if (keyEpoch === undefined || myRole === undefined) return
     let cancelled = false
@@ -95,6 +99,13 @@ function CommunityDetailScreen() {
       // Owner/leader: top up identity-signed membership caps for the roster at
       // this epoch (the counterpart to the key-grant top-up; idempotent).
       await communityChatStore.issueCapabilities(communityId, keyEpoch, myRole)
+      // + channel-moderator caps for group_key channels (the rotation-minter authority).
+      await communityChatStore.issueChannelModCaps(
+        communityId,
+        groupKeyKey ? groupKeyKey.split(',') : [],
+        keyEpoch,
+        myRole,
+      )
       if ((obtained || rotated) && !cancelled) {
         void queryClient.invalidateQueries({ queryKey: ['community', communityId] })
         void queryClient.invalidateQueries({ queryKey: ['communities'] })
@@ -103,7 +114,8 @@ function CommunityDetailScreen() {
     return () => {
       cancelled = true
     }
-  }, [communityId, keyEpoch, rotationPending, isLeader, myRole, root, queryClient])
+  }, [communityId, keyEpoch, rotationPending, isLeader, myRole, root, groupKeyKey, queryClient])
+  // groupKeyKey (a stable joined string) keys the group_key channel set for the effect.
 
   const deleteChannel = useMutation({
     mutationFn: (channelId: string) =>

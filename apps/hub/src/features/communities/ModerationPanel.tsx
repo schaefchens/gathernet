@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../lib/api.ts'
+import { communityChatStore } from '../../stores/community-chat.ts'
 
 interface ModerationPanelProps {
   communityId: string
@@ -68,7 +69,14 @@ export function ModerationPanel({
   const setModerator = useMutation({
     mutationFn: (input: { accountId: string; action: 'set' | 'unset' }) =>
       api('POST', `${base}/moderators/${input.accountId}`, { action: input.action }),
-    onSuccess: refresh,
+    onSuccess: (_data, input) => {
+      // On promotion, issue the new moderator's channel cap now so they can mint a
+      // trusted group_key rotation immediately (demotion revocation rides a rotation).
+      if (input.action === 'set') {
+        void communityChatStore.issueChannelModCapNow(communityId, channelId)
+      }
+      refresh()
+    },
   })
   const setMuted = useMutation({
     mutationFn: (input: { accountId: string; muted: boolean }) =>

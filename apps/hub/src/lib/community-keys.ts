@@ -20,6 +20,7 @@ import {
   base58Encode,
   type CapabilityResponse,
   type CapabilityRole,
+  type ChannelMembersResponse,
   type CommunityDetailResponse,
   type CommunityDevice,
   type CommunityDeviceResponse,
@@ -897,6 +898,64 @@ export async function issueCapabilities(
 }
 
 /**
+ * Issue channel-scope MODERATOR capabilities `{scope: channelId, role: 'moderator',
+ * epoch: community.keyEpoch}` for the current moderators of the given channels — the
+ * authority a group_key channel's rotation-minter proves. Owner/leader only (channel
+ * managers, so the roster read honours the no-roster constraint — only managers see
+ * it). Community-epoch anchored (stable across channel rotations, one epoch namespace)
+ * and re-issued when the epoch bumps; must run eagerly on rotation so a moderator's
+ * post-rotation mint stays verifiable (else the fail-closed send wedges the channel).
+ * Session-deduped + chunked; idempotent via the server's PK upsert.
+ */
+export async function issueChannelModCaps(
+  communityId: string,
+  channelIds: string[],
+  epoch: number,
+  myRole: 'owner' | 'leader' | 'member',
+  record: DeviceRecord,
+): Promise<void> {
+  if (myRole !== 'owner' && myRole !== 'leader') return
+  for (const channelId of channelIds) {
+    const caps: MembershipCapability[] = []
+    let after: string | undefined
+    do {
+      const q = new URLSearchParams({ limit: '500', ...(after ? { after } : {}) })
+      let page: ChannelMembersResponse
+      try {
+        page = await api<ChannelMembersResponse>(
+          'GET',
+          `/api/v1/communities/${communityId}/channels/${channelId}/members?${q}`,
+        )
+      } catch {
+        break // not a manager of this channel / offline — skip it
+      }
+      for (const m of page.members) {
+        if (m.role !== 'moderator' || m.status !== 'active') continue
+        const dedupKey = `${communityId}:${channelId}:${epoch}:${m.accountId}`
+        if (capIssuedTo.has(dedupKey)) continue
+        caps.push(
+          await buildCapability(communityId, channelId, m.accountId, 'moderator', epoch, record),
+        )
+      }
+      after = page.nextCursor ?? undefined
+    } while (after)
+
+    for (let i = 0; i < caps.length; i += 500) {
+      const batch = caps.slice(i, i + 500)
+      try {
+        await api('POST', `/api/v1/communities/${communityId}/capabilities`, {
+          capabilities: batch,
+        })
+        for (const c of batch)
+          capIssuedTo.add(`${communityId}:${channelId}:${epoch}:${c.subjectAccountId}`)
+      } catch {
+        // epoch race / offline — a later open/rotation re-issues (idempotent).
+      }
+    }
+  }
+}
+
+/**
  * K_meta rotation (forward secrecy after a member leaves). A leader's client
  * mints a new key, re-encrypts all metadata + avatars under it, and posts it in
  * one shot; the server applies it with a compare-and-set on the epoch. Returns
@@ -987,5 +1046,17 @@ export async function rotateCommunity(communityId: string, record: DeviceRecord)
   }
   await rememberKMeta(communityId, newKMeta, newEpoch)
   for (const g of grants) grantedTo.add(`${communityId}:${newEpoch}:${g.granteeDeviceId}`)
+  // EAGERLY re-issue authority + membership caps at the new epoch (the rotator is
+  // owner/leader): a group_key channel's minter check + fail-closed send would
+  // otherwise wedge the channel until someone re-opens it. What only the owner may
+  // mint (leader caps) stays stale until the owner's next activity — fail-closed
+  // (no leak), a bounded window (documented liveness assumption).
+  const groupKeyChannelIds = detail.channels
+    .filter((ch) => ch.encryptionMode === 'group_key')
+    .map((ch) => ch.channelId)
+  await issueCapabilities(communityId, newEpoch, detail.myRole, record).catch(() => {})
+  await issueChannelModCaps(communityId, groupKeyChannelIds, newEpoch, detail.myRole, record).catch(
+    () => {},
+  )
   return true
 }
