@@ -562,6 +562,49 @@ export async function accountHoldsCap(
   )
 }
 
+/** Whether `account` holds a valid cap of a SPECIFIC role at `scope` (role-checked). */
+async function holdsRole(
+  scope: string,
+  role: CapabilityRole,
+  account: string,
+  ownerAccountId: string,
+  resolve: DeviceResolver,
+  getCap: CapabilityFetcher,
+  expectedEpoch: number,
+): Promise<boolean> {
+  const cap = await getCap(scope, account)
+  return (
+    !!cap &&
+    cap.role === role &&
+    cap.scope === scope &&
+    cap.subjectAccountId === account &&
+    verifyCapability(cap, ownerAccountId, resolve, getCap, expectedEpoch)
+  )
+}
+
+/**
+ * Whether the device that minted a group_key channel's epoch-commitment was
+ * AUTHORISED to: the pinned owner, OR an account holding a valid community-LEADER
+ * cap, OR an account holding a valid MODERATOR cap at scope === channelId. A plain
+ * member cap does NOT authorize minting (role is checked explicitly — not via
+ * accountHoldsCap, which is role-agnostic). Epoch-pinned to the held community epoch.
+ */
+export async function authorizedChannelMinter(
+  channelId: string,
+  minterAccountId: string,
+  ownerAccountId: string,
+  resolve: DeviceResolver,
+  getCap: CapabilityFetcher,
+  expectedEpoch: number,
+): Promise<boolean> {
+  if (minterAccountId === ownerAccountId) return true
+  const args = [minterAccountId, ownerAccountId, resolve, getCap, expectedEpoch] as const
+  return (
+    (await holdsRole(COMMUNITY_SCOPE, 'leader', ...args)) ||
+    (await holdsRole(channelId, 'moderator', ...args))
+  )
+}
+
 /** The owner's device signs the community root (capability-chain anchor). */
 export async function buildCommunityRoot(
   communityId: string,

@@ -19,7 +19,6 @@
 import {
   type ChannelDevicesResponse,
   type CommunityDevice,
-  type CommunityDevicesResponse,
   type DeviceId,
   eciesOpen,
   eciesSeal,
@@ -31,6 +30,7 @@ import {
 import { ApiError, api } from './api.ts'
 import {
   accountHoldsCap,
+  authorizedChannelMinter,
   type CapabilityFetcher,
   COMMUNITY_SCOPE,
   type DeviceResolver,
@@ -197,13 +197,16 @@ async function buildCommitment(
 }
 
 /**
- * Verify a fetched key against its epoch commitment: (1) the opened key must
- * hash to the published commitment (integrity), and (2) the commitment must be
- * signed by the minter's device — bound to THIS channelId+epoch — which defeats
- * a server substituting another channel's (key, commitment) pair. The minter's
- * cert is resolved from the community member-device list (verifiable by any
- * member) and authenticated under its account identity. Whether the minter is an
- * authorised manager is server-asserted (documented trust boundary, ADR 0002).
+ * Verify a fetched key against its epoch commitment: (1) the opened key must hash
+ * to the published commitment (integrity), (2) the commitment must be signed by the
+ * minter's device — bound to THIS channelId+epoch — which defeats a server
+ * substituting another channel's (key, commitment) pair, and (3) the minter must be
+ * an AUTHORISED manager (owner / community-leader / this-channel moderator), proven
+ * by a capability chained to the pinned owner at the locally-held community epoch —
+ * closing the server-asserted-authority gap (ADR 0002/0004). The minter device is
+ * resolved via the TARGETED single-device endpoint (no roster enumeration — honours
+ * the big-group no-roster constraint). With no pinned owner / no held K_meta we
+ * can't verify authority → legacy behaviour (sig-only), the accepted degradation.
  */
 async function verifyCommitment(
   communityId: string,
@@ -213,19 +216,32 @@ async function verifyCommitment(
   commitment: KeyCommitment,
 ): Promise<boolean> {
   const expect = await computeKeyCommitment(channelId, epoch, key)
-  if (toStdB64(expect) !== commitment.keyCommitment) return false
+  if (toStdB64(expect) !== commitment.keyCommitment) return false // integrity (needs the key)
+  return verifyCommitmentAuthority(communityId, channelId, epoch, commitment)
+}
+
+/**
+ * The KEY-INDEPENDENT half of commitment verification: the commitment's minter
+ * signature (bound to channelId+epoch) is valid AND the minter is an authorised
+ * manager chained to the pinned owner at the held epoch. Runs without the K_channel
+ * itself, so a client that only sees the commitment (server withholds the grant) can
+ * still learn that an AUTHORISED rotation to `epoch` happened — which advances the
+ * forward-secrecy high-water so the sender fails closed instead of leaking under the
+ * old epoch. Degrades to sig-only when there's no pinned owner / no held K_meta.
+ */
+async function verifyCommitmentAuthority(
+  communityId: string,
+  channelId: string,
+  epoch: number,
+  commitment: KeyCommitment,
+): Promise<boolean> {
   try {
-    const { devices } = await api<CommunityDevicesResponse>(
-      'GET',
-      `/api/v1/communities/${communityId}/devices`,
-    )
-    const minter = devices.find((d) => d.deviceId === commitment.minterDeviceId)
+    const resolve = makeDeviceResolver([], { communityId })
+    const minter = await resolve(commitment.minterDeviceId)
     if (!minter) return false
-    const verified = await verifyDeviceCert(minter)
-    if (!verified) return false
     const mls = await loadCrypto()
-    return mls.ed25519Verify(
-      verified.devicePk,
+    const sigOk = mls.ed25519Verify(
+      minter.devicePk,
       concat(
         encoder.encode(SIG_DOMAIN.channelKeyCommit),
         encoder.encode(channelId),
@@ -234,8 +250,45 @@ async function verifyCommitment(
       ),
       fromStdB64(commitment.minterSig),
     )
+    if (!sigOk) return false
+
+    const ownerAccountId = await getPinnedOwner(communityId)
+    const expectedEpoch = await getKMetaEpoch(communityId)
+    if (!ownerAccountId || expectedEpoch < 0) return true // legacy/degraded (no anchor)
+    const getCap = makeCapFetcher(communityId)
+    return authorizedChannelMinter(
+      channelId,
+      minter.accountId,
+      ownerAccountId,
+      resolve,
+      getCap,
+      expectedEpoch,
+    )
   } catch {
     return false
+  }
+}
+
+/* --------------------- forward-secrecy epoch high-water ------------------- */
+
+/**
+ * A per-channel, locally-persisted, MONOTONIC high-water of the highest epoch we
+ * have seen an AUTHORISED commitment for. It is advanced ONLY from verified
+ * evidence (our own rotations; a commitment passing `verifyCommitmentAuthority`) —
+ * NEVER from a raw server-reported epoch scalar, which a compromised server could
+ * under-report to keep us sealing under an old (removed-member-readable) key, or
+ * over-report to wedge us. `sendGroupKey` refuses to send while `latestHeldEpoch <
+ * highWater`, so we never seal under a superseded key (fail closed, no leak).
+ */
+const highWaterKey = (channelId: string) => `gn.gkhw.${channelId}`
+
+export function channelEpochHighWater(channelId: string): number {
+  return Number(localStorage.getItem(highWaterKey(channelId)) ?? '0')
+}
+
+export function bumpChannelEpochHighWater(channelId: string, epoch: number): void {
+  if (epoch > channelEpochHighWater(channelId)) {
+    localStorage.setItem(highWaterKey(channelId), String(epoch))
   }
 }
 
@@ -443,6 +496,16 @@ export async function fetchChannelKeyGrant(
       'GET',
       `/api/v1/communities/${communityId}/channels/${channelId}/key-grants/mine`,
     )
+    // Advance the forward-secrecy high-water from an AUTHORISED commitment even when
+    // the grant is withheld — so a server that serves the (authorised) rotation
+    // commitment but drops our grant can't keep us sealing under the old epoch: the
+    // sender will fail closed. The commitment sig+authority need no key.
+    if (
+      res.commitment &&
+      (await verifyCommitmentAuthority(communityId, channelId, res.keyEpoch, res.commitment))
+    ) {
+      bumpChannelEpochHighWater(channelId, res.keyEpoch)
+    }
     if (!res.grant) return false
     if (await getKChannel(channelId, res.keyEpoch)) return false // already held
     // A commitment is REQUIRED to trust the key. An ECIES seal to a *public*
@@ -638,6 +701,7 @@ export async function rotateChannelKey(
     return false
   }
   await rememberKChannel(channelId, newEpoch, key)
+  bumpChannelEpochHighWater(channelId, newEpoch) // we just authored this epoch
   granted.add(`${channelId}:${newEpoch}:${record.deviceId}`)
   // Top up the remaining member devices at the new epoch.
   await grantChannelKey(communityId, channelId, record, key, newEpoch)

@@ -114,11 +114,20 @@ export function ChannelChat({
               {t('communities.channelUntrusted')}
             </div>
           )}
+          {status === 'rotation_pending' && (
+            <div className="mt-3 rounded-md border border-gold/50 bg-gold/10 px-3 py-2 text-sm text-gold">
+              {t('communities.channelRotationPending')}
+            </div>
+          )}
           <MessageThread
             messages={messages}
             ready={status === 'ready'}
             onSend={(text) => communityChatStore.send(channelId, text)}
-            notReadyLabel={notReadyLabel}
+            notReadyLabel={
+              status === 'rotation_pending'
+                ? t('communities.channelRotationPending')
+                : notReadyLabel
+            }
             readOnly={!canPost || status === 'untrusted'}
             readOnlyLabel={
               status === 'untrusted'

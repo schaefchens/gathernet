@@ -19,6 +19,7 @@ import { create } from 'zustand'
 import { ApiError, api } from '../lib/api.ts'
 import {
   bootstrapGroupKeyChannel,
+  channelEpochHighWater,
   envelopeEpoch,
   fetchChannelKeyGrant,
   forgetChannelKeyCache,
@@ -73,6 +74,9 @@ export type ChannelStatus =
   | 'pending'
   | 'error'
   | 'untrusted'
+  /** group_key: an authorised rotation exists we can't adopt yet — sending is paused
+   *  (fail-closed forward secrecy). Transient; clears when the new-epoch grant lands. */
+  | 'rotation_pending'
 
 interface CommunityChatState {
   channels: Record<string, ChannelStatus> // by channelId
@@ -355,6 +359,7 @@ class CommunityChatStore {
     await fetchChannelKeyGrant(communityId, channelId, record).catch(() => {})
     if (this.groupKey.has(channelId)) {
       await this.catchUpGroupKey(channelId, communityId).catch(() => {})
+      await this.refreshRotationPending(channelId)
     }
   }
 
@@ -594,6 +599,8 @@ class CommunityChatStore {
     }
     this.setStatus(info.channelId, 'ready')
     await this.catchUpGroupKey(info.channelId, info.communityId).catch(() => {})
+    // Reflect fail-closed state on open (an unadopted authorised rotation → paused).
+    await this.refreshRotationPending(info.channelId)
     return 'ready'
   }
 
@@ -623,9 +630,19 @@ class CommunityChatStore {
     // Pick up any rotation FIRST — latestHeldEpoch reflects only what we hold, so
     // without this a sender that missed a rotation would seal under the OLD epoch
     // (the key a removed member still has), letting them read post-removal
-    // messages. fetchChannelKeyGrant advances us to the server's current epoch.
+    // messages. fetchChannelKeyGrant advances us to the server's current epoch AND
+    // the forward-secrecy high-water (from the authorised rotation commitment).
     await fetchChannelKeyGrant(gk.communityId, channelId, record).catch(() => {})
     const epoch = (await latestHeldEpoch(channelId)) ?? gk.keyEpoch
+    // FAIL CLOSED: if an AUTHORISED rotation to a higher epoch exists (locally-
+    // trusted high-water) that we haven't been able to adopt, REFUSE to send rather
+    // than seal under the superseded key a removed member still holds. Self-heals
+    // when the new-epoch grant arrives (composer re-enables).
+    if (epoch < channelEpochHighWater(channelId)) {
+      this.setStatus(channelId, 'rotation_pending')
+      throw new Error('rotation_pending')
+    }
+    this.clearRotationPending(channelId)
     const key = await getKChannel(channelId, epoch)
     if (!key) throw new Error('no_channel_key')
 
@@ -807,6 +824,28 @@ class CommunityChatStore {
   private clearUntrusted(channelId: string): void {
     if (this.untrustedChannels.delete(channelId) && this.ready.has(channelId)) {
       this.setStatus(channelId, 'ready')
+    }
+  }
+
+  /** Restore a group_key channel to `ready` after a rotation_pending clears (keyed
+   *  off `groupKey`, NOT `ready` — group_key channels never join `this.ready`). */
+  private clearRotationPending(channelId: string): void {
+    if (this.groupKey.has(channelId)) this.setStatus(channelId, 'ready')
+  }
+
+  /**
+   * Re-evaluate a group_key channel's fail-closed send state: if an authorised
+   * rotation (high-water) is ahead of the epoch we hold, mark rotation_pending;
+   * else clear it. Called after a grant fetch / channel open so the composer
+   * reflects the current state without waiting for a send attempt.
+   */
+  private async refreshRotationPending(channelId: string): Promise<void> {
+    if (!this.groupKey.has(channelId)) return
+    const held = (await latestHeldEpoch(channelId)) ?? -1
+    if (held < channelEpochHighWater(channelId)) {
+      this.setStatus(channelId, 'rotation_pending')
+    } else {
+      this.clearRotationPending(channelId)
     }
   }
 

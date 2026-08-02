@@ -208,6 +208,7 @@
     "channelLocked": "This is a leaders-only channel. You don't have access.",
     "channelUntrusted": "This channel has an unverified member. Sending is paused until every member's identity checks out.",
     "channelUntrustedHint": "Sending paused — unverified member present.",
+    "channelRotationPending": "Sending paused — the channel key just rotated. Waiting for the new key so nothing is sent under the old one.",
     "invite": "Invite",
     "inviteHint": "Share this code with people you want in the community. Invite-only — there is no public directory.",
     "newInvite": "New invite code",
