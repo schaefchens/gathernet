@@ -112,12 +112,24 @@ grants. Closing it needs identity-signed membership/role capabilities — a
 cross-cutting hardening milestone. Small/sensitive coordination stays on MLS,
 where the trust surface is smallest and removal is cryptographically immediate.
 
-**Deferred:** the scalable fan-out (a coalesced `channel.updated` nudge + client
-pull instead of pushing ciphertext to 100k online devices; a multi-node fan-out
-bus) — broadcast posts are infrequent, so the interim chunked/async push (with
-recipient enumeration outside the write lock) suffices near-term. Also deferred:
-the K_meta grant context-binding retrofit (K_meta grants still lack the epoch
-commitment K_channel has); large-community K_meta grant fan-out (>500 devices,
-per ADR 0002). No crypto library was changed — the scheme composes the existing
-`seal`/`open`, `ed25519Sign`/`ed25519Verify`, `decodeDeviceCert`, and ECIES
-primitives (see the never-modify-crypto-libraries constraint).
+### Scalable fan-out (implemented)
+
+group_key channels do **not** push ciphertext to every member. A socket that has
+a channel open sends `channel.subscribe {channelId}` (WS); the server verifies
+active membership and tracks the subscription in the connection registry. On a
+post, the WS handler sends a tiny `channel.updated {channelId, seq}` nudge to the
+channel's subscribers only — O(open viewers), never O(members) — and each client
+pulls the ciphertext from the existing mailbox. So a broadcast to 100k readers is
+one small nudge per *currently-viewing* socket, not 100k ciphertext copies, and
+`postMessage` does no per-member enumeration under the write lock. Subscriptions
+are cleaned up on disconnect and re-established on reconnect; the mls path keeps
+its per-leaf push unchanged. The registry's subscription set is the seam a
+multi-node bus later replaces with topic subscriptions.
+
+**Deferred:** a multi-node fan-out bus (this node-local subscription registry is
+the single-node form). Also deferred: the K_meta grant context-binding retrofit
+(K_meta grants still lack the epoch commitment K_channel has); large-community
+K_meta grant fan-out (>500 devices, per ADR 0002). No crypto library was changed
+— the scheme composes the existing `seal`/`open`, `ed25519Sign`/`ed25519Verify`,
+`decodeDeviceCert`, and ECIES primitives (see the never-modify-crypto-libraries
+constraint).

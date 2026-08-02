@@ -59,6 +59,25 @@ export const welcomeAckMessage = z.object({
   }),
 })
 
+/**
+ * Subscribe/unsubscribe this socket to a group_key channel's delivery nudges.
+ * Large channels don't push ciphertext to every member — they push a tiny
+ * `channel.updated {seq}` to subscribed (i.e. currently-open) sockets, which
+ * then pull the ciphertext from the mailbox. The server verifies active
+ * membership before subscribing.
+ */
+export const channelSubscribeMessage = z.object({
+  type: z.literal('channel.subscribe'),
+  id: z.string().min(1),
+  payload: z.object({ channelId: groupIdSchema }),
+})
+
+export const channelUnsubscribeMessage = z.object({
+  type: z.literal('channel.unsubscribe'),
+  id: z.string().min(1),
+  payload: z.object({ channelId: groupIdSchema }),
+})
+
 /** Fire-and-forget room fan-out (cursor/pointer/typing …) — never persisted. */
 export const roomEphemeralClientMessage = z.object({
   type: z.literal('room.ephemeral'),
@@ -80,6 +99,8 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   chatSendMessage,
   chatAckMessage,
   welcomeAckMessage,
+  channelSubscribeMessage,
+  channelUnsubscribeMessage,
   roomEphemeralClientMessage,
 ])
 

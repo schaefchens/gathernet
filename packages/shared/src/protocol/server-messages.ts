@@ -291,6 +291,20 @@ export const communityRotationNeededMessage = z.object({
   }),
 })
 
+/**
+ * Delivery nudge for a group_key channel: a new message landed at `seq`. Sent
+ * only to sockets subscribed to the channel (currently open) instead of pushing
+ * the ciphertext to every member; the client pulls from the mailbox. Tiny +
+ * coalescible so a broadcast to 100k readers isn't 100k ciphertext copies.
+ */
+export const channelUpdatedMessage = z.object({
+  type: z.literal('channel.updated'),
+  payload: z.object({
+    channelId: groupIdSchema,
+    seq: z.number().int().nonnegative(),
+  }),
+})
+
 /** To a grantee account: a K_channel grant is available for a group_key channel —
  *  a device lacking the current channel key can fetch + open it. */
 export const channelKeyGrantsMessage = z.object({
@@ -422,6 +436,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   communityUpdatedMessage,
   communityKeyGrantsMessage,
   communityRotationNeededMessage,
+  channelUpdatedMessage,
   channelKeyGrantsMessage,
   channelRotationNeededMessage,
   communityChannelCreatedMessage,

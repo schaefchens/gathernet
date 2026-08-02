@@ -1450,14 +1450,47 @@ describe('group_key channels (mega-community scale)', () => {
     // The member posts an opaque group_key envelope (authorised via channel_members).
     const fanout = await postMessage(testDb.db, member.deviceId, channelId, 0, fakeB64(64))
     expect(fanout.senderDevice).toBe(member.deviceId)
-    // Fan-out reaches the other member's device, not the sender's own.
-    expect(fanout.recipients).toContain(owner.deviceId)
-    expect(fanout.recipients).not.toContain(member.deviceId)
+    // Delivery is via a subscription nudge (Stage 6), NOT a per-member push.
+    expect(fanout.mode).toBe('group_key')
+    expect(fanout.recipients).toEqual([])
 
     // Both members can pull the ciphertext from the mailbox.
     const forOwner = await listMessages(testDb.db, owner.accountId, channelId, 0)
     expect(forOwner).toHaveLength(1)
     expect(forOwner[0]?.senderDevice).toBe(member.deviceId)
+  })
+
+  it('scalable fan-out: a post nudges subscribed sockets (channel.updated), not non-members', async () => {
+    const owner = await createUser('GKNudgeOwner')
+    const member = await createUser('GKNudgeMember')
+    const stranger = await createUser('GKNudgeStranger')
+    const communityId = await createCommunity(owner)
+    const channelId = await createGroupKeyChannel(owner, communityId)
+    await addMember(owner, communityId, member)
+    await postJoin(member, communityId, channelId)
+
+    const ownerWs = await TestWsClient.connect(port, owner.token)
+    const memberWs = await TestWsClient.connect(port, member.token)
+    const strangerWs = await TestWsClient.connect(port, stranger.token)
+    try {
+      // The member subscribes; the stranger (not a channel member) is refused silently.
+      const subId = memberWs.send('channel.subscribe', { channelId })
+      await memberWs.waitFor((m) => m.type === 'ack' && 'replyTo' in m && m.replyTo === subId)
+      const strId = strangerWs.send('channel.subscribe', { channelId })
+      await strangerWs.waitFor((m) => m.type === 'ack' && 'replyTo' in m && m.replyTo === strId)
+
+      // The owner (a moderator) posts via chat.send → the WS handler nudges subscribers.
+      ownerWs.send('chat.send', { groupId: channelId, epoch: 0, ciphertext: fakeB64(48) })
+
+      const nudge = await memberWs.waitFor((m) => m.type === 'channel.updated')
+      expect(nudge.payload).toMatchObject({ channelId, seq: 1 })
+      // The stranger's subscribe was ignored (not a member) → no nudge reaches them.
+      await strangerWs.expectSilence((m) => m.type === 'channel.updated')
+    } finally {
+      await ownerWs.close()
+      await memberWs.close()
+      await strangerWs.close()
+    }
   })
 
   it('broadcast (postPolicy=moderators): readers cannot post, managers can; mute blocks posting', async () => {

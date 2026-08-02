@@ -1,6 +1,6 @@
 import cors from '@fastify/cors'
 import rateLimit from '@fastify/rate-limit'
-import type { AccountId, AppId, AppUserId, DeviceId } from '@gathernet/shared'
+import type { AccountId, AppId, AppUserId, DeviceId, GroupId } from '@gathernet/shared'
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { Config } from './config.ts'
 import type { Db } from './db/index.ts'
@@ -11,6 +11,7 @@ import { registerAppRoutes } from './modules/apps/routes.ts'
 import { verifyAppSessionToken } from './modules/apps/sessions.ts'
 import { verifySessionToken } from './modules/auth/sessions.ts'
 import { registerCommunityRoutes } from './modules/communities/routes.ts'
+import { isActiveChannelMember } from './modules/communities/service.ts'
 import { registerDeliveryRoutes } from './modules/delivery/routes.ts'
 import {
   ackCursor,
@@ -164,19 +165,28 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
         message.payload.epoch,
         message.payload.ciphertext,
       )
-      for (const recipient of fanout.recipients) {
-        registry.sendToDevice(recipient, {
-          type: 'chat.message',
-          payload: {
-            groupId: message.payload.groupId,
-            seq: fanout.seq,
-            kind: 'application',
-            epoch: fanout.epoch,
-            senderDevice: fanout.senderDevice as DeviceId,
-            payload: fanout.payload,
-            sentAt: Date.now(),
-          },
+      if (fanout.mode === 'group_key') {
+        // Scalable fan-out: nudge subscribed (currently-open) sockets with just
+        // the seq; they pull the ciphertext from the mailbox. No per-member push.
+        registry.nudgeChannel(message.payload.groupId, {
+          type: 'channel.updated',
+          payload: { channelId: message.payload.groupId as GroupId, seq: fanout.seq },
         })
+      } else {
+        for (const recipient of fanout.recipients) {
+          registry.sendToDevice(recipient, {
+            type: 'chat.message',
+            payload: {
+              groupId: message.payload.groupId,
+              seq: fanout.seq,
+              kind: 'application',
+              epoch: fanout.epoch,
+              senderDevice: fanout.senderDevice as DeviceId,
+              payload: fanout.payload,
+              sentAt: Date.now(),
+            },
+          })
+        }
       }
       session.send({
         type: 'ack',
@@ -241,6 +251,25 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
         handler: async (session, message) => {
           if (message.type !== 'welcome.ack') return
           await ackWelcome(db, session.deviceId, message.payload.welcomeId)
+          session.send({ type: 'ack', replyTo: message.id, payload: {} })
+        },
+      },
+      // group_key channel delivery nudges — community channels are a Hub concept.
+      'channel.subscribe': {
+        kinds: ['user'],
+        handler: async (session, message) => {
+          if (message.type !== 'channel.subscribe') return
+          if (await isActiveChannelMember(db, message.payload.channelId, session.accountId)) {
+            registry.subscribeChannel(session, message.payload.channelId)
+          }
+          session.send({ type: 'ack', replyTo: message.id, payload: {} })
+        },
+      },
+      'channel.unsubscribe': {
+        kinds: ['user'],
+        handler: async (session, message) => {
+          if (message.type !== 'channel.unsubscribe') return
+          registry.unsubscribeChannel(session, message.payload.channelId)
           session.send({ type: 'ack', replyTo: message.id, payload: {} })
         },
       },

@@ -544,8 +544,11 @@ export async function postCommit(
 }
 
 export interface MessageFanout {
+  /** mls: push the ciphertext to `recipients`. group_key: nudge channel subscribers. */
+  mode: 'mls' | 'group_key'
   seq: number
   epoch: number
+  /** device ids to push a full chat.message to (mls/dm/room); empty for group_key */
   recipients: string[]
   senderDevice: string
   payload: string
@@ -695,42 +698,26 @@ export async function postMessage(
     }
   })
 
-  // Recipient enumeration for group_key happens outside the write lock.
-  const recipients =
-    result.mode === 'group_key'
-      ? await activeChannelMemberDevices(db, result.channelId, deviceId)
-      : result.recipients
+  // group_key channels don't enumerate/push per member — the WS layer nudges
+  // subscribed (currently-open) sockets, which then pull from the mailbox.
+  if (result.mode === 'group_key') {
+    return {
+      mode: 'group_key',
+      seq: result.seq,
+      epoch: result.epoch,
+      recipients: [],
+      senderDevice: deviceId,
+      payload: payloadB64,
+    }
+  }
   return {
+    mode: 'mls',
     seq: result.seq,
     epoch: result.epoch,
-    recipients,
+    recipients: result.recipients,
     senderDevice: deviceId,
     payload: payloadB64,
   }
-}
-
-/**
- * Active devices of a group_key channel's active members (message fan-out),
- * excluding the sender's own device. Read outside the post write lock. At true
- * broadcast scale this is superseded by the pull+nudge fan-out (Stage 6).
- */
-async function activeChannelMemberDevices(
-  db: Db,
-  channelId: string,
-  exceptDeviceId: string,
-): Promise<string[]> {
-  const rows = await db
-    .select({ deviceId: devices.deviceId })
-    .from(channelMembers)
-    .innerJoin(devices, eq(devices.accountId, channelMembers.accountId))
-    .where(
-      and(
-        eq(channelMembers.channelId, channelId),
-        eq(channelMembers.status, 'active'),
-        eq(devices.status, 'active'),
-      ),
-    )
-  return rows.map((r) => r.deviceId).filter((d) => d !== exceptDeviceId)
 }
 
 export async function listMessages(

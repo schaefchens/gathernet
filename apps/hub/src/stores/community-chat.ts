@@ -244,7 +244,17 @@ class CommunityChatStore {
           })
           .catch((err) => console.error('channel work failed', m.payload.groupId, err))
       }),
+      // Scalable group_key delivery: a tiny nudge → pull the ciphertext.
+      wsClient.on('channel.updated', (m) => {
+        const gk = this.groupKey.get(m.payload.channelId)
+        if (gk) {
+          void this.catchUpGroupKey(m.payload.channelId, gk.communityId).catch((err) =>
+            console.error('channel work failed', m.payload.channelId, err),
+          )
+        }
+      }),
       wsClient.on('hello.ok', () => {
+        this.resubscribeChannels()
         void this.catchUpAll()
         void this.sweepRotations()
       }),
@@ -390,6 +400,16 @@ class CommunityChatStore {
 
   /* ------------------------------ group_key -------------------------------- */
 
+  /** Subscribe to a group_key channel's delivery nudges (fire-and-forget). */
+  private subscribeGroupKey(channelId: string): void {
+    void wsClient.send('channel.subscribe', { channelId }).catch(() => {})
+  }
+
+  /** Re-subscribe every tracked group_key channel after a (re)connect. */
+  private resubscribeChannels(): void {
+    for (const channelId of this.groupKey.keys()) this.subscribeGroupKey(channelId)
+  }
+
   private cursor(channelId: string): number {
     return Number(localStorage.getItem(cursorKey(channelId)) ?? '0')
   }
@@ -514,6 +534,7 @@ class CommunityChatStore {
       communityId: info.communityId,
       keyEpoch: info.keyEpoch,
     })
+    this.subscribeGroupKey(info.channelId)
     const local = await messageStore.list(info.channelId)
     useCommunityChat.setState((state) => ({
       messages: { ...state.messages, [info.channelId]: local },
@@ -540,6 +561,7 @@ class CommunityChatStore {
     if (!record) throw new Error('locked')
     await bootstrapGroupKeyChannel(communityId, channelId, record)
     this.groupKey.set(channelId, { communityId, keyEpoch: 0 })
+    this.subscribeGroupKey(channelId)
     this.setStatus(channelId, 'ready')
     useCommunityChat.setState((state) => ({
       messages: { ...state.messages, [channelId]: state.messages[channelId] ?? [] },
@@ -832,6 +854,9 @@ class CommunityChatStore {
   /** Forget a locally-held channel (e.g. after it was deleted server-side). */
   async forgetChannel(channelId: string): Promise<void> {
     this.ready.delete(channelId)
+    if (this.groupKey.delete(channelId)) {
+      void wsClient.send('channel.unsubscribe', { channelId }).catch(() => {})
+    }
     await channelStore.delete(channelId).catch(() => {})
     useCommunityChat.setState((state) => {
       const channels = { ...state.channels }

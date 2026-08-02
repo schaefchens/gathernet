@@ -89,6 +89,23 @@ function isLeaderRole(role: string): boolean {
   return role === 'owner' || role === 'leader'
 }
 
+/**
+ * Whether an account is an active member of a channel — gates a WS
+ * `channel.subscribe` (a subscriber receives that channel's delivery nudges).
+ * The nudge carries only `seq` (no ciphertext), and any pull is independently
+ * access-controlled, but we verify membership so activity metadata never leaks.
+ */
+export async function isActiveChannelMember(
+  db: DbOrTx,
+  channelId: string,
+  accountId: string,
+): Promise<boolean> {
+  const row = await db.query.channelMembers.findFirst({
+    where: and(eq(channelMembers.channelId, channelId), eq(channelMembers.accountId, accountId)),
+  })
+  return row?.status === 'active'
+}
+
 function requireLeader(row: MemberRow): void {
   if (!isLeaderRole(row.role)) throw new ServiceError(403, 'not_a_leader')
 }
