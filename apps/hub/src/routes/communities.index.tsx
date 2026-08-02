@@ -160,6 +160,8 @@ function CreatePanel({ onDone }: { onDone: () => void }) {
         metaCiphertext,
       })
       await rememberKMeta(res.communityId, kMeta, 0)
+      // Owner signs + publishes the ownership root (capability-chain anchor) + pins self.
+      await communityChatStore.publishCommunityRoot(res.communityId)
       return res
     },
     onSuccess: (res) => {
@@ -207,7 +209,7 @@ function JoinPanel({ onDone }: { onDone: () => void }) {
 
   const accept = async (raw: string) => {
     setError(null)
-    const { code: parsedCode, kMeta, epoch } = parseInvite(raw)
+    const { code: parsedCode, kMeta, epoch, ownerAccountId } = parseInvite(raw)
     try {
       const res = await api<AcceptCommunityInviteResponse>(
         'POST',
@@ -215,6 +217,9 @@ function JoinPanel({ onDone }: { onDone: () => void }) {
         { code: parsedCode },
       )
       if (kMeta) await rememberKMeta(res.communityId, kMeta, epoch)
+      // Pin the owner from the out-of-band invite (capability-chain trust anchor).
+      if (ownerAccountId)
+        await communityChatStore.pinCommunityOwner(res.communityId, ownerAccountId)
       void queryClient.invalidateQueries({ queryKey: ['communities'] })
       onDone()
       void navigate({

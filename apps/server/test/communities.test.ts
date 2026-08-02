@@ -258,6 +258,54 @@ describe('community lifecycle + encrypted metadata', () => {
     ])
   })
 
+  it('owner publishes the ownership root (capability-chain anchor); non-owners refused', async () => {
+    const owner = await createUser('RootOwner')
+    const member = await createUser('RootMember')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+
+    // Before publishing, the detail carries no root.
+    expect((await detail(owner, communityId)).json().community.root).toBeNull()
+
+    const rootUrl = `/api/v1/communities/${communityId}/root`
+    const ok = await app.inject({
+      method: 'POST',
+      url: rootUrl,
+      headers: auth(owner),
+      payload: { ownerDeviceId: owner.deviceId, ownerSig: fakeB64(64) },
+    })
+    expect(ok.statusCode).toBe(200)
+    const root = (await detail(owner, communityId)).json().community.root
+    expect(root).toMatchObject({
+      communityId,
+      ownerAccountId: owner.accountId,
+      ownerDeviceId: owner.deviceId,
+    })
+
+    // A non-owner member cannot set the root.
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: rootUrl,
+          headers: auth(member),
+          payload: { ownerDeviceId: member.deviceId, ownerSig: fakeB64(64) },
+        })
+      ).statusCode,
+    ).toBe(403)
+    // The owner can't attribute the root to a device that isn't theirs.
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: rootUrl,
+          headers: auth(owner),
+          payload: { ownerDeviceId: member.deviceId, ownerSig: fakeB64(64) },
+        })
+      ).statusCode,
+    ).toBe(400)
+  })
+
   it('invite → accept → member visible in list with role + channel count', async () => {
     const owner = await createUser('Owner2')
     const member = await createUser('Member2')

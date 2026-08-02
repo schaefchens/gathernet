@@ -103,8 +103,16 @@ function fromB64Url(s: string): Uint8Array {
  * detected (stale → fetch a fresh grant) rather than the key being trusted
  * blindly.
  */
-export function buildInvitePayload(code: string, kMeta: Uint8Array, epoch: number): string {
-  return `${COMMUNITY_INVITE_SCHEME}${code}#${epoch}.${toB64Url(kMeta)}`
+export function buildInvitePayload(
+  code: string,
+  kMeta: Uint8Array,
+  epoch: number,
+  ownerAccountId?: string,
+): string {
+  // Fragment: <epoch>.<kMeta_b64url>[.<ownerAccountId>] — the owner accountId is
+  // the capability-chain anchor the joiner pins out-of-band (base58, no dots).
+  const frag = `${epoch}.${toB64Url(kMeta)}${ownerAccountId ? `.${ownerAccountId}` : ''}`
+  return `${COMMUNITY_INVITE_SCHEME}${code}#${frag}`
 }
 
 /**
@@ -118,20 +126,29 @@ export function parseInvite(raw: string): {
   code: string
   kMeta: Uint8Array | null
   epoch: number
+  ownerAccountId: string | null
 } {
   let s = raw.trim()
   if (s.startsWith(COMMUNITY_INVITE_SCHEME)) s = s.slice(COMMUNITY_INVITE_SCHEME.length)
   const hash = s.indexOf('#')
-  if (hash === -1) return { code: normalizeCode(s), kMeta: null, epoch: 0 }
+  if (hash === -1) return { code: normalizeCode(s), kMeta: null, epoch: 0, ownerAccountId: null }
   const code = normalizeCode(s.slice(0, hash))
-  const frag = s.slice(hash + 1)
-  const dot = frag.indexOf('.')
-  const [epochStr, keyStr] = dot === -1 ? ['0', frag] : [frag.slice(0, dot), frag.slice(dot + 1)]
+  const parts = s.slice(hash + 1).split('.')
+  // <epoch>.<kMeta>[.<owner>], or a legacy single-part fragment = bare kMeta (epoch 0).
+  const [epochStr, keyStr, ownerAccountId] =
+    parts.length === 1
+      ? ['0', parts[0] ?? '', null]
+      : [parts[0] ?? '0', parts[1] ?? '', parts[2] ?? null]
   try {
     const epoch = Number.parseInt(epochStr, 10)
-    return { code, kMeta: fromB64Url(keyStr), epoch: Number.isFinite(epoch) ? epoch : 0 }
+    return {
+      code,
+      kMeta: keyStr ? fromB64Url(keyStr) : null,
+      epoch: Number.isFinite(epoch) ? epoch : 0,
+      ownerAccountId: ownerAccountId ?? null,
+    }
   } catch {
-    return { code, kMeta: null, epoch: 0 }
+    return { code, kMeta: null, epoch: 0, ownerAccountId: null }
   }
 }
 
@@ -489,6 +506,39 @@ export async function verifyCommunityRoot(
     ),
     fromStdB64(root.ownerSig),
   )
+}
+
+/** TOFU-pin the community owner (first-seen wins), learned out-of-band from the invite. */
+export async function pinCommunityOwner(
+  communityId: string,
+  ownerAccountId: string,
+): Promise<void> {
+  const existing = await secureStore.getCommunityOwner(communityId)
+  if (!existing) await secureStore.putCommunityOwner(communityId, ownerAccountId)
+}
+
+export async function getPinnedOwner(communityId: string): Promise<string | null> {
+  return secureStore.getCommunityOwner(communityId)
+}
+
+/**
+ * The owner's first act after creating a community: sign the ownership root, pin
+ * itself as owner, and publish the root so joiners can verify the capability chain.
+ */
+export async function publishCommunityRoot(
+  communityId: string,
+  record: DeviceRecord,
+): Promise<void> {
+  const root = await buildCommunityRoot(communityId, record.accountId, record)
+  await pinCommunityOwner(communityId, record.accountId)
+  try {
+    await api('POST', `/api/v1/communities/${communityId}/root`, {
+      ownerDeviceId: root.ownerDeviceId,
+      ownerSig: root.ownerSig,
+    })
+  } catch {
+    // offline — a later create-sweep retries (Stage 6)
+  }
 }
 
 /** communityId:deviceId pairs we've already sealed a grant to this session. */

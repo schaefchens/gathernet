@@ -247,6 +247,27 @@ export async function createCommunity(
   return { communityId }
 }
 
+/**
+ * Store the owner-signed community root (capability-chain anchor). Owner-only, and
+ * the signing device must belong to the owner account. The server relays this
+ * client-produced signature — it never mints it. Idempotent (owner may re-post).
+ */
+export async function setCommunityRoot(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  ownerDeviceId: string,
+  ownerSig: string,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  requireOwner(membership)
+  await requireOwnDevice(db, accountId, ownerDeviceId)
+  await db
+    .update(communities)
+    .set({ rootDeviceId: ownerDeviceId, rootSig: bufOf(ownerSig) })
+    .where(eq(communities.communityId, communityId))
+}
+
 export async function listCommunities(db: Db, accountId: string): Promise<CommunityListItem[]> {
   const rows = await db
     .select({
@@ -405,6 +426,15 @@ export async function getCommunityDetail(
       keyEpoch: community.keyEpoch,
       rotationPending: community.rotationPending,
       ownerAccountId: community.ownerAccountId as AccountId,
+      root:
+        community.rootDeviceId && community.rootSig
+          ? {
+              communityId: community.communityId as CommunityId,
+              ownerAccountId: community.ownerAccountId as AccountId,
+              ownerDeviceId: community.rootDeviceId as DeviceId,
+              ownerSig: community.rootSig.toString('base64'),
+            }
+          : null,
     },
     myRole: membership.role,
     members: memberRows.map((m) => ({

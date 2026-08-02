@@ -9,6 +9,7 @@ import {
   COMMUNITY_INVITE_SCHEME,
   getKMeta,
   getKMetaEpoch,
+  getPinnedOwner,
 } from '../../lib/community-keys.ts'
 
 function QrDisplay({ value }: { value: string }) {
@@ -67,8 +68,10 @@ export function InvitePanel({ communityId }: { communityId: string }) {
     void (async () => {
       const kMeta = await getKMeta(communityId)
       const epoch = await getKMetaEpoch(communityId)
+      // Carry the pinned owner so the joiner anchors the capability chain.
+      const owner = (await getPinnedOwner(communityId)) ?? undefined
       const value = kMeta
-        ? buildInvitePayload(invite.code, kMeta, epoch)
+        ? buildInvitePayload(invite.code, kMeta, epoch, owner)
         : `${COMMUNITY_INVITE_SCHEME}${invite.code}`
       if (!cancelled) setShareValue(value)
     })()

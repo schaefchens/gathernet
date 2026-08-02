@@ -173,6 +173,25 @@ export const secureStore = {
       s.put(requireBox().seal(buf, `secure:kmeta:${communityId}`), `kmeta:${communityId}`),
     )
   },
+  /**
+   * Pinned community owner accountId (the capability-chain anchor), learned
+   * out-of-band from the invite on first join and pinned so a compromised server
+   * can't later swap the owner. Sealed under the DMK, keyed `owner:<communityId>`.
+   */
+  async getCommunityOwner(communityId: string): Promise<string | null> {
+    const sealed = await tx<Uint8Array | undefined>('secure', 'readonly', (s) =>
+      s.get(`owner:${communityId}`),
+    )
+    return sealed ? decoder.decode(requireBox().open(sealed, `secure:owner:${communityId}`)) : null
+  },
+  putCommunityOwner(communityId: string, ownerAccountId: string): Promise<unknown> {
+    return tx('secure', 'readwrite', (s) =>
+      s.put(
+        requireBox().seal(encoder.encode(ownerAccountId), `secure:owner:${communityId}`),
+        `owner:${communityId}`,
+      ),
+    )
+  },
 }
 
 /**
