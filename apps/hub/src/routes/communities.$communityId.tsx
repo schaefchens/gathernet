@@ -80,13 +80,17 @@ function CommunityDetailScreen() {
   // rotate K_meta (re-encrypt metadata under a new epoch). Re-decrypt on change.
   const keyEpoch = detail?.community.keyEpoch
   const rotationPending = detail?.community.rotationPending ?? false
+  const myRole = detail?.myRole
   useEffect(() => {
-    if (keyEpoch === undefined) return
+    if (keyEpoch === undefined || myRole === undefined) return
     let cancelled = false
     void (async () => {
       const obtained = await communityChatStore.syncKeyGrants(communityId, keyEpoch)
       const rotated =
         rotationPending && isLeader ? await communityChatStore.rotateCommunity(communityId) : false
+      // Owner/leader: top up identity-signed membership caps for the roster at
+      // this epoch (the counterpart to the key-grant top-up; idempotent).
+      await communityChatStore.issueCapabilities(communityId, keyEpoch, myRole)
       if ((obtained || rotated) && !cancelled) {
         void queryClient.invalidateQueries({ queryKey: ['community', communityId] })
         void queryClient.invalidateQueries({ queryKey: ['communities'] })
@@ -95,7 +99,7 @@ function CommunityDetailScreen() {
     return () => {
       cancelled = true
     }
-  }, [communityId, keyEpoch, rotationPending, isLeader, queryClient])
+  }, [communityId, keyEpoch, rotationPending, isLeader, myRole, queryClient])
 
   const deleteChannel = useMutation({
     mutationFn: (channelId: string) =>

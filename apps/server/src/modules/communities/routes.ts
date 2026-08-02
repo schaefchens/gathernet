@@ -8,6 +8,7 @@ import {
   type GroupId,
   joinByCodeRequestSchema,
   paginationQuerySchema,
+  postCapabilitiesRequestSchema,
   postChannelKeyGrantsRequestSchema,
   postCommitRequestSchema,
   postKeyGrantsRequestSchema,
@@ -37,6 +38,7 @@ import {
   createCommunity,
   createCommunityInvite,
   deleteChannel,
+  getCapability,
   getChannelJoinInfo,
   getCommunityDetail,
   getCommunityMedia,
@@ -50,8 +52,10 @@ import {
   listCommunityDevices,
   listCommunityInvites,
   listCommunityMembers,
+  myCapabilities,
   myChannelKeyGrant,
   myKeyGrant,
+  postCapabilities,
   postChannelKeyGrants,
   postKeyGrants,
   publishChannelGroupInfo,
@@ -83,6 +87,12 @@ function requireSession(request: FastifyRequest) {
 
 /** Channel MLS commits carry the committing device explicitly. */
 const channelCommitSchema = postCommitRequestSchema.extend({ deviceId: z.string() })
+
+/** Query for a single capability lookup (chain-walk): scope + subject account. */
+const capabilityQuerySchema = z.object({
+  scope: z.string().min(1).max(64),
+  account: z.string().min(1),
+})
 
 export function registerCommunityRoutes(
   app: FastifyInstance,
@@ -277,6 +287,38 @@ export function registerCommunityRoutes(
     await rotateCommunity(db, registry, session.accountId, request.params.id, body)
     return { ok: true }
   })
+
+  /* --------------------- membership capabilities (relayed) --------------------- */
+
+  app.post<{ Params: { id: string } }>(
+    '/api/v1/communities/:id/capabilities',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = postCapabilitiesRequestSchema.parse(request.body)
+      await postCapabilities(db, session.accountId, request.params.id, body)
+      return { ok: true }
+    },
+  )
+
+  app.get<{ Params: { id: string } }>(
+    '/api/v1/communities/:id/capabilities/mine',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      return myCapabilities(db, session.accountId, request.params.id)
+    },
+  )
+
+  app.get<{ Params: { id: string }; Querystring: { scope?: string; account?: string } }>(
+    '/api/v1/communities/:id/capabilities',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const { scope, account } = capabilityQuerySchema.parse(request.query)
+      return getCapability(db, session.accountId, request.params.id, scope, account)
+    },
+  )
 
   /* ------------------- K_channel (group_key) grants --------------------- */
 

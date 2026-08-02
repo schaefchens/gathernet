@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type {
   AccountId,
+  CapabilityResponse,
   ChannelDevicesResponse,
   ChannelJoinInfoResponse,
   ChannelMemberRole,
@@ -16,8 +17,11 @@ import type {
   CreateCommunityRequest,
   DeviceId,
   GroupId,
+  MembershipCapability,
+  MyCapabilitiesResponse,
   MyChannelKeyGrantResponse,
   MyKeyGrantResponse,
+  PostCapabilitiesRequest,
   PostChannelKeyGrantsRequest,
   PostKeyGrantsRequest,
   RotateChannelRequest,
@@ -51,6 +55,7 @@ import {
   devices,
   groupMembers,
   groups,
+  membershipCapabilities,
   mlsCursors,
   mlsMessages,
   welcomes,
@@ -1832,6 +1837,113 @@ export async function myKeyGrant(
         }
       : null,
   }
+}
+
+/* --------------------------- membership capabilities --------------------------- */
+
+const toCapability = (r: {
+  communityId: string
+  scope: string
+  subjectAccountId: string
+  role: string
+  epoch: number
+  issuerDeviceId: string
+  issuerSig: Buffer
+}): MembershipCapability => ({
+  communityId: r.communityId as CommunityId,
+  scope: r.scope,
+  subjectAccountId: r.subjectAccountId as AccountId,
+  role: r.role as MembershipCapability['role'],
+  epoch: r.epoch,
+  issuerDeviceId: r.issuerDeviceId as DeviceId,
+  issuerSig: r.issuerSig.toString('base64'),
+})
+
+/**
+ * Store issuer-minted membership capabilities. The server is a pure relay — it
+ * never mints or validates the Ed25519 chain (clients do, against the pinned
+ * owner root); it only accepts caps from an active member and pins them to the
+ * community's *current* epoch, so a stale-epoch cap can't be back-filled. The
+ * `(communityId, scope, subjectAccountId, epoch)` PK makes re-issue idempotent.
+ */
+export async function postCapabilities(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  input: PostCapabilitiesRequest,
+): Promise<void> {
+  await requireActiveMembership(db, communityId, accountId)
+  const community = await db.query.communities.findFirst({
+    where: eq(communities.communityId, communityId),
+  })
+  if (!community) throw new ServiceError(404, 'community_not_found')
+  const rows = input.capabilities
+    .filter((c) => c.communityId === communityId && c.epoch === community.keyEpoch)
+    .map((c) => ({
+      communityId,
+      scope: c.scope,
+      subjectAccountId: c.subjectAccountId,
+      epoch: c.epoch,
+      role: c.role,
+      issuerDeviceId: c.issuerDeviceId,
+      issuerSig: bufOf(c.issuerSig),
+      createdBy: accountId,
+    }))
+  if (rows.length === 0) return
+  await db.insert(membershipCapabilities).values(rows).onConflictDoNothing()
+}
+
+/** The caller's own capabilities at the community's current epoch (proves own membership). */
+export async function myCapabilities(
+  db: Db,
+  accountId: string,
+  communityId: string,
+): Promise<MyCapabilitiesResponse> {
+  await requireActiveMembership(db, communityId, accountId)
+  const community = await db.query.communities.findFirst({
+    where: eq(communities.communityId, communityId),
+  })
+  if (!community) throw new ServiceError(404, 'community_not_found')
+  const rows = await db
+    .select()
+    .from(membershipCapabilities)
+    .where(
+      and(
+        eq(membershipCapabilities.communityId, communityId),
+        eq(membershipCapabilities.subjectAccountId, accountId),
+        eq(membershipCapabilities.epoch, community.keyEpoch),
+      ),
+    )
+  return { epoch: community.keyEpoch, capabilities: rows.map(toCapability) }
+}
+
+/**
+ * A specific account's capability at a scope + the community's current epoch —
+ * so a verifier can walk the delegation chain (a member cap's issuer → that
+ * issuer's leader cap). Any active member may read caps (signed attestations,
+ * not secrets).
+ */
+export async function getCapability(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  scope: string,
+  subjectAccountId: string,
+): Promise<CapabilityResponse> {
+  await requireActiveMembership(db, communityId, accountId)
+  const community = await db.query.communities.findFirst({
+    where: eq(communities.communityId, communityId),
+  })
+  if (!community) throw new ServiceError(404, 'community_not_found')
+  const row = await db.query.membershipCapabilities.findFirst({
+    where: and(
+      eq(membershipCapabilities.communityId, communityId),
+      eq(membershipCapabilities.scope, scope),
+      eq(membershipCapabilities.subjectAccountId, subjectAccountId),
+      eq(membershipCapabilities.epoch, community.keyEpoch),
+    ),
+  })
+  return { capability: row ? toCapability(row) : null }
 }
 
 /**

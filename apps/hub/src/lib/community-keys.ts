@@ -23,6 +23,7 @@ import {
   type CommunityDevice,
   type CommunityDevicesResponse,
   type CommunityId,
+  type CommunityMembersPageResponse,
   type CommunityRoot,
   type DeviceId,
   eciesOpen,
@@ -198,6 +199,7 @@ export async function getKMetaEpoch(communityId: string): Promise<number> {
 export function forgetKMetaCache(): void {
   cache.clear()
   grantedTo.clear()
+  capIssuedTo.clear()
 }
 
 /* --------------------------------- seal/open ------------------------------ */
@@ -700,6 +702,64 @@ export async function syncKeyGrants(
   const obtained = await fetchKMetaGrant(communityId, record, knownEpoch)
   await grantToOthers(communityId, record).catch(() => {})
   return obtained
+}
+
+/** (communityId:epoch:subjectAccountId) caps we've already issued this session. */
+const capIssuedTo = new Set<string>()
+
+/**
+ * Issue membership capabilities for the community roster at the current epoch —
+ * the identity-signed counterpart to the key-grant top-up. Only an owner or leader
+ * issues (a plain member has no authority): the OWNER attests every member at their
+ * community role (so leader caps, which only the owner may mint, exist); a LEADER
+ * attests only plain members (owner/leader caps require the owner). Idempotent —
+ * session-deduped and the server pins to the current epoch with an upsert — so this
+ * runs freely on every community open. Chunked to the 500-cap request cap.
+ *
+ * Scaling note: this sweeps the whole roster, so for very large communities cap
+ * issuance rides the same fan-out ceiling the grant path does (a signed Merkle
+ * roster is the noted future alternative). Members lacking a current-epoch cap are
+ * simply topped up on the next authorised open.
+ */
+export async function issueCapabilities(
+  communityId: string,
+  epoch: number,
+  myRole: 'owner' | 'leader' | 'member',
+  record: DeviceRecord,
+): Promise<void> {
+  if (myRole !== 'owner' && myRole !== 'leader') return
+
+  const caps: MembershipCapability[] = []
+  let after: string | undefined
+  do {
+    const q = new URLSearchParams({ limit: '500', ...(after ? { after } : {}) })
+    const page = await api<CommunityMembersPageResponse>(
+      'GET',
+      `/api/v1/communities/${communityId}/members?${q}`,
+    )
+    for (const m of page.members) {
+      // A leader may attest only plain members; owner/leader roles need the owner.
+      if (myRole === 'leader' && m.role !== 'member') continue
+      const dedupKey = `${communityId}:${epoch}:${m.accountId}`
+      if (capIssuedTo.has(dedupKey)) continue
+      caps.push(
+        await buildCapability(communityId, COMMUNITY_SCOPE, m.accountId, m.role, epoch, record),
+      )
+    }
+    after = page.nextCursor ?? undefined
+  } while (after)
+
+  for (let i = 0; i < caps.length; i += 500) {
+    const batch = caps.slice(i, i + 500)
+    try {
+      await api('POST', `/api/v1/communities/${communityId}/capabilities`, {
+        capabilities: batch,
+      })
+      for (const c of batch) capIssuedTo.add(`${communityId}:${epoch}:${c.subjectAccountId}`)
+    } catch {
+      // epoch race / offline — a later open re-issues (idempotent).
+    }
+  }
 }
 
 /**

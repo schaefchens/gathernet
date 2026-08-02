@@ -306,6 +306,91 @@ describe('community lifecycle + encrypted metadata', () => {
     ).toBe(400)
   })
 
+  it('membership capabilities: relay + fetch own/other; epoch- and community-pinned; membership-gated', async () => {
+    const owner = await createUser('CapOwner')
+    const member = await createUser('CapMember')
+    const outsider = await createUser('CapOutsider')
+    const communityId = await createCommunity(owner)
+    const otherCommunityId = await createCommunity(owner) // a valid-format foreign id
+    await addMember(owner, communityId, member)
+
+    const capUrl = `/api/v1/communities/${communityId}/capabilities`
+    const cap = (subject: string, role: string, epoch: number, issuer: TestUser) => ({
+      communityId,
+      scope: 'community',
+      subjectAccountId: subject,
+      role,
+      epoch,
+      issuerDeviceId: issuer.deviceId,
+      issuerSig: fakeB64(64),
+    })
+
+    // Owner issues caps for itself (owner) + the member — but also submits a
+    // stale-epoch cap and a wrong-community cap, which the server must drop.
+    const post = await app.inject({
+      method: 'POST',
+      url: capUrl,
+      headers: auth(owner),
+      payload: {
+        capabilities: [
+          cap(owner.accountId, 'owner', 0, owner),
+          cap(member.accountId, 'member', 0, owner),
+          cap(member.accountId, 'member', 5, owner), // stale/future epoch → dropped
+          { ...cap(member.accountId, 'member', 0, owner), communityId: otherCommunityId }, // wrong community → dropped
+        ],
+      },
+    })
+    expect(post.statusCode).toBe(200)
+
+    // The member fetches its own caps — sees exactly the current-epoch member cap.
+    const mine = await app.inject({
+      method: 'GET',
+      url: `${capUrl}/mine`,
+      headers: auth(member),
+    })
+    expect(mine.statusCode).toBe(200)
+    expect(mine.json().epoch).toBe(0)
+    expect(mine.json().capabilities).toMatchObject([
+      { subjectAccountId: member.accountId, role: 'member', scope: 'community', epoch: 0 },
+    ])
+
+    // Any member can look up another account's cap (chain-walk) at the current epoch.
+    const lookup = await app.inject({
+      method: 'GET',
+      url: `${capUrl}?scope=community&account=${owner.accountId}`,
+      headers: auth(member),
+    })
+    expect(lookup.statusCode).toBe(200)
+    expect(lookup.json().capability).toMatchObject({
+      subjectAccountId: owner.accountId,
+      role: 'owner',
+      issuerDeviceId: owner.deviceId,
+    })
+    // A subject with no cap resolves to null (not an error).
+    const miss = await app.inject({
+      method: 'GET',
+      url: `${capUrl}?scope=community&account=${outsider.accountId}`,
+      headers: auth(member),
+    })
+    expect(miss.json().capability).toBeNull()
+
+    // A non-member can neither post nor read capabilities (404 — existence never leaks).
+    expect(
+      (await app.inject({ method: 'GET', url: `${capUrl}/mine`, headers: auth(outsider) }))
+        .statusCode,
+    ).toBe(404)
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: capUrl,
+          headers: auth(outsider),
+          payload: { capabilities: [cap(outsider.accountId, 'member', 0, outsider)] },
+        })
+      ).statusCode,
+    ).toBe(404)
+  })
+
   it('invite → accept → member visible in list with role + channel count', async () => {
     const owner = await createUser('Owner2')
     const member = await createUser('Member2')

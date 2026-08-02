@@ -205,6 +205,26 @@ export const setCommunityRootRequestSchema = z.object({
   ownerSig: z.base64(),
 })
 
+/** An issuer posts membership capabilities it minted (server relays, never mints). */
+export const postCapabilitiesRequestSchema = z.object({
+  capabilities: z.array(membershipCapabilitySchema).min(1).max(500),
+})
+
+/** The caller's own capabilities at the community's current epoch. */
+export const myCapabilitiesResponseSchema = z.object({
+  epoch: z.number().int().nonnegative(),
+  capabilities: z.array(membershipCapabilitySchema),
+})
+
+/** A specific account's capability at a scope (current epoch) — for chain verification. */
+export const capabilityResponseSchema = z.object({
+  capability: membershipCapabilitySchema.nullable(),
+})
+
+export type PostCapabilitiesRequest = z.infer<typeof postCapabilitiesRequestSchema>
+export type MyCapabilitiesResponse = z.infer<typeof myCapabilitiesResponseSchema>
+export type CapabilityResponse = z.infer<typeof capabilityResponseSchema>
+
 export const communityDetailResponseSchema = z.object({
   community: z.object({
     communityId: communityIdSchema,

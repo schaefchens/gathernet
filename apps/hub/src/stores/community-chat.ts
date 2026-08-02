@@ -33,6 +33,7 @@ import {
   fetchKMetaGrant,
   forgetKMetaCache,
   fromStdB64,
+  issueCapabilities,
   pinCommunityOwner,
   publishCommunityRoot,
   rotateCommunity,
@@ -884,6 +885,16 @@ class CommunityChatStore {
   /** Pin the community owner (from the out-of-band invite) — TOFU, first-seen wins. */
   async pinCommunityOwner(communityId: string, ownerAccountId: string): Promise<void> {
     await pinCommunityOwner(communityId, ownerAccountId).catch(() => {})
+  }
+
+  /** Owner/leader: issue identity-signed membership caps for the roster (this epoch). */
+  async issueCapabilities(
+    communityId: string,
+    epoch: number,
+    myRole: 'owner' | 'leader' | 'member',
+  ): Promise<void> {
+    if (!this.record) return
+    await issueCapabilities(communityId, epoch, myRole, this.record).catch(() => {})
   }
 
   /** Forget a locally-held channel (e.g. after it was deleted server-side). */
