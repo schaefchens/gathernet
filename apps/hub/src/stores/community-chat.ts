@@ -12,6 +12,7 @@ import type {
   CommunityDetailResponse,
   CommunityDevicesResponse,
   CommunityListItem,
+  CommunityRoot,
   MailboxMessage,
 } from '@gathernet/shared'
 import { create } from 'zustand'
@@ -44,6 +45,7 @@ import {
   rotateCommunity,
   syncKeyGrants,
   toStdB64,
+  verifyCommunityRoot,
 } from '../lib/community-keys.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
 import {
@@ -962,6 +964,37 @@ class CommunityChatStore {
   /** Pin the community owner (from the out-of-band invite) — TOFU, first-seen wins. */
   async pinCommunityOwner(communityId: string, ownerAccountId: string): Promise<void> {
     await pinCommunityOwner(communityId, ownerAccountId).catch(() => {})
+  }
+
+  /**
+   * Bootstrap the capability root for a community that predates this feature (or a
+   * device that never saw the owner out-of-band). The owner publishes + self-pins
+   * the root on next activity if it's missing; a member with no local pin TOFU-pins
+   * from the server-served root — but only after verifying the owner's own device
+   * signed it (internal consistency; the out-of-band invite pin is still stronger).
+   */
+  async bootstrapOwnership(
+    communityId: string,
+    root: CommunityRoot | null,
+    myRole: 'owner' | 'leader' | 'member',
+  ): Promise<void> {
+    if (!this.record) return
+    if (myRole === 'owner') {
+      if (!root) await this.publishCommunityRoot(communityId)
+      return
+    }
+    if (!root || (await getPinnedOwner(communityId))) return
+    try {
+      const { devices } = await api<CommunityDevicesResponse>(
+        'GET',
+        `/api/v1/communities/${communityId}/devices`,
+      )
+      if (await verifyCommunityRoot(root, makeDeviceResolver(devices))) {
+        await pinCommunityOwner(communityId, root.ownerAccountId)
+      }
+    } catch {
+      // offline — a later open retries.
+    }
   }
 
   /** Owner/leader: issue identity-signed membership caps for the roster (this epoch). */

@@ -81,6 +81,7 @@ function CommunityDetailScreen() {
   const keyEpoch = detail?.community.keyEpoch
   const rotationPending = detail?.community.rotationPending ?? false
   const myRole = detail?.myRole
+  const root = detail?.community.root ?? null
   useEffect(() => {
     if (keyEpoch === undefined || myRole === undefined) return
     let cancelled = false
@@ -88,6 +89,9 @@ function CommunityDetailScreen() {
       const obtained = await communityChatStore.syncKeyGrants(communityId, keyEpoch)
       const rotated =
         rotationPending && isLeader ? await communityChatStore.rotateCommunity(communityId) : false
+      // Bootstrap the capability root (existing communities / no out-of-band pin):
+      // owner publishes+pins if missing; a member TOFU-pins the verified server root.
+      await communityChatStore.bootstrapOwnership(communityId, root, myRole)
       // Owner/leader: top up identity-signed membership caps for the roster at
       // this epoch (the counterpart to the key-grant top-up; idempotent).
       await communityChatStore.issueCapabilities(communityId, keyEpoch, myRole)
@@ -99,7 +103,7 @@ function CommunityDetailScreen() {
     return () => {
       cancelled = true
     }
-  }, [communityId, keyEpoch, rotationPending, isLeader, myRole, queryClient])
+  }, [communityId, keyEpoch, rotationPending, isLeader, myRole, root, queryClient])
 
   const deleteChannel = useMutation({
     mutationFn: (channelId: string) =>
