@@ -18,13 +18,13 @@
 
 import {
   type ChannelDevicesResponse,
-  type ChannelKeyCommitment,
   type CommunityDevice,
   type CommunityDevicesResponse,
   type DeviceId,
   eciesOpen,
   eciesSeal,
   importEciesPrivateKey,
+  type KeyCommitment,
   type MyChannelKeyGrantResponse,
   SIG_DOMAIN,
 } from '@gathernet/shared'
@@ -143,7 +143,7 @@ async function buildCommitment(
   epoch: number,
   key: Uint8Array,
   record: DeviceRecord,
-): Promise<ChannelKeyCommitment> {
+): Promise<KeyCommitment> {
   const mls = await loadCrypto()
   const commitment = await computeKeyCommitment(channelId, epoch, key)
   const sig = mls.ed25519Sign(
@@ -176,7 +176,7 @@ async function verifyCommitment(
   channelId: string,
   epoch: number,
   key: Uint8Array,
-  commitment: ChannelKeyCommitment,
+  commitment: KeyCommitment,
 ): Promise<boolean> {
   const expect = await computeKeyCommitment(channelId, epoch, key)
   if (toStdB64(expect) !== commitment.keyCommitment) return false

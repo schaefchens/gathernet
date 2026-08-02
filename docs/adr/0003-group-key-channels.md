@@ -130,9 +130,10 @@ its per-leaf push unchanged. The registry's subscription set is the seam a
 multi-node bus later replaces with topic subscriptions.
 
 **Deferred:** a multi-node fan-out bus (this node-local subscription registry is
-the single-node form). Also deferred: the K_meta grant context-binding retrofit
-(K_meta grants still lack the epoch commitment K_channel has); large-community
-K_meta grant fan-out (>500 devices, per ADR 0002). No crypto library was changed
+the single-node form); large-community K_meta grant fan-out (>500 devices, per
+ADR 0002). (The K_meta grant context-binding retrofit — the same epoch commitment
+K_channel uses — has since been applied to K_meta; see ADR 0002.) No crypto
+library was changed
 — the scheme composes the existing `seal`/`open`, `ed25519Sign`/`ed25519Verify`,
 `decodeDeviceCert`, and ECIES primitives (see the never-modify-crypto-libraries
 constraint).

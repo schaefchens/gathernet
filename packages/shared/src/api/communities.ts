@@ -330,6 +330,20 @@ export const setMutedRequestSchema = z.object({
 /* ----------------------- K_meta cross-device grants ----------------------- */
 
 /**
+ * Authenticated per-epoch key commitment, shared by K_meta (community_key_epochs)
+ * and K_channel (channel_key_epochs): binds the sealed key to its scope+epoch so a
+ * grantee can detect substitution/partition. `scopeId` = communityId or channelId.
+ */
+export const keyCommitmentSchema = z.object({
+  /** base64 SHA-256(scopeId ‖ keyEpoch ‖ key) */
+  keyCommitment: z.base64(),
+  /** device that minted this epoch's key (resolve its cert via the scope's device list) */
+  minterDeviceId: deviceIdSchema,
+  /** base64 Ed25519(minterDeviceKey, domain ‖ scopeId ‖ keyEpoch ‖ keyCommitment) */
+  minterSig: z.base64(),
+})
+
+/**
  * A community member device that can receive a K_meta grant. The caller
  * authenticates `receiptPk` itself: verify `certSig` over `deviceCert` under the
  * member's account identity (accountId = base58 identity pk), then verify
@@ -361,6 +375,8 @@ export const keyGrantSchema = z.object({
 
 export const postKeyGrantsRequestSchema = z.object({
   keyEpoch: z.number().int().nonnegative(),
+  /** required the first time an epoch is seen; ignored (idempotent) afterwards */
+  commitment: keyCommitmentSchema.optional(),
   grants: z.array(keyGrantSchema).min(1).max(500),
 })
 
@@ -368,6 +384,8 @@ export const myKeyGrantResponseSchema = z.object({
   keyEpoch: z.number().int().nonnegative(),
   /** null when no grant exists for this device at the current epoch */
   grant: z.object({ sealedKMeta: z.base64(), senderPkB64: z.base64() }).nullable(),
+  /** the authenticated epoch commitment; null until a minter has published it */
+  commitment: keyCommitmentSchema.nullable(),
 })
 
 /**
@@ -379,6 +397,8 @@ export const myKeyGrantResponseSchema = z.object({
  */
 export const rotateRequestSchema = z.object({
   fromEpoch: z.number().int().nonnegative(),
+  /** authenticated commitment binding the new K_meta to the community + new epoch */
+  commitment: keyCommitmentSchema,
   /** re-encrypted community metadata under the new key (null if none) */
   community: z.object({ metaCiphertext: metaCiphertextSchema.nullable() }),
   /** re-encrypted channel metadata under the new key */
@@ -403,18 +423,9 @@ export const channelMembersResponseSchema = z.object({
  * K_channel distribution for group_key channels. Mirrors the K_meta grant flow
  * (per-device ECIES receipt-key seals) but scoped to a channel and minted only
  * by an authorized granter set (channel moderators / community leaders). Each
- * epoch carries an authenticated `commitment` = SHA256(domain ‖ channelId ‖
- * epoch ‖ K_channel) signed by the minter device, so a grantee can prove the
- * key it opened is the one authority published (fork/partition detection).
+ * epoch carries an authenticated `commitment` (see keyCommitmentSchema) so a
+ * grantee can prove the key it opened is the one authority published.
  */
-export const channelKeyCommitmentSchema = z.object({
-  /** base64 SHA-256(domain ‖ channelId ‖ keyEpoch ‖ K_channel) */
-  keyCommitment: z.base64(),
-  /** device that minted this epoch's key (resolve its cert via GET …/channels/:id/devices) */
-  minterDeviceId: deviceIdSchema,
-  /** base64 Ed25519(minterDeviceKey, domain ‖ channelId ‖ keyEpoch ‖ keyCommitment) */
-  minterSig: z.base64(),
-})
 
 /** Devices eligible for a K_channel grant = the channel's active-member devices. */
 export const channelDevicesResponseSchema = z.object({
@@ -434,7 +445,7 @@ export const channelKeyGrantSchema = z.object({
 export const postChannelKeyGrantsRequestSchema = z.object({
   keyEpoch: z.number().int().nonnegative(),
   /** required the first time an epoch is seen; ignored (idempotent) afterwards */
-  commitment: channelKeyCommitmentSchema.optional(),
+  commitment: keyCommitmentSchema.optional(),
   grants: z.array(channelKeyGrantSchema).min(1).max(CHANNEL_KEY_GRANT_BATCH_MAX),
 })
 
@@ -443,7 +454,7 @@ export const myChannelKeyGrantResponseSchema = z.object({
   /** null when no grant exists for this device at the current epoch */
   grant: z.object({ sealedKey: z.base64(), senderPkB64: z.base64() }).nullable(),
   /** the authenticated epoch commitment; null until a minter has published it */
-  commitment: channelKeyCommitmentSchema.nullable(),
+  commitment: keyCommitmentSchema.nullable(),
 })
 
 /**
@@ -456,7 +467,7 @@ export const myChannelKeyGrantResponseSchema = z.object({
  */
 export const rotateChannelRequestSchema = z.object({
   fromEpoch: z.number().int().nonnegative(),
-  commitment: channelKeyCommitmentSchema,
+  commitment: keyCommitmentSchema,
   grants: z.array(channelKeyGrantSchema).min(1).max(CHANNEL_KEY_GRANT_BATCH_MAX),
 })
 
@@ -500,7 +511,7 @@ export type PostKeyGrantsRequest = z.infer<typeof postKeyGrantsRequestSchema>
 export type MyKeyGrantResponse = z.infer<typeof myKeyGrantResponseSchema>
 export type RotateRequest = z.infer<typeof rotateRequestSchema>
 export type SetMemberRoleRequest = z.infer<typeof setMemberRoleRequestSchema>
-export type ChannelKeyCommitment = z.infer<typeof channelKeyCommitmentSchema>
+export type KeyCommitment = z.infer<typeof keyCommitmentSchema>
 export type ChannelDevicesResponse = z.infer<typeof channelDevicesResponseSchema>
 export type ChannelKeyGrant = z.infer<typeof channelKeyGrantSchema>
 export type PostChannelKeyGrantsRequest = z.infer<typeof postChannelKeyGrantsRequestSchema>

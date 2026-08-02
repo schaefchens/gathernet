@@ -20,9 +20,11 @@ import {
   type CommunityDetailResponse,
   type CommunityDevice,
   type CommunityDevicesResponse,
+  type DeviceId,
   eciesOpen,
   eciesSeal,
   importEciesPrivateKey,
+  type KeyCommitment,
   type MyKeyGrantResponse,
   SIG_DOMAIN,
 } from '@gathernet/shared'
@@ -234,6 +236,92 @@ function concat(...parts: Uint8Array[]): Uint8Array {
   return out
 }
 
+function u64le(n: number): Uint8Array {
+  const b = new Uint8Array(8)
+  new DataView(b.buffer).setBigUint64(0, BigInt(n), true)
+  return b
+}
+
+async function sha256(data: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(data)))
+}
+
+/* ----------------------- authenticated K_meta epoch commitment ------------ */
+
+/** SHA-256(communityId ‖ u64(epoch) ‖ K_meta) — binds a key to its community+epoch. */
+async function computeKMetaCommitment(
+  communityId: string,
+  epoch: number,
+  kMeta: Uint8Array,
+): Promise<Uint8Array> {
+  return sha256(concat(encoder.encode(communityId), u64le(epoch), kMeta))
+}
+
+/** The authenticated epoch commitment a leader publishes alongside its K_meta grants. */
+async function buildKMetaCommitment(
+  communityId: string,
+  epoch: number,
+  kMeta: Uint8Array,
+  record: DeviceRecord,
+): Promise<KeyCommitment> {
+  const mls = await loadCrypto()
+  const commitment = await computeKMetaCommitment(communityId, epoch, kMeta)
+  const sig = mls.ed25519Sign(
+    record.deviceSecret,
+    concat(
+      encoder.encode(SIG_DOMAIN.communityKeyCommit),
+      encoder.encode(communityId),
+      u64le(epoch),
+      commitment,
+    ),
+  )
+  return {
+    keyCommitment: toStdB64(commitment),
+    minterDeviceId: record.deviceId as DeviceId,
+    minterSig: toStdB64(sig),
+  }
+}
+
+/**
+ * Verify a fetched K_meta against its epoch commitment: the opened key must hash
+ * to the published commitment, and the commitment must be signed by the minter's
+ * device bound to THIS community+epoch — so a compromised relay can't feed one
+ * community's (key, commitment) blob as another's. The minter's cert is resolved
+ * from the member-device list and authenticated under its account identity.
+ */
+async function verifyKMetaCommitment(
+  communityId: string,
+  epoch: number,
+  kMeta: Uint8Array,
+  commitment: KeyCommitment,
+): Promise<boolean> {
+  const expect = await computeKMetaCommitment(communityId, epoch, kMeta)
+  if (toStdB64(expect) !== commitment.keyCommitment) return false
+  try {
+    const { devices } = await api<CommunityDevicesResponse>(
+      'GET',
+      `/api/v1/communities/${communityId}/devices`,
+    )
+    const minter = devices.find((d) => d.deviceId === commitment.minterDeviceId)
+    if (!minter) return false
+    const verified = await verifyDeviceCert(minter)
+    if (!verified) return false
+    const mls = await loadCrypto()
+    return mls.ed25519Verify(
+      verified.devicePk,
+      concat(
+        encoder.encode(SIG_DOMAIN.communityKeyCommit),
+        encoder.encode(communityId),
+        u64le(epoch),
+        fromStdB64(commitment.keyCommitment),
+      ),
+      fromStdB64(commitment.minterSig),
+    )
+  } catch {
+    return false
+  }
+}
+
 /** communityId:deviceId pairs we've already sealed a grant to this session. */
 const grantedTo = new Set<string>()
 
@@ -323,8 +411,13 @@ async function grantToOthers(communityId: string, record: DeviceRecord): Promise
     grantedTo.has(`${communityId}:${keyEpoch}:${id}`),
   )
   if (grants.length === 0) return
+  const commitment = await buildKMetaCommitment(communityId, keyEpoch, kMeta, record)
   try {
-    await api('POST', `/api/v1/communities/${communityId}/key-grants`, { keyEpoch, grants })
+    await api('POST', `/api/v1/communities/${communityId}/key-grants`, {
+      keyEpoch,
+      commitment,
+      grants,
+    })
     for (const g of grants) grantedTo.add(`${communityId}:${keyEpoch}:${g.granteeDeviceId}`)
   } catch {
     // epoch race / offline — a later sync retries
@@ -352,6 +445,10 @@ export async function fetchKMetaGrant(
       `/api/v1/communities/${communityId}/key-grants/mine`,
     )
     if (localEpoch >= res.keyEpoch || !res.grant) return false
+    // The commitment is REQUIRED to trust the key — an ECIES seal to a public
+    // receipt key gives no authenticity over WHICH key was sealed, so without it
+    // a compromised server could substitute one community's grant for another's.
+    if (!res.commitment) return false
     const priv = await importEciesPrivateKey(toStdB64(record.receiptPrivPkcs8))
     const opened = await eciesOpen(
       priv,
@@ -359,6 +456,9 @@ export async function fetchKMetaGrant(
       res.grant.sealedKMeta,
       record.receiptPk,
     )
+    if (!(await verifyKMetaCommitment(communityId, res.keyEpoch, opened, res.commitment))) {
+      return false
+    }
     await rememberKMeta(communityId, opened, res.keyEpoch)
     return true
   } catch {
@@ -444,10 +544,12 @@ export async function rotateCommunity(communityId: string, record: DeviceRecord)
     `/api/v1/communities/${communityId}/devices`,
   )
   const grants = await buildGrants(devices, record.deviceId, newKMeta, null)
+  const commitment = await buildKMetaCommitment(communityId, newEpoch, newKMeta, record)
 
   try {
     await api('POST', `/api/v1/communities/${communityId}/rotate`, {
       fromEpoch,
+      commitment,
       community: { metaCiphertext: communityMeta },
       channels,
       media,

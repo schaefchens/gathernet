@@ -44,6 +44,7 @@ import {
   communities,
   communityChannels,
   communityInvites,
+  communityKeyEpochs,
   communityKeyGrants,
   communityMedia,
   communityMembers,
@@ -1699,36 +1700,52 @@ export async function postKeyGrants(
   registry: ConnectionRegistry,
   accountId: string,
   communityId: string,
-  keyEpoch: number,
-  grants: PostKeyGrantsRequest['grants'],
+  input: PostKeyGrantsRequest,
 ): Promise<void> {
   await requireActiveMembership(db, communityId, accountId)
   const community = await db.query.communities.findFirst({
     where: eq(communities.communityId, communityId),
   })
   if (!community) throw new ServiceError(404, 'community_not_found')
-  if (keyEpoch !== community.keyEpoch) throw new ServiceError(409, 'key_epoch_stale')
+  if (input.keyEpoch !== community.keyEpoch) throw new ServiceError(409, 'key_epoch_stale')
 
   // Only seal to devices that actually belong to active members — never leak
   // K_meta to an outsider's device.
   const allowed = new Set((await grantableDeviceRows(db, communityId)).map((r) => r.deviceId))
-  for (const g of grants) {
+  for (const g of input.grants) {
     if (!allowed.has(g.granteeDeviceId)) throw new ServiceError(400, 'invalid_grantee')
   }
 
-  await db
-    .insert(communityKeyGrants)
-    .values(
-      grants.map((g) => ({
-        communityId,
-        keyEpoch,
-        granteeDeviceId: g.granteeDeviceId,
-        sealedKMeta: bufOf(g.sealedKMeta),
-        senderPkB64: g.senderPkB64,
-        createdBy: accountId,
-      })),
-    )
-    .onConflictDoNothing()
+  await db.transaction(async (tx) => {
+    // The authenticated epoch commitment binds K_meta to community+epoch (fetchers
+    // verify their opened key against it). Published once per epoch with the grants.
+    if (input.commitment) {
+      await requireOwnDevice(tx, accountId, input.commitment.minterDeviceId)
+      await tx
+        .insert(communityKeyEpochs)
+        .values({
+          communityId,
+          keyEpoch: input.keyEpoch,
+          keyCommitment: bufOf(input.commitment.keyCommitment),
+          minterDeviceId: input.commitment.minterDeviceId,
+          minterSig: bufOf(input.commitment.minterSig),
+        })
+        .onConflictDoNothing()
+    }
+    await tx
+      .insert(communityKeyGrants)
+      .values(
+        input.grants.map((g) => ({
+          communityId,
+          keyEpoch: input.keyEpoch,
+          granteeDeviceId: g.granteeDeviceId,
+          sealedKMeta: bufOf(g.sealedKMeta),
+          senderPkB64: g.senderPkB64,
+          createdBy: accountId,
+        })),
+      )
+      .onConflictDoNothing()
+  })
 
   const owners = await db
     .select({ accountId: devices.accountId })
@@ -1736,7 +1753,7 @@ export async function postKeyGrants(
     .where(
       inArray(
         devices.deviceId,
-        grants.map((g) => g.granteeDeviceId),
+        input.grants.map((g) => g.granteeDeviceId),
       ),
     )
   for (const acct of new Set(owners.map((o) => o.accountId))) {
@@ -1766,10 +1783,23 @@ export async function myKeyGrant(
       eq(communityKeyGrants.granteeDeviceId, deviceId),
     ),
   })
+  const commit = await db.query.communityKeyEpochs.findFirst({
+    where: and(
+      eq(communityKeyEpochs.communityId, communityId),
+      eq(communityKeyEpochs.keyEpoch, community.keyEpoch),
+    ),
+  })
   return {
     keyEpoch: community.keyEpoch,
     grant: row
       ? { sealedKMeta: row.sealedKMeta.toString('base64'), senderPkB64: row.senderPkB64 }
+      : null,
+    commitment: commit
+      ? {
+          keyCommitment: commit.keyCommitment.toString('base64'),
+          minterDeviceId: commit.minterDeviceId as DeviceId,
+          minterSig: commit.minterSig.toString('base64'),
+        }
       : null,
   }
 }
@@ -1829,7 +1859,8 @@ export async function rotateCommunity(
         )
     }
 
-    // Old-epoch grants (incl. any to the removed member) become useless — drop them.
+    // Old-epoch grants + commitments (incl. any to the removed member) become
+    // useless — drop them (K_meta re-encrypts metadata, unlike K_channel).
     await tx
       .delete(communityKeyGrants)
       .where(
@@ -1838,6 +1869,26 @@ export async function rotateCommunity(
           lt(communityKeyGrants.keyEpoch, newEpoch),
         ),
       )
+    await tx
+      .delete(communityKeyEpochs)
+      .where(
+        and(
+          eq(communityKeyEpochs.communityId, communityId),
+          lt(communityKeyEpochs.keyEpoch, newEpoch),
+        ),
+      )
+    // The authenticated commitment for the new K_meta epoch.
+    await requireOwnDevice(tx, accountId, input.commitment.minterDeviceId)
+    await tx
+      .insert(communityKeyEpochs)
+      .values({
+        communityId,
+        keyEpoch: newEpoch,
+        keyCommitment: bufOf(input.commitment.keyCommitment),
+        minterDeviceId: input.commitment.minterDeviceId,
+        minterSig: bufOf(input.commitment.minterSig),
+      })
+      .onConflictDoNothing()
 
     // Install new grants, but only for devices of still-active members.
     const allowed = new Set((await grantableDeviceRows(tx, communityId)).map((r) => r.deviceId))

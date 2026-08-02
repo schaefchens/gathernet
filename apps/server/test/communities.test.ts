@@ -40,6 +40,13 @@ afterAll(async () => {
 const fakeB64 = (n = 64) => randomBytes(n).toString('base64')
 /** Stand-in for a server-opaque sealed metadata / media blob. */
 const sealed = (n = 48) => randomBytes(n).toString('base64')
+/** A well-formed epoch commitment (the server stores it + checks minterDeviceId
+ *  ownership; the cryptographic recompute/verify is a client concern). */
+const fakeCommitment = (u: TestUser) => ({
+  keyCommitment: randomBytes(32).toString('base64'),
+  minterDeviceId: u.deviceId,
+  minterSig: fakeB64(64),
+})
 
 interface TestUser {
   accountId: string
@@ -1023,6 +1030,7 @@ describe('K_meta cross-device key grants', () => {
       headers: auth(owner),
       payload: {
         keyEpoch: 0,
+        commitment: fakeCommitment(owner),
         grants: [
           {
             granteeDeviceId: member.deviceId,
@@ -1041,6 +1049,8 @@ describe('K_meta cross-device key grants', () => {
       headers: auth(member),
     })
     expect(mine.statusCode).toBe(200)
+    // The authenticated epoch commitment is returned alongside the grant.
+    expect(mine.json().commitment).not.toBeNull()
     const grant = mine.json().grant as { sealedKMeta: string; senderPkB64: string } | null
     expect(grant).not.toBeNull()
     const priv = await importEciesPrivateKey(member.receipt.privateKeyPkcs8B64)
@@ -1125,6 +1135,7 @@ describe('K_meta rotation on removal (Phase B)', () => {
       headers: auth(owner),
       payload: {
         fromEpoch: 0,
+        commitment: fakeCommitment(owner),
         community: { metaCiphertext: newMeta },
         channels: [],
         media: [],
@@ -1162,6 +1173,7 @@ describe('K_meta rotation on removal (Phase B)', () => {
       headers: auth(owner),
       payload: {
         fromEpoch: 0,
+        commitment: fakeCommitment(owner),
         community: { metaCiphertext: sealed() },
         channels: [],
         media: [],
@@ -1196,6 +1208,7 @@ describe('K_meta rotation on removal (Phase B)', () => {
       headers: auth(owner),
       payload: {
         fromEpoch: 0,
+        commitment: fakeCommitment(owner),
         community: { metaCiphertext: sealed() },
         channels: [],
         media: [],
@@ -1211,6 +1224,7 @@ describe('K_meta rotation on removal (Phase B)', () => {
       headers: auth(owner),
       payload: {
         fromEpoch: 0,
+        commitment: fakeCommitment(owner),
         community: { metaCiphertext: sealed() },
         channels: [],
         media: [],
@@ -1786,9 +1800,9 @@ describe('group_key channels (mega-community scale)', () => {
     })
     expect((await postJoin(leader, communityId, channelId)).json().status).toBe('active')
     const mineUrl = `/api/v1/communities/${communityId}/channels/${channelId}/key-grants/mine`
-    expect((await app.inject({ method: 'GET', url: mineUrl, headers: auth(leader) })).statusCode).toBe(
-      200,
-    )
+    expect(
+      (await app.inject({ method: 'GET', url: mineUrl, headers: auth(leader) })).statusCode,
+    ).toBe(200)
 
     // Demote back to member: still an active channel member, but no longer access-eligible.
     await app.inject({

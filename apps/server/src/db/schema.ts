@@ -559,6 +559,32 @@ export const communityKeyGrants = pgTable(
   ],
 )
 
+/**
+ * Authenticated per-epoch commitment to a community's K_meta (mirror of
+ * channel_key_epochs): `keyCommitment` = SHA256(domain ‖ communityId ‖ keyEpoch ‖
+ * K_meta), signed by an authorized minter device. A grantee recomputes the
+ * commitment from its opened K_meta grant and checks it here — binding the sealed
+ * key to this community+epoch so a compromised relay can't feed one community's
+ * grant blob as another's (the ECIES seal alone binds only the recipient key).
+ * One row per epoch (server-enforced).
+ */
+export const communityKeyEpochs = pgTable(
+  'community_key_epochs',
+  {
+    communityId: text('community_id')
+      .notNull()
+      .references(() => communities.communityId),
+    keyEpoch: integer('key_epoch').notNull(),
+    keyCommitment: bytea('key_commitment').notNull(),
+    minterDeviceId: text('minter_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    minterSig: bytea('minter_sig').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.communityId, t.keyEpoch] })],
+)
+
 export const communityMembers = pgTable(
   'community_members',
   {

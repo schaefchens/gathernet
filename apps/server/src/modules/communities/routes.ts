@@ -251,14 +251,7 @@ export function registerCommunityRoutes(
     async (request) => {
       const session = requireSession(request)
       const body = postKeyGrantsRequestSchema.parse(request.body)
-      await postKeyGrants(
-        db,
-        registry,
-        session.accountId,
-        request.params.id,
-        body.keyEpoch,
-        body.grants,
-      )
+      await postKeyGrants(db, registry, session.accountId, request.params.id, body)
       return { ok: true }
     },
   )

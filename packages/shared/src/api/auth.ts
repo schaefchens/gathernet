@@ -23,6 +23,9 @@ export const SIG_DOMAIN = {
    *  — authenticates which key an authorised minter published for an epoch, so a
    *  grantee can detect a partition (two keys claiming one epoch). */
   channelKeyCommit: 'gathernet-channel-key-commit-v1',
+  /** As channelKeyCommit but for a community's K_meta (community_key_epochs) —
+   *  binds a K_meta grant to its community+epoch. */
+  communityKeyCommit: 'gathernet-community-key-commit-v1',
 } as const
 
 export const displayNameSchema = z.string().trim().min(1).max(64)

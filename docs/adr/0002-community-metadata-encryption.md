@@ -101,6 +101,21 @@ grant (K_meta is stored per-epoch client-side; the invite fragment now carries
 `<epoch>.<key>` so a joiner detects staleness). Messages keep MLS forward secrecy
 independently. Migration 0010 (`communities.rotationPending`).
 
+**Grant context-binding (authenticated epoch commitment) — IMPLEMENTED (migration
+0012).** An ECIES seal to a device's *public* receipt key carries no authenticity
+over *which* key was sealed, so a grant blob alone let a compromised relay feed
+one community's K_meta grant as another's (a partition/DoS, since the metadata
+stays sealed under the real key). Each epoch now has an authenticated commitment
+in `community_key_epochs` — `SHA256(communityId ‖ epoch ‖ K_meta)`, signed by the
+minting leader device (`minterSig` over the domain-separated commitment). A
+fetcher recomputes the commitment from its opened K_meta and verifies the
+`minterSig` (bound to this community + epoch) against the minter's DeviceCert,
+resolved from the member-device list — REQUIRED for the key to be trusted. This
+mirrors the K_channel epoch commitment (ADR 0003); grants are published with the
+commitment (cross-device sync + rotation), and stale-epoch commitments are dropped
+on rotation alongside stale grants. The invite-fragment distribution path is
+unchanged (K_meta is trusted out-of-band there, not via a grant).
+
 **Deferred:** rotation currently re-seals avatar image bytes; an optimization
 (wrap a per-media key inside the K_meta-sealed metadata so only small blobs are
 re-sealed) is noted but unbuilt. Large-community grant fan-out (>~300 devices)
