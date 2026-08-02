@@ -8,7 +8,7 @@ import {
   type SnapshotStore,
   type SyncTransport,
 } from './ports.ts'
-import type { MlsDeviceHandle, ProcessedMessage } from './types.ts'
+import type { MemberInfo, MlsDeviceHandle, ProcessedMessage } from './types.ts'
 
 export interface MlsSyncEngineOptions {
   device: MlsDeviceHandle
@@ -104,6 +104,11 @@ export class MlsSyncEngine {
 
   currentEpoch(groupId: string): number {
     return this.device.currentEpoch(hexToBytes(groupId))
+  }
+
+  /** The group's current MLS leaves (accountId/deviceId/name). Read-only. */
+  members(groupId: string): MemberInfo[] {
+    return this.device.members(hexToBytes(groupId))
   }
 
   /** Fetch and process every mailbox message past the cursor. */

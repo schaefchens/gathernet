@@ -49,9 +49,14 @@ export function ChannelChat({
   const messages = useCommunityChat((s) => s.messages[channelId] ?? NO_MESSAGES)
 
   useEffect(() => {
-    void communityChatStore.openChannel(channelId)
+    void (async () => {
+      await communityChatStore.openChannel(channelId)
+      // Capability overlay: after the engine has caught up, verify every MLS leaf
+      // holds a valid membership cap (a server-injected member → channel untrusted).
+      await communityChatStore.verifyChannelTrust(communityId, channelId)
+    })()
     void communityChatStore.pruneChannelLocal(channelId, messageTtlDays)
-  }, [channelId, messageTtlDays])
+  }, [communityId, channelId, messageTtlDays])
 
   const notReadyLabel =
     status === 'pending' ? t('communities.channelPending') : t('communities.channelJoining')
@@ -103,14 +108,27 @@ export function ChannelChat({
           </div>
         </div>
       ) : (
-        <MessageThread
-          messages={messages}
-          ready={status === 'ready'}
-          onSend={(text) => communityChatStore.send(channelId, text)}
-          notReadyLabel={notReadyLabel}
-          readOnly={!canPost}
-          readOnlyLabel={muted ? t('communities.mutedHint') : t('communities.readOnlyHint')}
-        />
+        <>
+          {status === 'untrusted' && (
+            <div className="mt-3 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {t('communities.channelUntrusted')}
+            </div>
+          )}
+          <MessageThread
+            messages={messages}
+            ready={status === 'ready'}
+            onSend={(text) => communityChatStore.send(channelId, text)}
+            notReadyLabel={notReadyLabel}
+            readOnly={!canPost || status === 'untrusted'}
+            readOnlyLabel={
+              status === 'untrusted'
+                ? t('communities.channelUntrustedHint')
+                : muted
+                  ? t('communities.mutedHint')
+                  : t('communities.readOnlyHint')
+            }
+          />
+        </>
       )}
     </div>
   )

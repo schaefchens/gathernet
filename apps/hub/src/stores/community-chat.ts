@@ -30,10 +30,15 @@ import {
   verifyChannelSender,
 } from '../lib/channel-keys.ts'
 import {
+  accountHoldsCap,
+  COMMUNITY_SCOPE,
   fetchKMetaGrant,
   forgetKMetaCache,
   fromStdB64,
+  getPinnedOwner,
   issueCapabilities,
+  makeCapFetcher,
+  makeDeviceResolver,
   pinCommunityOwner,
   publishCommunityRoot,
   rotateCommunity,
@@ -56,7 +61,14 @@ import { wsClient } from '../lib/ws-client.ts'
  * only). `pending` means the channel exists but its epoch-0 GroupInfo has not
  * been published yet (the creator hasn't bootstrapped it).
  */
-export type ChannelStatus = 'idle' | 'joining' | 'ready' | 'locked' | 'pending' | 'error'
+export type ChannelStatus =
+  | 'idle'
+  | 'joining'
+  | 'ready'
+  | 'locked'
+  | 'pending'
+  | 'error'
+  | 'untrusted'
 
 interface CommunityChatState {
   channels: Record<string, ChannelStatus> // by channelId
@@ -171,6 +183,9 @@ class CommunityChatStore {
   private unsubscribes: (() => void)[] = []
   /** channelIds this device holds MLS state for (created/joined/restored). */
   private ready = new Set<string>()
+  /** MLS channels whose current leaf set failed capability verification (an
+   *  unauthorised/injected member) — sending is refused to contain the leak. */
+  private untrustedChannels = new Set<string>()
   /** group_key channels this device tracks: channelId → {communityId, keyEpoch}. */
   private groupKey = new Map<string, { communityId: string; keyEpoch: number }>()
   /** Verified sender certs, per community: communityId → deviceId → identity (or null). */
@@ -381,6 +396,7 @@ class CommunityChatStore {
     this.crypto = null
     this.record = null
     this.ready = new Set()
+    this.untrustedChannels = new Set()
     this.groupKey = new Map()
     this.senderCerts = new Map()
     this.unresolvedSenders = new Set()
@@ -721,6 +737,65 @@ class CommunityChatStore {
   }
 
   /**
+   * MLS-channel capability overlay (detection + containment). mls-rs applies an
+   * external-join commit automatically — a compromised server could inject a leaf
+   * we can't refuse at the protocol layer without a crate change — so after the
+   * channel's engine has caught up we enumerate its current MLS leaves and require
+   * EACH leaf's account to hold a valid membership capability chained to the pinned
+   * owner. If any leaf lacks one the channel is marked `untrusted`: the composer is
+   * disabled and `send` refuses, so no further plaintext reaches the injected
+   * member. Runs only when an owner is pinned (else we can't verify → legacy trust)
+   * and only for MLS channels (group_key access is gated at the key-grant instead).
+   * Returns true iff the channel is trusted.
+   *
+   * Scope note: this verifies COMMUNITY membership (blocks a server-injected
+   * outsider). Per-channel authorisation (channel-scope caps) is the same follow-up
+   * as the K_channel grant enforcement.
+   */
+  async verifyChannelTrust(communityId: string, channelId: string): Promise<boolean> {
+    const engine = this.engine
+    if (!engine || this.groupKey.has(channelId) || !engine.hasGroup(channelId)) return true
+    const ownerAccountId = await getPinnedOwner(communityId)
+    if (!ownerAccountId) {
+      this.clearUntrusted(channelId)
+      return true // no pinned owner → cannot verify (legacy/degraded, same as K_meta)
+    }
+    let devices: CommunityDevicesResponse['devices']
+    try {
+      devices = (
+        await api<CommunityDevicesResponse>('GET', `/api/v1/communities/${communityId}/devices`)
+      ).devices
+    } catch {
+      return true // offline — don't flip a channel untrusted on a fetch failure
+    }
+    const resolve = makeDeviceResolver(devices)
+    const getCap = makeCapFetcher(communityId)
+    let trusted = true
+    for (const leaf of engine.members(channelId)) {
+      if (
+        !(await accountHoldsCap(COMMUNITY_SCOPE, leaf.accountId, ownerAccountId, resolve, getCap))
+      ) {
+        trusted = false
+        break
+      }
+    }
+    if (trusted) {
+      this.clearUntrusted(channelId)
+    } else {
+      this.untrustedChannels.add(channelId)
+      this.setStatus(channelId, 'untrusted')
+    }
+    return trusted
+  }
+
+  /** Restore a channel to `ready` if it was previously flagged untrusted. */
+  private clearUntrusted(channelId: string): void {
+    if (this.untrustedChannels.delete(channelId) && this.ready.has(channelId)) {
+      this.setStatus(channelId, 'ready')
+    }
+  }
+
+  /**
    * Explicit join action (open channels + invite acceptance). POSTs to the
    * channel join endpoint: the server flips us to active (open policy or
    * accepting a targeted invite) and returns GroupInfo, or leaves us 'pending'
@@ -839,6 +914,8 @@ class CommunityChatStore {
     const engine = this.engine
     const record = this.record
     if (!engine || !record) throw new Error('locked')
+    // Containment: never emit plaintext into a channel with an unauthorised leaf.
+    if (this.untrustedChannels.has(channelId)) throw new Error('untrusted')
     const plaintext = encoder.encode(JSON.stringify({ t: text, ts: Date.now() }))
     const { seq } = await engine.sendApplication(channelId, plaintext)
     const stored: StoredMessage = {

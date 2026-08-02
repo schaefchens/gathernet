@@ -206,6 +206,8 @@
     "channelJoining": "Kanal wird beigetreten…",
     "channelPending": "Verschlüsselung wird eingerichtet…",
     "channelLocked": "Dies ist ein Kanal nur für Leiter. Du hast keinen Zugriff.",
+    "channelUntrusted": "Dieser Kanal hat ein nicht verifiziertes Mitglied. Das Senden ist pausiert, bis die Identität aller Mitglieder bestätigt ist.",
+    "channelUntrustedHint": "Senden pausiert – nicht verifiziertes Mitglied vorhanden.",
     "invite": "Einladen",
     "inviteHint": "Teile diesen Code mit Menschen, die du in der Gemeinschaft haben möchtest. Nur auf Einladung — es gibt kein öffentliches Verzeichnis.",
     "newInvite": "Neuer Einladungscode",
