@@ -16,15 +16,20 @@
  */
 
 import {
+  type AccountId,
   base58Encode,
+  type CapabilityRole,
   type CommunityDetailResponse,
   type CommunityDevice,
   type CommunityDevicesResponse,
+  type CommunityId,
+  type CommunityRoot,
   type DeviceId,
   eciesOpen,
   eciesSeal,
   importEciesPrivateKey,
   type KeyCommitment,
+  type MembershipCapability,
   type MyKeyGrantResponse,
   SIG_DOMAIN,
 } from '@gathernet/shared'
@@ -320,6 +325,170 @@ async function verifyKMetaCommitment(
   } catch {
     return false
   }
+}
+
+/* --------------- identity-signed membership/role capabilities ------------- */
+
+/** The COMMUNITY scope literal (channel caps use the channelId as scope). */
+export const COMMUNITY_SCOPE = 'community'
+
+function capabilityTuple(
+  communityId: string,
+  scope: string,
+  subjectAccountId: string,
+  role: CapabilityRole,
+  epoch: number,
+): Uint8Array {
+  return concat(
+    encoder.encode(SIG_DOMAIN.membershipCap),
+    encoder.encode(communityId),
+    encoder.encode(scope),
+    encoder.encode(subjectAccountId),
+    encoder.encode(role),
+    u64le(epoch),
+  )
+}
+
+/** Mint a capability: this device (cert-chained to its account) attests the subject's role. */
+export async function buildCapability(
+  communityId: string,
+  scope: string,
+  subjectAccountId: string,
+  role: CapabilityRole,
+  epoch: number,
+  record: DeviceRecord,
+): Promise<MembershipCapability> {
+  const mls = await loadCrypto()
+  const sig = mls.ed25519Sign(
+    record.deviceSecret,
+    capabilityTuple(communityId, scope, subjectAccountId, role, epoch),
+  )
+  return {
+    communityId: communityId as CommunityId,
+    scope,
+    subjectAccountId: subjectAccountId as AccountId,
+    role,
+    epoch,
+    issuerDeviceId: record.deviceId as DeviceId,
+    issuerSig: toStdB64(sig),
+  }
+}
+
+/** Resolve a capability issuer's device to its authenticated identity, or null. */
+export type DeviceResolver = (
+  deviceId: string,
+) => Promise<{ devicePk: Uint8Array; accountId: string } | null>
+/** Fetch an account's own capability at a scope (current epoch), for authority chaining. */
+export type CapabilityFetcher = (
+  scope: string,
+  accountId: string,
+) => Promise<MembershipCapability | null>
+
+/**
+ * Verify a membership capability against the pinned community owner (server never
+ * trusted). Checks the issuer's Ed25519 signature (device cert-chained to its
+ * account via `resolveDevice`), then that the issuer is AUTHORISED to mint this
+ * (role, scope): the owner may mint anything; a community leader may mint community
+ * members + channel members/moderators; a channel moderator may mint members of its
+ * own channel. Authority is proven by recursively verifying the issuer's own
+ * same-epoch capability. Depth-bounded (member → leader/mod → owner).
+ */
+export async function verifyCapability(
+  cap: MembershipCapability,
+  ownerAccountId: string,
+  resolveDevice: DeviceResolver,
+  getCap: CapabilityFetcher,
+  depth = 0,
+): Promise<boolean> {
+  if (depth > 3) return false
+  const mls = await loadCrypto()
+  const issuer = await resolveDevice(cap.issuerDeviceId)
+  if (!issuer) return false
+  const tuple = capabilityTuple(
+    cap.communityId,
+    cap.scope,
+    cap.subjectAccountId,
+    cap.role,
+    cap.epoch,
+  )
+  if (!mls.ed25519Verify(issuer.devicePk, tuple, fromStdB64(cap.issuerSig))) return false
+
+  // The owner (pinned out-of-band) is the root — may issue any capability.
+  if (issuer.accountId === ownerAccountId) return true
+
+  // A non-owner issuer needs its own authorising same-epoch capability.
+  const holds = async (scope: string, role: CapabilityRole): Promise<boolean> => {
+    const c = await getCap(scope, issuer.accountId)
+    if (
+      !c ||
+      c.role !== role ||
+      c.scope !== scope ||
+      c.subjectAccountId !== issuer.accountId ||
+      c.communityId !== cap.communityId ||
+      c.epoch !== cap.epoch
+    ) {
+      return false
+    }
+    return verifyCapability(c, ownerAccountId, resolveDevice, getCap, depth + 1)
+  }
+
+  if (cap.scope === COMMUNITY_SCOPE) {
+    // owner/leader caps require the owner (handled above); a leader may mint members.
+    return cap.role === 'member' && (await holds(COMMUNITY_SCOPE, 'leader'))
+  }
+  // Channel scope: leaders mint members+moderators; channel moderators mint members.
+  if (cap.role === 'member') {
+    return (await holds(COMMUNITY_SCOPE, 'leader')) || (await holds(cap.scope, 'moderator'))
+  }
+  if (cap.role === 'moderator') return holds(COMMUNITY_SCOPE, 'leader')
+  return false
+}
+
+/** The owner's device signs the community root (capability-chain anchor). */
+export async function buildCommunityRoot(
+  communityId: string,
+  ownerAccountId: string,
+  record: DeviceRecord,
+): Promise<CommunityRoot> {
+  const mls = await loadCrypto()
+  const sig = mls.ed25519Sign(
+    record.deviceSecret,
+    concat(
+      encoder.encode(SIG_DOMAIN.communityRoot),
+      encoder.encode(communityId),
+      encoder.encode(ownerAccountId),
+    ),
+  )
+  return {
+    communityId: communityId as CommunityId,
+    ownerAccountId: ownerAccountId as AccountId,
+    ownerDeviceId: record.deviceId as DeviceId,
+    ownerSig: toStdB64(sig),
+  }
+}
+
+/**
+ * Verify a community root: its signer device must belong to `ownerAccountId` (the
+ * value pinned from the out-of-band invite) and have signed the ownership tuple.
+ * This authenticates that the pinned owner's own device attested ownership — not
+ * the server. Returns false if the signer isn't the owner or the sig is bad.
+ */
+export async function verifyCommunityRoot(
+  root: CommunityRoot,
+  resolveDevice: DeviceResolver,
+): Promise<boolean> {
+  const mls = await loadCrypto()
+  const signer = await resolveDevice(root.ownerDeviceId)
+  if (!signer || signer.accountId !== root.ownerAccountId) return false
+  return mls.ed25519Verify(
+    signer.devicePk,
+    concat(
+      encoder.encode(SIG_DOMAIN.communityRoot),
+      encoder.encode(root.communityId),
+      encoder.encode(root.ownerAccountId),
+    ),
+    fromStdB64(root.ownerSig),
+  )
 }
 
 /** communityId:deviceId pairs we've already sealed a grant to this session. */

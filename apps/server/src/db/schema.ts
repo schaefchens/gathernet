@@ -528,6 +528,11 @@ export const communities = pgTable('communities', {
   ownerAccountId: text('owner_account_id')
     .notNull()
     .references(() => accounts.accountId),
+  /** Owner-device attestation of ownership (capability-chain root): the device that
+   *  signed it + Ed25519(ownerDeviceKey, domain.communityRoot ‖ communityId ‖
+   *  ownerAccountId). Nullable — communities predating identity-signed capabilities. */
+  rootDeviceId: text('root_device_id').references(() => devices.deviceId),
+  rootSig: bytea('root_sig'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -583,6 +588,40 @@ export const communityKeyEpochs = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.communityId, t.keyEpoch] })],
+)
+
+/**
+ * Identity-signed membership/role capabilities (server relays ciphertext-of-trust
+ * only — it never issues or is trusted for them). `scope` = 'community' or a
+ * channelId; `role` = owner|leader|member|moderator. Verified client-side against
+ * the pinned owner root. One row per (community, scope, subject, epoch); old epochs
+ * pruned with the key grants they ride alongside (revocation = not re-issued).
+ */
+export const membershipCapabilities = pgTable(
+  'membership_capabilities',
+  {
+    communityId: text('community_id')
+      .notNull()
+      .references(() => communities.communityId),
+    scope: text('scope').notNull(),
+    subjectAccountId: text('subject_account_id')
+      .notNull()
+      .references(() => accounts.accountId),
+    epoch: integer('epoch').notNull(),
+    role: text('role').notNull(),
+    issuerDeviceId: text('issuer_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    issuerSig: bytea('issuer_sig').notNull(),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => accounts.accountId),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.communityId, t.scope, t.subjectAccountId, t.epoch] }),
+    index('membership_capabilities_subject_idx').on(t.communityId, t.subjectAccountId),
+  ],
 )
 
 export const communityMembers = pgTable(

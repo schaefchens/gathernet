@@ -343,6 +343,45 @@ export const keyCommitmentSchema = z.object({
   minterSig: z.base64(),
 })
 
+/* ----------------- identity-signed membership/role capabilities ----------- */
+
+/** owner|leader|member (community scope) or moderator|member (a channel scope). */
+export const capabilityRoleSchema = z.enum(['owner', 'leader', 'member', 'moderator'])
+export type CapabilityRole = z.infer<typeof capabilityRoleSchema>
+
+/**
+ * An identity-signed membership/role capability: an issuer device (cert-chained to
+ * its account) attests that `subjectAccountId` holds `role` in `communityId` at
+ * `scope` ('community' or a channelId) for `epoch`. Verified client-side against the
+ * pinned community owner root — the server relays it but is never trusted for
+ * membership. `issuerSig = Ed25519(issuerDeviceKey, domain.membershipCap ‖
+ * communityId ‖ scope ‖ subjectAccountId ‖ role ‖ epoch)`.
+ */
+export const membershipCapabilitySchema = z.object({
+  communityId: communityIdSchema,
+  scope: z.string().min(1).max(64),
+  subjectAccountId: accountIdSchema,
+  role: capabilityRoleSchema,
+  epoch: z.number().int().nonnegative(),
+  issuerDeviceId: deviceIdSchema,
+  issuerSig: z.base64(),
+})
+export type MembershipCapability = z.infer<typeof membershipCapabilitySchema>
+
+/**
+ * The community owner's device attestation of ownership — the root every capability
+ * chain terminates at. `ownerSig = Ed25519(ownerDeviceKey, domain.communityRoot ‖
+ * communityId ‖ ownerAccountId)`. The `ownerAccountId` is pinned client-side from
+ * the out-of-band invite, so a compromised server can't swap the owner.
+ */
+export const communityRootSchema = z.object({
+  communityId: communityIdSchema,
+  ownerAccountId: accountIdSchema,
+  ownerDeviceId: deviceIdSchema,
+  ownerSig: z.base64(),
+})
+export type CommunityRoot = z.infer<typeof communityRootSchema>
+
 /**
  * A community member device that can receive a K_meta grant. The caller
  * authenticates `receiptPk` itself: verify `certSig` over `deviceCert` under the

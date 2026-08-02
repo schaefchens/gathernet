@@ -26,6 +26,15 @@ export const SIG_DOMAIN = {
   /** As channelKeyCommit but for a community's K_meta (community_key_epochs) —
    *  binds a K_meta grant to its community+epoch. */
   communityKeyCommit: 'gathernet-community-key-commit-v1',
+  /** Ed25519(issuerDK, domain.membershipCap || communityId || scope || subjectAccountId
+   *  || role || epoch) — an identity-signed (via the issuer's cert-chained device)
+   *  attestation that an account holds a role in a community/channel at an epoch, so
+   *  honest clients stop trusting the server's membership rows. */
+  membershipCap: 'gathernet-membership-cap-v1',
+  /** Ed25519(ownerDK, domain.communityRoot || communityId || ownerAccountId) — the
+   *  owner's device attesting community ownership; the root all capabilities chain to
+   *  (the owner accountId is pinned client-side from the out-of-band invite). */
+  communityRoot: 'gathernet-community-root-v1',
 } as const
 
 export const displayNameSchema = z.string().trim().min(1).max(64)
