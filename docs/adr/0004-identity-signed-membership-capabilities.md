@@ -116,6 +116,38 @@ The server relays caps + the root opaquely (POST `.../capabilities`, GET
 `.../devices/:deviceId`, POST `.../root`); it never mints or validates the Ed25519
 chain, and pins stored caps to the community's current epoch.
 
+### group_key channel forward secrecy (minter authority + fail-closed send)
+
+For group_key channels the epoch key (K_channel) is minted by a manager and
+distributed per-device; a removed member's cached key must stop being used. This
+milestone closes the "who may mint" + "never send under a superseded key" gaps:
+
+- **Channel-scope moderator caps** `{scope: channelId, role: 'moderator', epoch:
+  community.keyEpoch}` — community-epoch anchored (single namespace, stable across
+  channel rotations), issued by owner/leader on the open sweep, eagerly inside
+  `rotateCommunity`, and on promotion.
+- **Minter authority** (`verifyCommitment` → `authorizedChannelMinter`): a K_channel
+  epoch is ADOPTED only if its commitment's minter is the owner, a community-leader
+  cap, or a moderator cap at that channel — role-checked (`holdsRole`, not the
+  role-agnostic `accountHoldsCap`), chained to the pinned owner at the held epoch,
+  minter resolved via the targeted single-device endpoint (no roster enum).
+- **Locally-trusted monotonic epoch high-water** (per channel, persisted). Advanced
+  from our own rotations and — crucially — from any **signature-valid** commitment at
+  a higher epoch (a member signed a rotation → one happened), NOT from a server epoch
+  scalar and NOT gated on authority. `sendGroupKey` refuses to send while
+  `heldEpoch < highWater` (`rotation_pending` status, composer paused), so it never
+  seals under a key a removed member holds — even in a window where the minter's
+  authority can't yet be verified. Authority is still required to ADOPT the key, so an
+  unauthorized fork is not adopted; a sig-valid-but-unauthorized higher commitment
+  only makes us fail *closed* (stop sending), never adopt.
+- **Receive write-gate**: a group_key message is displayed only if its (cert-verified)
+  sender holds a current membership cap — so a removed member holding a retained old
+  key can't keep posting. Targeted lookup, cached per (community, epoch, account).
+- **Demotion revocation**: `setModerator('unset')` deletes the mod's channel cap
+  immediately (relay honesty) AND requests a K_meta rotation; `setMemberRole(→member)`
+  requests a rotation. The epoch bump + freshness pin invalidate the stale cap even
+  for clients that cached it (the cap PK blocks same-epoch supersession).
+
 ## Consequences
 
 - A compromised server can no longer make an honest client leak **K_meta** to an
@@ -129,18 +161,22 @@ chain, and pins stored caps to the community's current epoch.
 
 ## Deferred (explicit follow-ups)
 
-- **Channel-scope caps (per-channel authorization) + the fetch-path
-  minter-authority check.** All three landed gates verify *community* membership
-  (block an outsider), not *which* member is authorized in *which* channel, and no
-  gate verifies the epoch-commitment minter. A review confirmed the minter check has
-  a sharp, non-self-healing hazard: a channel-moderator-minted rotation would be
-  rejected by every fetcher until an owner/leader re-issues the moderator's cap, and
-  because `rotationPending` self-clears on the successful CAS, `sendGroupKey` would
-  silently fall back to the *old* epoch — readable by the removed member — defeating
-  the rotation's forward secrecy and partitioning the channel. Landing it safely
-  needs channel-scope caps anchored to the community epoch (so a mod holds stable
-  authority) **and** a rotation re-mint that never falls back to a stale epoch. Until
-  then, community-scope enforcement is the shipped protection.
+- **Decouple channel-minter authority from the K_meta epoch (owner-availability
+  liveness).** Moderator caps chain through a community-LEADER cap, which only the
+  OWNER mints. After a *leader-driven* K_meta rotation, no leader cap exists at the
+  new epoch until the owner is next active, so moderator- and leader-minted channel
+  rotations can't be authority-verified in that window → affected group_key channels
+  go **fail-closed (send paused, no leak)** until the owner re-issues. This is safe
+  but a real liveness coupling at 100k scale (frequent rotations). The durable fix is
+  a longer-lived, owner-signed authority delegation (a separate authority epoch that
+  bumps only on demotion) so channel authority survives key rotations — its own
+  design + review pass.
+- **Cross-device forward-secrecy high-water.** The epoch high-water is per-device
+  (localStorage); a freshly-restored device starts at 0 and relies on one honest
+  fetch before its first send. Propagating it under the (authenticated) K_meta store
+  would shrink the exposed set. The pure-partition residual (a server withholding
+  BOTH the grant AND the rotation commitment from a chosen sender) is fundamental —
+  documented, not closable at the app layer.
 - **Full MLS-join prevention** — the M3 mls-rs sub-credential work (a crate change);
   the overlay here is detection + containment only.
 - **A signed Merkle roster** for very-large-community capability issuance.

@@ -205,6 +205,11 @@ class CommunityChatStore {
    *  so a server injecting random unknown ids can't force an O(members) refetch +
    *  re-verify per frame. Cleared on reconnect so genuinely-new devices resolve. */
   private unresolvedSenders = new Set<string>()
+  /** `communityId:epoch:accountId` → whether a group_key message sender holds a valid
+   *  membership cap (so a REMOVED member holding a retained old key can't keep
+   *  posting). Keyed by epoch → self-heals on rotation; only reached by cert-verified
+   *  senders, so a server can't amplify it with fake accounts. */
+  private memberCapCache = new Map<string, boolean>()
 
   async init(record: DeviceRecord): Promise<void> {
     this.crypto = await loadCrypto()
@@ -285,6 +290,7 @@ class CommunityChatStore {
         // Drop cached sender lookups so devices added while we were offline resolve.
         this.senderCerts.clear()
         this.unresolvedSenders.clear()
+        this.memberCapCache.clear() // re-check membership (a just-issued cap resolves)
         this.resubscribeChannels()
         void this.catchUpAll()
         void this.sweepRotations()
@@ -409,6 +415,7 @@ class CommunityChatStore {
     this.groupKey = new Map()
     this.senderCerts = new Map()
     this.unresolvedSenders = new Set()
+    this.memberCapCache = new Map()
     forgetKMetaCache()
     forgetChannelKeyCache()
     useCommunityChat.setState({ channels: {}, messages: {} })
@@ -483,6 +490,34 @@ class CommunityChatStore {
   }
 
   /**
+   * Whether a group_key message sender's account is a CURRENT community member —
+   * holds a valid membership capability chained to the pinned owner at the held
+   * epoch. Uses TARGETED lookups (single cap + single device, no roster enum —
+   * honours the big-group no-roster constraint). Degrades to accept when there's no
+   * pinned owner / no held K_meta. Cached per (community, epoch, account).
+   */
+  private async senderIsMember(communityId: string, accountId: string): Promise<boolean> {
+    const ownerAccountId = await getPinnedOwner(communityId)
+    const epoch = await getKMetaEpoch(communityId)
+    if (!ownerAccountId || epoch < 0) return true // legacy/degraded — can't verify
+    const cacheKey = `${communityId}:${epoch}:${accountId}`
+    const cached = this.memberCapCache.get(cacheKey)
+    if (cached !== undefined) return cached
+    const resolve = makeDeviceResolver([], { communityId })
+    const getCap = makeCapFetcher(communityId)
+    const ok = await accountHoldsCap(
+      COMMUNITY_SCOPE,
+      accountId,
+      ownerAccountId,
+      resolve,
+      getCap,
+      epoch,
+    )
+    this.memberCapCache.set(cacheKey, ok)
+    return ok
+  }
+
+  /**
    * Ordered mailbox catch-up for a group_key channel: fetch ciphertext after the
    * cursor, decrypt + verify each in seq order, store, ack. Malformed frames and
    * old-epoch history (never grantable) are skipped; it stalls (leaving the
@@ -501,6 +536,10 @@ class CommunityChatStore {
       this.setCursor(channelId, m.seq)
       await wsClient.send('chat.ack', { groupId: channelId, seq: m.seq }).catch(() => {})
     }
+    // A newly-adopted epoch here (or an advanced high-water from a seen commitment)
+    // may resolve or trigger the fail-closed composer state — reflect it now so the
+    // composer isn't left stuck without a send attempt.
+    await this.refreshRotationPending(channelId)
   }
 
   private async ingestGroupKeyMessage(
@@ -547,6 +586,11 @@ class CommunityChatStore {
       resolveSender: (id) => this.resolveSender(communityId, id),
     })
     if (opened) {
+      // WRITE GATE: the sender must be a CURRENT community member (cap chained to the
+      // pinned owner) — a removed member holding a retained old-epoch key must not be
+      // able to keep posting authentic-looking messages. Cert-verified senders only
+      // reach here, so this can't be amplified with fake accounts.
+      if (!(await this.senderIsMember(communityId, opened.senderAccountId))) return true
       // Persisted per-(channel,sender) high-water senderSeq — survives reloads so
       // a compromised server can't replay a signed old envelope at a fresh seq.
       const seqKey = `gn.gkss.${channelId}.${opened.senderDeviceId}`

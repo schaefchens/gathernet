@@ -221,24 +221,27 @@ async function verifyCommitment(
 }
 
 /**
- * The KEY-INDEPENDENT half of commitment verification: the commitment's minter
- * signature (bound to channelId+epoch) is valid AND the minter is an authorised
- * manager chained to the pinned owner at the held epoch. Runs without the K_channel
- * itself, so a client that only sees the commitment (server withholds the grant) can
- * still learn that an AUTHORISED rotation to `epoch` happened — which advances the
- * forward-secrecy high-water so the sender fails closed instead of leaking under the
- * old epoch. Degrades to sig-only when there's no pinned owner / no held K_meta.
+ * The SIGNATURE half of commitment verification (no key, no authority): the
+ * commitment is signed, bound to channelId+epoch, by a resolvable member device.
+ * A valid signature at a higher epoch is proof that SOME member rotated the channel
+ * — enough to advance the forward-secrecy high-water so a sender fails CLOSED rather
+ * than sealing under the old key, EVEN when we can't (yet) verify the minter's
+ * authority (e.g. the leader-cap-stale window right after a leader-driven K_meta
+ * rotation). A mere member can't get their commitment served as current without the
+ * server's manager gate + CAS, and a compromised server can already wedge by
+ * withholding grants — so advancing on the signature adds no new wedge power while
+ * closing the leak. Authority is still required to ADOPT the key (verifyCommitment).
  */
-async function verifyCommitmentAuthority(
+async function verifyCommitmentSigner(
   communityId: string,
   channelId: string,
   epoch: number,
   commitment: KeyCommitment,
-): Promise<boolean> {
+): Promise<{ minterAccountId: string; resolve: DeviceResolver } | null> {
   try {
     const resolve = makeDeviceResolver([], { communityId })
     const minter = await resolve(commitment.minterDeviceId)
-    if (!minter) return false
+    if (!minter) return null
     const mls = await loadCrypto()
     const sigOk = mls.ed25519Verify(
       minter.devicePk,
@@ -250,23 +253,38 @@ async function verifyCommitmentAuthority(
       ),
       fromStdB64(commitment.minterSig),
     )
-    if (!sigOk) return false
-
-    const ownerAccountId = await getPinnedOwner(communityId)
-    const expectedEpoch = await getKMetaEpoch(communityId)
-    if (!ownerAccountId || expectedEpoch < 0) return true // legacy/degraded (no anchor)
-    const getCap = makeCapFetcher(communityId)
-    return authorizedChannelMinter(
-      channelId,
-      minter.accountId,
-      ownerAccountId,
-      resolve,
-      getCap,
-      expectedEpoch,
-    )
+    return sigOk ? { minterAccountId: minter.accountId, resolve } : null
   } catch {
-    return false
+    return null
   }
+}
+
+/**
+ * The KEY-INDEPENDENT authority check: the commitment is signed (above) AND its
+ * minter is an authorised manager (owner / community-leader / this-channel
+ * moderator) chained to the pinned owner at the held epoch. Required to ADOPT a
+ * fetched key. Degrades to sig-only when there's no pinned owner / no held K_meta.
+ */
+async function verifyCommitmentAuthority(
+  communityId: string,
+  channelId: string,
+  epoch: number,
+  commitment: KeyCommitment,
+): Promise<boolean> {
+  const signer = await verifyCommitmentSigner(communityId, channelId, epoch, commitment)
+  if (!signer) return false
+  const ownerAccountId = await getPinnedOwner(communityId)
+  const expectedEpoch = await getKMetaEpoch(communityId)
+  if (!ownerAccountId || expectedEpoch < 0) return true // legacy/degraded (no anchor)
+  const getCap = makeCapFetcher(communityId)
+  return authorizedChannelMinter(
+    channelId,
+    signer.minterAccountId,
+    ownerAccountId,
+    signer.resolve,
+    getCap,
+    expectedEpoch,
+  )
 }
 
 /* --------------------- forward-secrecy epoch high-water ------------------- */
@@ -496,13 +514,14 @@ export async function fetchChannelKeyGrant(
       'GET',
       `/api/v1/communities/${communityId}/channels/${channelId}/key-grants/mine`,
     )
-    // Advance the forward-secrecy high-water from an AUTHORISED commitment even when
-    // the grant is withheld — so a server that serves the (authorised) rotation
-    // commitment but drops our grant can't keep us sealing under the old epoch: the
-    // sender will fail closed. The commitment sig+authority need no key.
+    // Advance the forward-secrecy high-water from a SIGNATURE-valid commitment at a
+    // higher epoch — proof a member rotated the channel — EVEN when we can't verify
+    // the minter's authority yet (leader-cap-stale window) or the grant is withheld.
+    // This is what makes the sender fail CLOSED (stop sending) instead of leaking
+    // under the old key. Authority is still required to ADOPT the key (below).
     if (
       res.commitment &&
-      (await verifyCommitmentAuthority(communityId, channelId, res.keyEpoch, res.commitment))
+      (await verifyCommitmentSigner(communityId, channelId, res.keyEpoch, res.commitment))
     ) {
       bumpChannelEpochHighWater(channelId, res.keyEpoch)
     }
