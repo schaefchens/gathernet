@@ -7,6 +7,7 @@ import type {
   ChannelMemberRole,
   ChannelMyStatus,
   CommunityDetailResponse,
+  CommunityDevice,
   CommunityDevicesResponse,
   CommunityId,
   CommunityListItem,
@@ -1727,6 +1728,53 @@ export async function listCommunityDevices(
   // Cursor advances by the raw device page (some rows may be filtered above).
   const nextCursor = rows.length === pageSize ? (rows[rows.length - 1]?.deviceId ?? null) : null
   return { keyEpoch: community.keyEpoch, devices: list, nextCursor }
+}
+
+/**
+ * A single active-member device by id (its cert) — lets a capability verifier
+ * resolve a cap's issuer device regardless of which page of a 100k-device roster
+ * it falls on, without enumerating the whole list. Active-member gated; returns
+ * null for an unknown/inactive device (the caller bounds how many it fetches).
+ */
+export async function getCommunityDevice(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  deviceId: string,
+): Promise<{ device: CommunityDevice | null }> {
+  await requireActiveMembership(db, communityId, accountId)
+  const rows = await db
+    .select({
+      accountId: devices.accountId,
+      deviceId: devices.deviceId,
+      cert: devices.cert,
+      certSig: devices.certSig,
+      receiptPk: devices.receiptPk,
+      receiptPkSig: devices.receiptPkSig,
+    })
+    .from(communityMembers)
+    .innerJoin(devices, eq(devices.accountId, communityMembers.accountId))
+    .where(
+      and(
+        eq(communityMembers.communityId, communityId),
+        eq(communityMembers.status, 'active'),
+        eq(devices.status, 'active'),
+        eq(devices.deviceId, deviceId),
+      ),
+    )
+    .limit(1)
+  const r = rows[0]
+  if (!r || !r.receiptPk || !r.receiptPkSig) return { device: null }
+  return {
+    device: {
+      accountId: r.accountId as AccountId,
+      deviceId: r.deviceId as DeviceId,
+      deviceCert: r.cert.toString('base64'),
+      certSig: r.certSig.toString('base64'),
+      receiptPk: r.receiptPk.toString('base64'),
+      receiptPkSig: r.receiptPkSig.toString('base64'),
+    },
+  }
 }
 
 /** Store K_meta grants (ciphertext only) for active-member devices. Idempotent. */

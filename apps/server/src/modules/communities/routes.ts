@@ -41,6 +41,7 @@ import {
   getCapability,
   getChannelJoinInfo,
   getCommunityDetail,
+  getCommunityDevice,
   getCommunityMedia,
   joinChannel,
   joinChannelByCode,
@@ -260,6 +261,15 @@ export function registerCommunityRoutes(
     const { after, limit } = paginationQuerySchema.parse(request.query)
     return listCommunityDevices(db, session.accountId, request.params.id, after, limit)
   })
+
+  app.get<{ Params: { id: string; deviceId: string } }>(
+    '/api/v1/communities/:id/devices/:deviceId',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      return getCommunityDevice(db, session.accountId, request.params.id, request.params.deviceId)
+    },
+  )
 
   app.get<{ Params: { id: string } }>(
     '/api/v1/communities/:id/key-grants/mine',

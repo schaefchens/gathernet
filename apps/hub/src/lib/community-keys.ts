@@ -22,6 +22,7 @@ import {
   type CapabilityRole,
   type CommunityDetailResponse,
   type CommunityDevice,
+  type CommunityDeviceResponse,
   type CommunityDevicesResponse,
   type CommunityId,
   type CommunityMembersPageResponse,
@@ -477,21 +478,44 @@ export async function verifyCapability(
 
 /* --------------------------- enforcement helpers --------------------------- */
 
+type DeviceCertLike = Pick<CommunityDevice, 'deviceId' | 'accountId' | 'deviceCert' | 'certSig'>
+
 /**
  * A DeviceResolver over a fetched member-device list: resolves a deviceId to its
  * cert-authenticated {devicePk, accountId} (server never trusted), memoised.
+ *
+ * `fetchOpts` enables bounded fetch-on-miss for the PAGED channel-grant path, where
+ * a cap's issuer device may live on a roster page we haven't loaded: an unseen id is
+ * fetched via the single-device endpoint, but at most `maxFetch` times per resolver
+ * — so a compromised server can't amplify (caps referencing thousands of distinct
+ * bogus issuer ids → thousands of round-trips). Misses beyond the cap resolve null.
  */
 export function makeDeviceResolver(
-  devices: Pick<CommunityDevice, 'deviceId' | 'accountId' | 'deviceCert' | 'certSig'>[],
+  devices: DeviceCertLike[],
+  fetchOpts?: { communityId: string; maxFetch?: number },
 ): DeviceResolver {
-  const byId = new Map<string, (typeof devices)[number]>(devices.map((d) => [d.deviceId, d]))
+  const byId = new Map<string, DeviceCertLike>(devices.map((d) => [d.deviceId, d]))
   const cache = new Map<string, { devicePk: Uint8Array; accountId: string } | null>()
+  const maxFetch = fetchOpts?.maxFetch ?? 64
+  let fetched = 0
   return async (deviceId) => {
     if (cache.has(deviceId)) return cache.get(deviceId) ?? null
-    const d = byId.get(deviceId)
-    const res = d ? await verifyDeviceCert(d) : null
-    cache.set(deviceId, res)
-    return res
+    let d = byId.get(deviceId)
+    if (!d && fetchOpts && fetched < maxFetch) {
+      fetched++
+      try {
+        const res = await api<CommunityDeviceResponse>(
+          'GET',
+          `/api/v1/communities/${fetchOpts.communityId}/devices/${deviceId}`,
+        )
+        d = res.device ?? undefined
+      } catch {
+        d = undefined
+      }
+    }
+    const resolved = d ? await verifyDeviceCert(d) : null
+    cache.set(deviceId, resolved)
+    return resolved
   }
 }
 

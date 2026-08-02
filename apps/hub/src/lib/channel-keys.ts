@@ -29,9 +29,43 @@ import {
   SIG_DOMAIN,
 } from '@gathernet/shared'
 import { ApiError, api } from './api.ts'
-import { fromStdB64, toStdB64, verifyDeviceCert, verifyPeerReceiptKey } from './community-keys.ts'
+import {
+  accountHoldsCap,
+  type CapabilityFetcher,
+  COMMUNITY_SCOPE,
+  type DeviceResolver,
+  fromStdB64,
+  getKMetaEpoch,
+  getPinnedOwner,
+  makeCapFetcher,
+  makeDeviceResolver,
+  toStdB64,
+  verifyDeviceCert,
+  verifyPeerReceiptKey,
+} from './community-keys.ts'
 import { loadCrypto } from './mls.ts'
 import { channelKeyStore, type DeviceRecord } from './storage.ts'
+
+/**
+ * The recipient capability gate for a channel-key grant sweep, built ONCE per sweep
+ * (shared across pages so the resolver/fetcher memoise). K_channel is sealed to a
+ * device only if its account holds a valid COMMUNITY-scope membership capability
+ * chained to the pinned owner at the locally-held community epoch — so a server-
+ * injected outsider device gets no channel content. Null when no owner is pinned or
+ * the manager holds no K_meta (can't establish the trusted epoch → legacy sealing).
+ *
+ * Scope note: this gates COMMUNITY membership (blocks an outsider). Per-channel
+ * authorisation (channel-scope caps) + the fetch-path minter-authority check remain
+ * the documented follow-up (see ADR 0004) — they need channel-scope caps anchored to
+ * the community epoch + a rotation re-mint that doesn't wedge moderator-run channels.
+ */
+interface ChannelGrantGate {
+  ownerAccountId: string
+  expectedEpoch: number
+  myAccountId: string
+  resolve: DeviceResolver
+  getCap: CapabilityFetcher
+}
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -450,6 +484,22 @@ export async function grantChannelKey(
   epoch: number,
 ): Promise<void> {
   const commitment = await buildCommitment(channelId, epoch, key, record)
+  // Build the recipient capability gate ONCE (shared across pages → memoised
+  // resolver/fetcher, no per-page re-fetch). The community epoch comes from our
+  // locally-held K_meta (never the relay); the issuer resolver may fetch-on-miss
+  // (bounded) since a cap's issuer can be on any roster page.
+  const ownerAccountId = await getPinnedOwner(communityId)
+  const communityEpoch = await getKMetaEpoch(communityId)
+  const gate: ChannelGrantGate | null =
+    ownerAccountId && communityEpoch >= 0
+      ? {
+          ownerAccountId,
+          expectedEpoch: communityEpoch,
+          myAccountId: record.accountId,
+          resolve: makeDeviceResolver([], { communityId }),
+          getCap: makeCapFetcher(communityId),
+        }
+      : null
   let commitmentPosted = false
   let after: string | undefined
   // Page the (possibly 100k) device list (server caps a page at DEVICE_PAGE);
@@ -466,8 +516,11 @@ export async function grantChannelKey(
     } catch {
       return // offline / not a manager — a later sync retries
     }
-    const grants = await buildChannelGrants(page.devices, key, (id) =>
-      granted.has(`${channelId}:${epoch}:${id}`),
+    const grants = await buildChannelGrants(
+      page.devices,
+      key,
+      (id) => granted.has(`${channelId}:${epoch}:${id}`),
+      gate,
     )
     if (grants.length > 0) {
       try {
@@ -495,12 +548,29 @@ async function buildChannelGrants(
   devices: CommunityDevice[],
   key: Uint8Array,
   skip: (deviceId: string) => boolean,
+  gate: ChannelGrantGate | null,
 ): Promise<{ granteeDeviceId: string; sealedKey: string; senderPkB64: string }[]> {
   const grants: { granteeDeviceId: string; sealedKey: string; senderPkB64: string }[] = []
   for (const d of devices) {
     if (skip(d.deviceId)) continue
     const receiptPk = await verifyPeerReceiptKey(d)
     if (!receiptPk) continue
+    // Own other devices are always granted (recovering MY key to MY device leaks
+    // nothing); everyone else must hold a valid community membership cap.
+    if (
+      gate &&
+      d.accountId !== gate.myAccountId &&
+      !(await accountHoldsCap(
+        COMMUNITY_SCOPE,
+        d.accountId,
+        gate.ownerAccountId,
+        gate.resolve,
+        gate.getCap,
+        gate.expectedEpoch,
+      ))
+    ) {
+      continue // no valid current-epoch membership cap → server-injected; skip
+    }
     const sealed = await eciesSeal(receiptPk, key)
     grants.push({
       granteeDeviceId: d.deviceId,

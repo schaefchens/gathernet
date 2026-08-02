@@ -391,6 +391,31 @@ describe('community lifecycle + encrypted metadata', () => {
     ).toBe(404)
   })
 
+  it('single-device lookup resolves a member device cert; null for unknown; 404 for non-member', async () => {
+    const owner = await createUserWithReceipt('DevOwner')
+    const member = await createUserWithReceipt('DevMember')
+    const outsider = await createUser('DevOutsider')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+
+    const url = (deviceId: string) => `/api/v1/communities/${communityId}/devices/${deviceId}`
+    const hit = await app.inject({ method: 'GET', url: url(member.deviceId), headers: auth(owner) })
+    expect(hit.statusCode).toBe(200)
+    expect(hit.json().device).toMatchObject({
+      accountId: member.accountId,
+      deviceId: member.deviceId,
+    })
+    // Unknown device id → null (caller bounds how many it probes), not an error.
+    const miss = await app.inject({ method: 'GET', url: url('dv_nope'), headers: auth(owner) })
+    expect(miss.statusCode).toBe(200)
+    expect(miss.json().device).toBeNull()
+    // A non-member can't probe devices (404 — existence never leaks).
+    expect(
+      (await app.inject({ method: 'GET', url: url(member.deviceId), headers: auth(outsider) }))
+        .statusCode,
+    ).toBe(404)
+  })
+
   it('invite → accept → member visible in list with role + channel count', async () => {
     const owner = await createUser('Owner2')
     const member = await createUser('Member2')

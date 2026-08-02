@@ -433,6 +433,12 @@ export const communityDevicesResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 })
 
+/** A single member device by id (capability-issuer resolution across paged rosters). */
+export const communityDeviceResponseSchema = z.object({
+  device: communityDeviceSchema.nullable(),
+})
+export type CommunityDeviceResponse = z.infer<typeof communityDeviceResponseSchema>
+
 export const keyGrantSchema = z.object({
   granteeDeviceId: deviceIdSchema,
   /** eciesSeal(receiptPk, K_meta) */
