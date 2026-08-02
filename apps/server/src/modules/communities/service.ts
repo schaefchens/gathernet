@@ -1208,6 +1208,11 @@ export async function setModerator(
       and(eq(channelMembers.channelId, channelId), eq(channelMembers.accountId, targetAccountId)),
     )
   await announceChannelMember(db, registry, communityId, channelId, targetAccountId, 'active', role)
+  // Demotion (moderator→member) must invalidate the demoted account's moderator
+  // capability (the group_key rotation-minter authority). Like leader demotion,
+  // revocation rides a K_meta epoch bump: request a rotation so caps are re-issued
+  // at the new epoch WITHOUT the demoted moderator's, and its stale cap fails the pin.
+  if (action === 'unset') await requestRotation(db, registry, communityId)
 }
 
 /**
@@ -1468,6 +1473,12 @@ export async function setMemberRole(
       role,
     },
   })
+  // Demotion (leader→member) must invalidate the demoted account's still-valid
+  // leader capability. Caps are pinned to community.keyEpoch and the cap PK blocks
+  // same-epoch supersession, so revocation must ride an epoch bump: request a K_meta
+  // rotation. A leader's client re-issues caps at the new epoch WITHOUT the demoted
+  // leader's, and its stale old-epoch cap fails the freshness pin.
+  if (role === 'member') await requestRotation(db, registry, communityId)
 }
 
 /**

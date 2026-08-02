@@ -416,6 +416,34 @@ describe('community lifecycle + encrypted metadata', () => {
     ).toBe(404)
   })
 
+  it('demoting a leader flags a K_meta rotation (capability revocation rides the epoch bump)', async () => {
+    const owner = await createUser('DemoteOwner')
+    const leader = await createUser('DemoteLeader')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, leader)
+    const roleUrl = `/api/v1/communities/${communityId}/members/${leader.accountId}/role`
+
+    // Promotion does NOT rotate (no cap needs invalidating).
+    const up = await app.inject({
+      method: 'POST',
+      url: roleUrl,
+      headers: auth(owner),
+      payload: { role: 'leader' },
+    })
+    expect(up.statusCode).toBe(200)
+    expect((await detail(owner, communityId)).json().community.rotationPending).toBe(false)
+
+    // Demotion flags a rotation so the demoted leader's stale leader cap is revoked.
+    const down = await app.inject({
+      method: 'POST',
+      url: roleUrl,
+      headers: auth(owner),
+      payload: { role: 'member' },
+    })
+    expect(down.statusCode).toBe(200)
+    expect((await detail(owner, communityId)).json().community.rotationPending).toBe(true)
+  })
+
   it('invite → accept → member visible in list with role + channel count', async () => {
     const owner = await createUser('Owner2')
     const member = await createUser('Member2')
