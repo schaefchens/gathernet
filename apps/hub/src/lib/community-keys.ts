@@ -18,6 +18,7 @@
 import {
   type AccountId,
   base58Encode,
+  type CapabilityResponse,
   type CapabilityRole,
   type CommunityDetailResponse,
   type CommunityDevice,
@@ -463,6 +464,90 @@ export async function verifyCapability(
   return false
 }
 
+/* --------------------------- enforcement helpers --------------------------- */
+
+/**
+ * A DeviceResolver over a fetched member-device list: resolves a deviceId to its
+ * cert-authenticated {devicePk, accountId} (server never trusted), memoised.
+ */
+export function makeDeviceResolver(
+  devices: Pick<CommunityDevice, 'deviceId' | 'accountId' | 'deviceCert' | 'certSig'>[],
+): DeviceResolver {
+  const byId = new Map<string, (typeof devices)[number]>(devices.map((d) => [d.deviceId, d]))
+  const cache = new Map<string, { devicePk: Uint8Array; accountId: string } | null>()
+  return async (deviceId) => {
+    if (cache.has(deviceId)) return cache.get(deviceId) ?? null
+    const d = byId.get(deviceId)
+    const res = d ? await verifyDeviceCert(d) : null
+    cache.set(deviceId, res)
+    return res
+  }
+}
+
+/** A CapabilityFetcher backed by the server relay (current epoch), memoised per sweep. */
+export function makeCapFetcher(communityId: string): CapabilityFetcher {
+  const cache = new Map<string, MembershipCapability | null>()
+  return async (scope, accountId) => {
+    const k = `${scope}:${accountId}`
+    if (cache.has(k)) return cache.get(k) ?? null
+    let cap: MembershipCapability | null = null
+    try {
+      const q = new URLSearchParams({ scope, account: accountId })
+      const res = await api<CapabilityResponse>(
+        'GET',
+        `/api/v1/communities/${communityId}/capabilities?${q}`,
+      )
+      cap = res.capability
+    } catch {
+      cap = null
+    }
+    cache.set(k, cap)
+    return cap
+  }
+}
+
+/**
+ * Whether `accountId` holds a valid membership capability at `scope`, chained to
+ * the pinned owner — the gate before sealing a key to that account's device.
+ */
+export async function accountHoldsCap(
+  scope: string,
+  accountId: string,
+  ownerAccountId: string,
+  resolve: DeviceResolver,
+  getCap: CapabilityFetcher,
+): Promise<boolean> {
+  const cap = await getCap(scope, accountId)
+  return (
+    !!cap &&
+    cap.subjectAccountId === accountId &&
+    verifyCapability(cap, ownerAccountId, resolve, getCap)
+  )
+}
+
+/**
+ * Whether the device that minted an epoch key was authorised to: the pinned owner,
+ * or an account holding a valid community-leader cap. (Channel-moderator minters +
+ * channel-scope caps are the documented follow-up; K_meta minters are owner/leaders.)
+ */
+export async function authorizedManager(
+  minterDeviceId: string,
+  ownerAccountId: string,
+  resolve: DeviceResolver,
+  getCap: CapabilityFetcher,
+): Promise<boolean> {
+  const minter = await resolve(minterDeviceId)
+  if (!minter) return false
+  if (minter.accountId === ownerAccountId) return true
+  const cap = await getCap(COMMUNITY_SCOPE, minter.accountId)
+  return (
+    !!cap &&
+    cap.role === 'leader' &&
+    cap.subjectAccountId === minter.accountId &&
+    verifyCapability(cap, ownerAccountId, resolve, getCap)
+  )
+}
+
 /** The owner's device signs the community root (capability-chain anchor). */
 export async function buildCommunityRoot(
   communityId: string,
@@ -594,19 +679,39 @@ export async function verifyPeerReceiptKey(d: CommunityDevice): Promise<string |
   }
 }
 
-/** Verify + seal K_meta to a set of member devices, returning grant entries. */
+/**
+ * Verify + seal K_meta to a set of member devices, returning grant entries.
+ *
+ * Capability enforcement: when a community owner is pinned (the out-of-band trust
+ * anchor), a recipient device's account MUST hold a valid membership capability
+ * chained to that owner — so a server-injected device (which has no owner-signed
+ * cap) is skipped and never receives K_meta. With no pin (a bare-code joiner, or a
+ * pre-capability community) we can't verify, so we fall back to the legacy sealing
+ * — the same degradation bare-code K_meta already accepts.
+ */
 async function buildGrants(
+  communityId: string,
   devices: CommunityDevice[],
   myDeviceId: string,
   kMeta: Uint8Array,
   skipGranted: ((deviceId: string) => boolean) | null,
 ): Promise<{ granteeDeviceId: string; sealedKMeta: string; senderPkB64: string }[]> {
+  const ownerAccountId = await getPinnedOwner(communityId)
+  const resolve = makeDeviceResolver(devices)
+  const getCap = ownerAccountId ? makeCapFetcher(communityId) : null
   const grants: { granteeDeviceId: string; sealedKMeta: string; senderPkB64: string }[] = []
   for (const d of devices) {
     if (d.deviceId === myDeviceId) continue
     if (skipGranted?.(d.deviceId)) continue
     const receiptPk = await verifyPeerReceiptKey(d)
     if (!receiptPk) continue
+    if (
+      ownerAccountId &&
+      getCap &&
+      !(await accountHoldsCap(COMMUNITY_SCOPE, d.accountId, ownerAccountId, resolve, getCap))
+    ) {
+      continue // no valid membership cap → server-injected or not-yet-issued; skip
+    }
     const sealed = await eciesSeal(receiptPk, kMeta)
     grants.push({
       granteeDeviceId: d.deviceId,
@@ -628,7 +733,7 @@ async function grantToOthers(communityId: string, record: DeviceRecord): Promise
   )
   // Only grant the CURRENT-epoch key — never seal a stale key to others.
   if (localEpoch !== keyEpoch) return
-  const grants = await buildGrants(devices, record.deviceId, kMeta, (id) =>
+  const grants = await buildGrants(communityId, devices, record.deviceId, kMeta, (id) =>
     grantedTo.has(`${communityId}:${keyEpoch}:${id}`),
   )
   if (grants.length === 0) return
@@ -822,7 +927,7 @@ export async function rotateCommunity(communityId: string, record: DeviceRecord)
     'GET',
     `/api/v1/communities/${communityId}/devices`,
   )
-  const grants = await buildGrants(devices, record.deviceId, newKMeta, null)
+  const grants = await buildGrants(communityId, devices, record.deviceId, newKMeta, null)
   const commitment = await buildKMetaCommitment(communityId, newEpoch, newKMeta, record)
 
   try {
