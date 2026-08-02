@@ -94,7 +94,7 @@ Friend discovery uses private invites:
 - Remove.
 - Block.
 
-No global public user search is part of the initial product.
+No global public user search is part of the initial product. (and never will be)
 
 ### Presence
 
