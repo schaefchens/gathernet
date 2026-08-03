@@ -39,7 +39,34 @@ export const friendsResponseSchema = z.object({
   friends: z.array(friendSchema),
 })
 
+/**
+ * Block a friend/account for a bounded window — time-limited BY DESIGN (no permanent
+ * block; a season of space, then the door reopens). Duration in hours, capped at ~1y.
+ */
+export const blockRequestSchema = z.object({
+  durationHours: z
+    .number()
+    .int()
+    .min(1)
+    .max(24 * 365),
+})
+
+/** An active block the caller holds ("taking space from"). */
+export const blockSchema = z.object({
+  accountId: accountIdSchema,
+  displayName: z.string(),
+  /** epoch ms when the block auto-lifts */
+  expiresAt: z.number().int(),
+})
+
+export const blocksResponseSchema = z.object({
+  blocks: z.array(blockSchema),
+})
+
 export type CreateInviteRequest = z.infer<typeof createInviteRequestSchema>
 export type Invite = z.infer<typeof inviteSchema>
 export type AcceptInviteRequest = z.infer<typeof acceptInviteRequestSchema>
 export type Friend = z.infer<typeof friendSchema>
+export type BlockRequest = z.infer<typeof blockRequestSchema>
+export type Block = z.infer<typeof blockSchema>
+export type BlocksResponse = z.infer<typeof blocksResponseSchema>

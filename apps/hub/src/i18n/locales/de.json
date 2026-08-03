@@ -72,10 +72,19 @@
       "offline": "Offline",
       "invisible": "Unsichtbar"
     },
+    "actions": "Optionen",
     "remove": "Freund entfernen",
-    "removeConfirm": "{{name}} aus deinen Freunden entfernen?",
-    "block": "Blockieren",
-    "blockConfirm": "{{name}} blockieren? Eine erneute Verbindung ist dann nicht mehr möglich.",
+    "removeConfirm": "{{name}} entfernen? Ihr könnt euch später mit einer neuen Einladung wieder verbinden.",
+    "block": "Abstand nehmen",
+    "blockHint": "Einladungen von {{name}} eine Weile pausieren. Es endet von selbst – du kannst es auch früher aufheben.",
+    "blockDuration": {
+      "day": "1 Tag",
+      "week": "1 Woche",
+      "month": "30 Tage"
+    },
+    "takingSpaceTitle": "Abstand von",
+    "blockedUntil": "bis {{date}}",
+    "lift": "Jetzt aufheben",
     "chat": "Chat"
   },
   "addFriend": {

@@ -122,6 +122,9 @@ export const blocks = pgTable(
     blockedAccountId: text('blocked_account_id')
       .notNull()
       .references(() => accounts.accountId),
+    /** Time-limited by design (no permanent block) — a block is ACTIVE only while
+     *  expiresAt > now(); expiry is lazy (filtered at read time, pruned opportunistically). */
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.blockerAccountId, t.blockedAccountId] })],

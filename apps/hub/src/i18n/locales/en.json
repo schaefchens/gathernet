@@ -72,6 +72,19 @@
       "offline": "Offline",
       "invisible": "Invisible"
     },
+    "actions": "Options",
+    "remove": "Remove friend",
+    "removeConfirm": "Remove {{name}}? You can reconnect later with a new invite.",
+    "block": "Take space",
+    "blockHint": "Pause invites from {{name}} for a while. It lifts on its own — you can also lift it early.",
+    "blockDuration": {
+      "day": "1 day",
+      "week": "1 week",
+      "month": "30 days"
+    },
+    "takingSpaceTitle": "Taking space from",
+    "blockedUntil": "until {{date}}",
+    "lift": "Lift now",
     "remove": "Remove friend",
     "removeConfirm": "Remove {{name}} from your friends?",
     "block": "Block",

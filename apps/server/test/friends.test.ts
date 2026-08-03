@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
+import { blocks } from '../src/db/schema.ts'
 import { buildEnrollment, generateEd25519 } from './helpers/client-crypto.ts'
 import { makeTestDb, type TestDb } from './helpers/db.ts'
 
@@ -196,7 +197,7 @@ describe('remove and block', () => {
     expect(bobFriends.json().friends).toHaveLength(0)
   })
 
-  it('blocking severs friendship and prevents re-adding, without leaking', async () => {
+  it('time-limited block severs friendship + prevents re-adding, listed + liftable', async () => {
     const alice = await createUser('Alice9')
     const bob = await createUser('Bob9')
     await accept(bob, await makeInvite(alice))
@@ -205,6 +206,7 @@ describe('remove and block', () => {
       method: 'POST',
       url: `/api/v1/friends/${bob.accountId}/block`,
       headers: auth(alice),
+      payload: { durationHours: 24 * 7 },
     })
     expect(block.statusCode).toBe(200)
 
@@ -214,6 +216,16 @@ describe('remove and block', () => {
       headers: auth(alice),
     })
     expect(aliceFriends.json().friends).toHaveLength(0)
+
+    // The active block is listed ("taking space from") with an expiry.
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/v1/friends/blocks',
+      headers: auth(alice),
+    })
+    expect(list.json().blocks).toHaveLength(1)
+    expect(list.json().blocks[0]).toMatchObject({ accountId: bob.accountId })
+    expect(list.json().blocks[0].expiresAt).toBeGreaterThan(Date.now())
 
     // Bob accepting a new alice invite fails exactly like an unknown code.
     const code2 = await makeInvite(alice)
@@ -225,12 +237,44 @@ describe('remove and block', () => {
     const bobCode = await makeInvite(bob)
     expect((await accept(alice, bobCode)).statusCode).toBe(404)
 
-    // Unblock restores the ability to pair.
+    // A block requires a valid duration.
+    const bad = await app.inject({
+      method: 'POST',
+      url: `/api/v1/friends/${bob.accountId}/block`,
+      headers: auth(alice),
+      payload: {},
+    })
+    expect(bad.statusCode).toBe(400)
+
+    // Lifting early (unblock) restores the ability to pair.
     await app.inject({
       method: 'DELETE',
       url: `/api/v1/friends/${bob.accountId}/block`,
       headers: auth(alice),
     })
     expect((await accept(alice, bobCode)).statusCode).toBe(200)
+  })
+
+  it('an EXPIRED block no longer restricts (self-lifting; not listed)', async () => {
+    const alice = await createUser('Alice10')
+    const bob = await createUser('Bob10')
+
+    // Insert a block that already expired (a season of space that has passed).
+    await testDb.db.insert(blocks).values({
+      blockerAccountId: alice.accountId,
+      blockedAccountId: bob.accountId,
+      expiresAt: new Date(Date.now() - 60_000),
+    })
+
+    // Not surfaced in the active-blocks list.
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/v1/friends/blocks',
+      headers: auth(alice),
+    })
+    expect(list.json().blocks).toHaveLength(0)
+
+    // And it no longer suppresses invites — the door has reopened.
+    expect((await accept(bob, await makeInvite(alice))).statusCode).toBe(200)
   })
 })

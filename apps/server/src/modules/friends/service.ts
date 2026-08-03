@@ -99,14 +99,17 @@ export async function acceptInvite(
       .select()
       .from(blocks)
       .where(
-        or(
-          and(
-            eq(blocks.blockerAccountId, invite.inviterAccountId),
-            eq(blocks.blockedAccountId, accepterId),
-          ),
-          and(
-            eq(blocks.blockerAccountId, accepterId),
-            eq(blocks.blockedAccountId, invite.inviterAccountId),
+        and(
+          gt(blocks.expiresAt, new Date()), // only ACTIVE blocks suppress invites
+          or(
+            and(
+              eq(blocks.blockerAccountId, invite.inviterAccountId),
+              eq(blocks.blockedAccountId, accepterId),
+            ),
+            and(
+              eq(blocks.blockerAccountId, accepterId),
+              eq(blocks.blockedAccountId, invite.inviterAccountId),
+            ),
           ),
         ),
       )
@@ -186,15 +189,28 @@ export async function removeFriend(db: Db, accountId: string, otherId: string): 
   return deleted.length > 0
 }
 
-/** Block also severs any existing friendship. Returns true if a friendship was removed. */
-export async function blockAccount(db: Db, blockerId: string, blockedId: string): Promise<boolean> {
+/**
+ * Time-limited block: severs any existing friendship AND suppresses the blocked
+ * account's invites until `expiresAt` (no permanent block by design — a season of
+ * space, then the door reopens). Re-blocking refreshes the expiry. Returns true if a
+ * friendship was removed. `unblockAccount` lifts it early (grace).
+ */
+export async function blockAccount(
+  db: Db,
+  blockerId: string,
+  blockedId: string,
+  expiresAt: Date,
+): Promise<boolean> {
   if (blockerId === blockedId) throw new ServiceError(400, 'self_block')
   const target = await db.query.accounts.findFirst({ where: eq(accounts.accountId, blockedId) })
   if (!target) throw new ServiceError(404, 'account_not_found')
   await db
     .insert(blocks)
-    .values({ blockerAccountId: blockerId, blockedAccountId: blockedId })
-    .onConflictDoNothing()
+    .values({ blockerAccountId: blockerId, blockedAccountId: blockedId, expiresAt })
+    .onConflictDoUpdate({
+      target: [blocks.blockerAccountId, blocks.blockedAccountId],
+      set: { expiresAt },
+    })
   return removeFriend(db, blockerId, blockedId)
 }
 
@@ -204,14 +220,37 @@ export async function unblockAccount(db: Db, blockerId: string, blockedId: strin
     .where(and(eq(blocks.blockerAccountId, blockerId), eq(blocks.blockedAccountId, blockedId)))
 }
 
+/** The caller's ACTIVE (unexpired) blocks — the "taking space from" list. */
+export async function listBlocks(db: Db, blockerId: string) {
+  const rows = await db
+    .select({
+      accountId: blocks.blockedAccountId,
+      displayName: accounts.displayName,
+      expiresAt: blocks.expiresAt,
+    })
+    .from(blocks)
+    .innerJoin(accounts, eq(accounts.accountId, blocks.blockedAccountId))
+    .where(and(eq(blocks.blockerAccountId, blockerId), gt(blocks.expiresAt, new Date())))
+    .orderBy(blocks.expiresAt)
+  return rows.map((r) => ({
+    accountId: r.accountId,
+    displayName: r.displayName,
+    expiresAt: r.expiresAt.getTime(),
+  }))
+}
+
+/** Only ACTIVE (unexpired) blocks count — an expired block no longer restricts. */
 export async function isBlockedEitherWay(db: Db, a: string, b: string): Promise<boolean> {
   const rows = await db
     .select()
     .from(blocks)
     .where(
-      or(
-        and(eq(blocks.blockerAccountId, a), eq(blocks.blockedAccountId, b)),
-        and(eq(blocks.blockerAccountId, b), eq(blocks.blockedAccountId, a)),
+      and(
+        gt(blocks.expiresAt, new Date()),
+        or(
+          and(eq(blocks.blockerAccountId, a), eq(blocks.blockedAccountId, b)),
+          and(eq(blocks.blockerAccountId, b), eq(blocks.blockedAccountId, a)),
+        ),
       ),
     )
     .limit(1)

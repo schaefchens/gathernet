@@ -1,6 +1,7 @@
 import {
   type AccountId,
   acceptInviteRequestSchema,
+  blockRequestSchema,
   createInviteRequestSchema,
 } from '@gathernet/shared'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
@@ -11,6 +12,7 @@ import {
   acceptInvite,
   blockAccount,
   createInvite,
+  listBlocks,
   listFriends,
   listInvites,
   removeFriend,
@@ -99,12 +101,24 @@ export function registerFriendRoutes(
     },
   )
 
+  app.get('/api/v1/friends/blocks', { preHandler: authenticate }, async (request) => {
+    const session = requireSession(request)
+    return { blocks: await listBlocks(db, session.accountId) }
+  })
+
   app.post<{ Params: { accountId: string } }>(
     '/api/v1/friends/:accountId/block',
     { preHandler: authenticate },
     async (request) => {
       const session = requireSession(request)
-      const removedFriendship = await blockAccount(db, session.accountId, request.params.accountId)
+      const { durationHours } = blockRequestSchema.parse(request.body ?? {})
+      const expiresAt = new Date(Date.now() + durationHours * 3600 * 1000)
+      const removedFriendship = await blockAccount(
+        db,
+        session.accountId,
+        request.params.accountId,
+        expiresAt,
+      )
       if (removedFriendship) {
         notifyRemoved(registry, session.accountId, request.params.accountId)
       }
