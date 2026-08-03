@@ -62,6 +62,7 @@ import {
   parseBody,
   reactionBody,
   textBody,
+  voiceBody,
 } from '../lib/message-body.ts'
 import {
   applyDelete,
@@ -1053,6 +1054,17 @@ class CommunityChatStore {
   ): Promise<void> {
     const media = await encryptAndUpload(file)
     return this.sendBody(channelId, mediaBody(media, caption, replyTo))
+  }
+
+  /** Encrypt + upload a recorded voice note, then send it as a voice message. */
+  async sendVoice(
+    channelId: string,
+    blob: Blob,
+    durationMs: number,
+    replyTo?: string,
+  ): Promise<void> {
+    const media = await encryptAndUpload(blob, { durationMs })
+    return this.sendBody(channelId, voiceBody(media, durationMs, replyTo))
   }
 
   /** Add or remove a reaction on a channel message (both MLS + group_key channels). */

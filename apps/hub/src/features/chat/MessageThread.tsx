@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { StoredMessage } from '../../lib/storage.ts'
 import { MediaAttachment } from './MediaAttachment.tsx'
+import { VoiceRecorder } from './VoiceRecorder.tsx'
 
 interface MessageThreadProps {
   messages: StoredMessage[]
@@ -10,6 +11,8 @@ interface MessageThreadProps {
   onSend: (text: string, replyTo?: string) => Promise<void>
   /** send an encrypted attachment (image/file) with an optional caption */
   onSendMedia?: (file: File, caption?: string, replyTo?: string) => Promise<void>
+  /** send an encrypted recorded voice note */
+  onSendVoice?: (blob: Blob, durationMs: number, replyTo?: string) => Promise<void>
   /** toggle a reaction on a message (by its v2 id) */
   onReact?: (targetId: string, emoji: string, remove: boolean) => void
   /** edit one of my own messages (new text) */
@@ -54,6 +57,7 @@ export function MessageThread({
   ready,
   onSend,
   onSendMedia,
+  onSendVoice,
   onReact,
   onEdit,
   onDelete,
@@ -81,6 +85,17 @@ export function MessageThread({
       setReplyingTo(null)
     } catch (err) {
       console.error('media send failed', err)
+    }
+  }
+
+  const sendVoiceNote = async (blob: Blob, durationMs: number) => {
+    if (!onSendVoice) return
+    const replyTo = replyingTo ?? undefined
+    setReplyingTo(null)
+    try {
+      await onSendVoice(blob, durationMs, replyTo)
+    } catch (err) {
+      console.error('voice send failed', err)
     }
   }
 
@@ -360,6 +375,9 @@ export function MessageThread({
                   📎
                 </button>
               </>
+            )}
+            {onSendVoice && (
+              <VoiceRecorder disabled={!ready} onRecorded={(b, d) => void sendVoiceNote(b, d)} />
             )}
             <input
               value={draft}

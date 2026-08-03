@@ -20,6 +20,7 @@ export function MediaAttachment({ media }: { media: MediaRef }) {
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   const isImage = media.mime.startsWith('image/')
+  const isAudio = media.mime.startsWith('audio/')
 
   useEffect(() => {
     let cancelled = false
@@ -50,6 +51,17 @@ export function MediaAttachment({ media }: { media: MediaRef }) {
         alt={media.name ?? ''}
         className="rounded max-w-full max-h-64 object-contain"
       />
+    )
+  }
+  if (isAudio) {
+    return (
+      <div className="flex items-center gap-2">
+        {/* biome-ignore lint/a11y/useMediaCaption: a personal voice note has no caption track */}
+        <audio controls src={url} className="max-w-full h-9" />
+        {media.durationMs ? (
+          <span className="text-[10px] text-ink-faint">{Math.round(media.durationMs / 1000)}s</span>
+        ) : null}
+      </div>
     )
   }
   return (

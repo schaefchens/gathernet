@@ -124,7 +124,8 @@
     "deleted": "This message was deleted",
     "attach": "Attach a file",
     "download": "Download",
-    "mediaFailed": "Attachment unavailable"
+    "mediaFailed": "Attachment unavailable",
+    "recordVoice": "Record a voice note"
   },
   "settings": {
     "title": "Settings",

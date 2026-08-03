@@ -27,6 +27,7 @@ import {
   parseBody,
   reactionBody,
   textBody,
+  voiceBody,
 } from '../lib/message-body.ts'
 import {
   applyDelete,
@@ -360,6 +361,26 @@ class ChatStore {
     if (!engine || !record) throw new Error('locked')
     const media = await encryptAndUpload(file)
     const body = mediaBody(media, caption, replyTo)
+    const { seq } = await engine.sendApplication(groupId, encodeBody(body))
+    const stored = bodyToStored(groupId, seq, record.accountId, true, body)
+    if (stored) {
+      await messageStore.put(stored)
+      appendMessage(stored)
+    }
+  }
+
+  /** Encrypt + upload a recorded voice note, then send it as a voice message. */
+  async sendVoice(
+    groupId: string,
+    blob: Blob,
+    durationMs: number,
+    replyTo?: string,
+  ): Promise<void> {
+    const engine = this.engine
+    const record = this.record
+    if (!engine || !record) throw new Error('locked')
+    const media = await encryptAndUpload(blob, { durationMs })
+    const body = voiceBody(media, durationMs, replyTo)
     const { seq } = await engine.sendApplication(groupId, encodeBody(body))
     const stored = bodyToStored(groupId, seq, record.accountId, true, body)
     if (stored) {

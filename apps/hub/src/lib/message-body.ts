@@ -59,6 +59,19 @@ export function encodeBody(body: MessageBody): Uint8Array {
   return encoder.encode(JSON.stringify(body))
 }
 
+/** Build a voice-note message body (audio media + duration). */
+export function voiceBody(media: MediaRef, durationMs: number, replyTo?: string): MessageBody {
+  return {
+    v: 2,
+    id: newMessageId(),
+    ts: Date.now(),
+    kind: 'voice',
+    media,
+    durationMs,
+    ...(replyTo ? { replyTo } : {}),
+  }
+}
+
 /** Build a media (image/file) message body with an optional caption + reply. */
 export function mediaBody(media: MediaRef, caption?: string, replyTo?: string): MessageBody {
   return {

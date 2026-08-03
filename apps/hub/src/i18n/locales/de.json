@@ -124,7 +124,8 @@
     "deleted": "Diese Nachricht wurde gelöscht",
     "attach": "Datei anhängen",
     "download": "Herunterladen",
-    "mediaFailed": "Anhang nicht verfügbar"
+    "mediaFailed": "Anhang nicht verfügbar",
+    "recordVoice": "Sprachnachricht aufnehmen"
   },
   "settings": {
     "title": "Einstellungen",

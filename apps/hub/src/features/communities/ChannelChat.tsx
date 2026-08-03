@@ -128,6 +128,9 @@ export function ChannelChat({
             onSendMedia={(file, caption, replyTo) =>
               communityChatStore.sendMedia(channelId, file, caption, replyTo)
             }
+            onSendVoice={(blob, durationMs, replyTo) =>
+              communityChatStore.sendVoice(channelId, blob, durationMs, replyTo)
+            }
             onReact={(targetId, emoji, remove) =>
               communityChatStore.react(channelId, targetId, emoji, remove)
             }
