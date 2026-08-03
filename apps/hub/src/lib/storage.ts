@@ -316,6 +316,10 @@ export interface StoredMessage {
   editedAt?: number
   /** set when deleted-for-everyone; the row is kept as a tombstone */
   deletedAt?: number
+  /** view-once: content is gated behind a tap and self-destructs after first open */
+  once?: boolean
+  /** view-once has been opened → content cleared, an "opened" tombstone remains */
+  viewOnceOpened?: boolean
   sentAt: number
   outgoing: boolean
 }

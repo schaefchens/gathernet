@@ -124,12 +124,14 @@ export function ChannelChat({
           <MessageThread
             messages={messages}
             ready={status === 'ready'}
-            onSend={(text, replyTo) => communityChatStore.send(channelId, text, replyTo)}
-            onSendMedia={(file, caption, replyTo) =>
-              communityChatStore.sendMedia(channelId, file, caption, replyTo)
+            onSend={(text, replyTo, once) =>
+              communityChatStore.send(channelId, text, replyTo, once)
             }
-            onSendVoice={(blob, durationMs, replyTo) =>
-              communityChatStore.sendVoice(channelId, blob, durationMs, replyTo)
+            onSendMedia={(file, caption, replyTo, once) =>
+              communityChatStore.sendMedia(channelId, file, caption, replyTo, once)
+            }
+            onSendVoice={(blob, durationMs, replyTo, once) =>
+              communityChatStore.sendVoice(channelId, blob, durationMs, replyTo, once)
             }
             onReact={(targetId, emoji, remove) =>
               communityChatStore.react(channelId, targetId, emoji, remove)
@@ -140,6 +142,7 @@ export function ChannelChat({
             onDelete={(targetId, seq) =>
               void communityChatStore.deleteMessage(channelId, targetId, seq)
             }
+            onConsume={(targetId) => void communityChatStore.consumeViewOnce(channelId, targetId)}
             myAccountId={myAccountId ?? undefined}
             notReadyLabel={
               status === 'rotation_pending'

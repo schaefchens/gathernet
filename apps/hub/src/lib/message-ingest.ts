@@ -32,7 +32,61 @@ export function bodyToStored(
     outgoing,
     ...(body.replyTo ? { replyTo: body.replyTo } : {}),
     ...(body.kind === 'media' || body.kind === 'voice' ? { media: body.media } : {}),
+    ...(body.once ? { once: true } : {}),
   }
+}
+
+/** The "opened" tombstone a view-once message collapses to once consumed. */
+function viewOnceTombstone(msg: StoredMessage): StoredMessage {
+  return {
+    groupId: msg.groupId,
+    seq: msg.seq,
+    ...(msg.id ? { id: msg.id } : {}),
+    senderAccountId: msg.senderAccountId,
+    kind: 'text',
+    text: '',
+    sentAt: msg.sentAt,
+    outgoing: msg.outgoing,
+    once: true,
+    viewOnceOpened: true,
+  }
+}
+
+/**
+ * Apply a view-once `consume` — destroy the target's content, leaving an "opened"
+ * tombstone. ONLY acts when it's safe: the consume came from the viewer's OWN
+ * account (their other device syncing the destroy) OR I am the target's author (a
+ * recipient opened it). A channel member's consume for a message I received is
+ * IGNORED — nobody but the viewer or the author can destroy a copy (anti-grief).
+ * Returns the tombstone + the pre-clear target (so a DM author can delete the blob).
+ */
+export function applyConsume(
+  list: StoredMessage[],
+  targetId: string,
+  consumeSender: string,
+  myAccountId: string,
+): { list: StoredMessage[]; changed: StoredMessage; target: StoredMessage } | null {
+  const idx = list.findIndex((m) => m.id === targetId)
+  const msg = idx >= 0 ? list[idx] : undefined
+  if (!msg || msg.viewOnceOpened) return null
+  const iAmAuthor = msg.senderAccountId === myAccountId
+  const myOwnDevice = consumeSender === myAccountId
+  if (!iAmAuthor && !myOwnDevice) return null
+  const changed = viewOnceTombstone(msg)
+  return { list: replaceAt(list, idx, changed).list, changed, target: msg }
+}
+
+/** Locally destroy a view-once message the moment the viewer opens it (before the
+ *  control message round-trips). Returns the tombstone + target, or null. */
+export function consumeLocally(
+  list: StoredMessage[],
+  targetId: string,
+): { list: StoredMessage[]; changed: StoredMessage; target: StoredMessage } | null {
+  const idx = list.findIndex((m) => m.id === targetId)
+  const msg = idx >= 0 ? list[idx] : undefined
+  if (!msg) return null
+  const changed = viewOnceTombstone(msg)
+  return { list: replaceAt(list, idx, changed).list, changed, target: msg }
 }
 
 /**
@@ -130,9 +184,13 @@ export async function ingestBody(
     seq: number
     senderAccountId: string
     outgoing: boolean
+    /** this device's account — for view-once anti-grief + author detection */
+    myAccountId: string
     getList: () => StoredMessage[]
     setList: (list: StoredMessage[]) => void
     append: (m: StoredMessage) => void
+    /** called when a view-once I authored was consumed by a recipient (DM: delete blob) */
+    onAuthoredConsume?: (target: StoredMessage) => void
   },
   body: MessageBody,
 ): Promise<StoredMessage | null> {
@@ -142,6 +200,15 @@ export async function ingestBody(
     await messageStore.put(stored)
     ctx.append(stored)
     return stored
+  }
+  if (body.kind === 'consume') {
+    const c = applyConsume(ctx.getList(), body.targetId, ctx.senderAccountId, ctx.myAccountId)
+    if (c) {
+      ctx.setList(c.list)
+      await messageStore.put(c.changed)
+      if (c.target.senderAccountId === ctx.myAccountId) ctx.onAuthoredConsume?.(c.target)
+    }
+    return null
   }
   let res: { list: StoredMessage[]; changed: StoredMessage } | null = null
   if (body.kind === 'reaction') {

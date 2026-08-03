@@ -8,17 +8,19 @@ interface MessageThreadProps {
   messages: StoredMessage[]
   /** true once encryption is set up and the composer may send */
   ready: boolean
-  onSend: (text: string, replyTo?: string) => Promise<void>
+  onSend: (text: string, replyTo?: string, once?: boolean) => Promise<void>
   /** send an encrypted attachment (image/file) with an optional caption */
-  onSendMedia?: (file: File, caption?: string, replyTo?: string) => Promise<void>
+  onSendMedia?: (file: File, caption?: string, replyTo?: string, once?: boolean) => Promise<void>
   /** send an encrypted recorded voice note */
-  onSendVoice?: (blob: Blob, durationMs: number, replyTo?: string) => Promise<void>
+  onSendVoice?: (blob: Blob, durationMs: number, replyTo?: string, once?: boolean) => Promise<void>
   /** toggle a reaction on a message (by its v2 id) */
   onReact?: (targetId: string, emoji: string, remove: boolean) => void
   /** edit one of my own messages (new text) */
   onEdit?: (targetId: string, text: string) => void
   /** delete one of my own messages for everyone (needs the mailbox seq too) */
   onDelete?: (targetId: string, seq: number) => void
+  /** recipient opened a view-once message → destroy it locally + tell author/own devices */
+  onConsume?: (targetId: string) => void
   /** the current account id — to show which reactions are mine + toggle correctly */
   myAccountId?: string | undefined
   /** shown in the body while `ready` is false */
@@ -61,6 +63,7 @@ export function MessageThread({
   onReact,
   onEdit,
   onDelete,
+  onConsume,
   myAccountId,
   notReadyLabel,
   readOnly,
@@ -74,14 +77,27 @@ export function MessageThread({
   const [customFor, setCustomFor] = useState<string | null>(null)
   const [editingFor, setEditingFor] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
+  const [viewOnce, setViewOnce] = useState(false)
+  // Content captured at reveal time so a view-once message can be shown for this
+  // one session even though its persisted copy is destroyed immediately on open.
+  const [revealed, setRevealed] = useState<Record<string, StoredMessage>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const supportsViewOnce = !!onConsume
+
+  const revealViewOnce = (message: StoredMessage) => {
+    if (!message.id) return
+    setRevealed((r) => ({ ...r, [message.id as string]: message }))
+    onConsume?.(message.id)
+  }
 
   const pickFile = async (file: File | undefined) => {
     if (!file || !onSendMedia) return
     const caption = draft.trim() || undefined
+    const once = viewOnce
     setDraft('')
+    setViewOnce(false)
     try {
-      await onSendMedia(file, caption, replyingTo ?? undefined)
+      await onSendMedia(file, caption, replyingTo ?? undefined, once)
       setReplyingTo(null)
     } catch (err) {
       console.error('media send failed', err)
@@ -91,9 +107,11 @@ export function MessageThread({
   const sendVoiceNote = async (blob: Blob, durationMs: number) => {
     if (!onSendVoice) return
     const replyTo = replyingTo ?? undefined
+    const once = viewOnce
     setReplyingTo(null)
+    setViewOnce(false)
     try {
-      await onSendVoice(blob, durationMs, replyTo)
+      await onSendVoice(blob, durationMs, replyTo, once)
     } catch (err) {
       console.error('voice send failed', err)
     }
@@ -125,12 +143,15 @@ export function MessageThread({
     setSending(true)
     setDraft('')
     const replyTo = replyingTo ?? undefined
+    const once = viewOnce
     setReplyingTo(null)
+    setViewOnce(false)
     try {
-      await onSend(text, replyTo)
+      await onSend(text, replyTo, once)
     } catch (err) {
       console.error('send failed', err)
       setDraft(text)
+      setViewOnce(once)
     } finally {
       setSending(false)
     }
@@ -152,8 +173,16 @@ export function MessageThread({
         {messages.map((message) => {
           const quoted = message.replyTo ? byId.get(message.replyTo) : null
           const reactions = Object.entries(message.reactions ?? {})
-          const canAct = !!message.id && !!onReact && !message.deletedAt
-          const canEdit = !!message.id && message.outgoing && !message.deletedAt
+          const spent = !!message.viewOnceOpened
+          // A revealed view-once: display the content captured at open time (its
+          // persisted copy is already a tombstone).
+          const rev = message.id ? revealed[message.id] : undefined
+          const shown = rev ?? message
+          // Incoming, view-once, not yet opened → gate behind a tap-to-open placeholder.
+          const needsReveal = !!message.once && !message.outgoing && !spent && !rev
+          const canAct = !!message.id && !!onReact && !message.deletedAt && !spent && !needsReveal
+          const canEdit =
+            !!message.id && message.outgoing && !message.deletedAt && !message.once && !spent
           return (
             <div
               key={message.seq}
@@ -168,6 +197,21 @@ export function MessageThread({
               >
                 {message.deletedAt ? (
                   <p className="italic text-ink-faint">{t('chat.deleted')}</p>
+                ) : spent && !rev ? (
+                  // Persisted tombstone with no in-session reveal snapshot → the
+                  // content is gone (a reload, another device, or the author's copy
+                  // after the recipient opened it).
+                  <p className="italic text-ink-faint">
+                    👁 {message.outgoing ? t('chat.viewOnceSeen') : t('chat.viewOnceOpened')}
+                  </p>
+                ) : needsReveal ? (
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 text-sm text-indigo-soft hover:text-ink"
+                    onClick={() => revealViewOnce(message)}
+                  >
+                    👁 {t('chat.viewOnceTap')}
+                  </button>
                 ) : editingFor === message.id ? (
                   <form
                     onSubmit={(e) => {
@@ -190,16 +234,21 @@ export function MessageThread({
                   <>
                     {quoted && (
                       <div className="mb-1 border-l-2 border-indigo-soft/60 pl-2 text-xs text-ink-faint truncate">
-                        {quoted.text || t('chat.attachment')}
+                        {quoted.once
+                          ? `👁 ${t('chat.viewOnce')}`
+                          : quoted.text || t('chat.attachment')}
                       </div>
                     )}
-                    {message.media && (
+                    {shown.media && (
                       <div className="mb-1">
-                        <MediaAttachment media={message.media} />
+                        <MediaAttachment media={shown.media} />
                       </div>
                     )}
-                    {message.text && (
-                      <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                    {shown.text && <p className="whitespace-pre-wrap break-words">{shown.text}</p>}
+                    {message.once && (
+                      <p className="text-[10px] text-indigo-soft/80 mt-1">
+                        👁 {message.outgoing ? t('chat.viewOnce') : t('chat.viewOnceViewing')}
+                      </p>
                     )}
                   </>
                 )}
@@ -378,6 +427,19 @@ export function MessageThread({
             )}
             {onSendVoice && (
               <VoiceRecorder disabled={!ready} onRecorded={(b, d) => void sendVoiceNote(b, d)} />
+            )}
+            {supportsViewOnce && (
+              <button
+                type="button"
+                className={`px-3 ${viewOnce ? 'btn-gold' : 'btn-quiet'}`}
+                disabled={!ready}
+                aria-pressed={viewOnce}
+                title={t('chat.viewOnce')}
+                aria-label={t('chat.viewOnce')}
+                onClick={() => setViewOnce((v) => !v)}
+              >
+                👁
+              </button>
             )}
             <input
               value={draft}

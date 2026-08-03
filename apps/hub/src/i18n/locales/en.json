@@ -125,7 +125,12 @@
     "attach": "Attach a file",
     "download": "Download",
     "mediaFailed": "Attachment unavailable",
-    "recordVoice": "Record a voice note"
+    "recordVoice": "Record a voice note",
+    "viewOnce": "View once",
+    "viewOnceTap": "View once — tap to open",
+    "viewOnceViewing": "This disappears after you close the chat",
+    "viewOnceOpened": "Opened — this message is gone",
+    "viewOnceSeen": "View once — opened by recipient"
   },
   "settings": {
     "title": "Settings",

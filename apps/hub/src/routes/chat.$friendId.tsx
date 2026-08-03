@@ -47,16 +47,17 @@ function ChatScreen() {
       <MessageThread
         messages={messages}
         ready={!!group?.ready}
-        onSend={(text, replyTo) => chatStore.send(groupId, text, replyTo)}
-        onSendMedia={(file, caption, replyTo) =>
-          chatStore.sendMedia(groupId, file, caption, replyTo)
+        onSend={(text, replyTo, once) => chatStore.send(groupId, text, replyTo, once)}
+        onSendMedia={(file, caption, replyTo, once) =>
+          chatStore.sendMedia(groupId, file, caption, replyTo, once)
         }
-        onSendVoice={(blob, durationMs, replyTo) =>
-          chatStore.sendVoice(groupId, blob, durationMs, replyTo)
+        onSendVoice={(blob, durationMs, replyTo, once) =>
+          chatStore.sendVoice(groupId, blob, durationMs, replyTo, once)
         }
         onReact={(targetId, emoji, remove) => chatStore.react(groupId, targetId, emoji, remove)}
         onEdit={(targetId, text) => void chatStore.editMessage(groupId, targetId, text)}
         onDelete={(targetId, seq) => void chatStore.deleteMessage(groupId, targetId, seq)}
+        onConsume={(targetId) => void chatStore.consumeViewOnce(groupId, targetId)}
         myAccountId={myAccountId ?? undefined}
       />
     </div>

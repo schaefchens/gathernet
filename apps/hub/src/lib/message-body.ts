@@ -32,6 +32,8 @@ interface Base {
   ts: number
   /** optional: the id of the message this one replies to */
   replyTo?: string
+  /** view-once: the recipient's copy self-destructs the first time it's opened */
+  once?: boolean
 }
 
 export type MessageBody =
@@ -41,6 +43,8 @@ export type MessageBody =
   | (Base & { kind: 'reaction'; targetId: string; emoji: string; remove?: boolean })
   | (Base & { kind: 'edit'; targetId: string; text: string })
   | (Base & { kind: 'delete'; targetId: string })
+  /** a recipient opened a view-once message → destroy it (their other devices + author) */
+  | (Base & { kind: 'consume'; targetId: string })
 
 /** The kinds that produce a DISPLAYED message (vs a control op on an existing one). */
 export type DisplayKind = 'text' | 'media' | 'voice'
@@ -60,7 +64,12 @@ export function encodeBody(body: MessageBody): Uint8Array {
 }
 
 /** Build a voice-note message body (audio media + duration). */
-export function voiceBody(media: MediaRef, durationMs: number, replyTo?: string): MessageBody {
+export function voiceBody(
+  media: MediaRef,
+  durationMs: number,
+  replyTo?: string,
+  once?: boolean,
+): MessageBody {
   return {
     v: 2,
     id: newMessageId(),
@@ -69,11 +78,17 @@ export function voiceBody(media: MediaRef, durationMs: number, replyTo?: string)
     media,
     durationMs,
     ...(replyTo ? { replyTo } : {}),
+    ...(once ? { once: true } : {}),
   }
 }
 
 /** Build a media (image/file) message body with an optional caption + reply. */
-export function mediaBody(media: MediaRef, caption?: string, replyTo?: string): MessageBody {
+export function mediaBody(
+  media: MediaRef,
+  caption?: string,
+  replyTo?: string,
+  once?: boolean,
+): MessageBody {
   return {
     v: 2,
     id: newMessageId(),
@@ -82,11 +97,17 @@ export function mediaBody(media: MediaRef, caption?: string, replyTo?: string): 
     media,
     ...(caption ? { text: caption } : {}),
     ...(replyTo ? { replyTo } : {}),
+    ...(once ? { once: true } : {}),
   }
 }
 
-/** Build a plain text (optionally reply) message body. */
-export function textBody(text: string, replyTo?: string): MessageBody {
+/** A recipient opened a view-once message → tells the author + own devices to destroy it. */
+export function consumeBody(targetId: string): MessageBody {
+  return { v: 2, id: newMessageId(), ts: Date.now(), kind: 'consume', targetId }
+}
+
+/** Build a plain text (optionally reply/view-once) message body. */
+export function textBody(text: string, replyTo?: string, once?: boolean): MessageBody {
   return {
     v: 2,
     id: newMessageId(),
@@ -94,6 +115,7 @@ export function textBody(text: string, replyTo?: string): MessageBody {
     kind: 'text',
     text,
     ...(replyTo ? { replyTo } : {}),
+    ...(once ? { once: true } : {}),
   }
 }
 

@@ -125,7 +125,12 @@
     "attach": "Datei anhängen",
     "download": "Herunterladen",
     "mediaFailed": "Anhang nicht verfügbar",
-    "recordVoice": "Sprachnachricht aufnehmen"
+    "recordVoice": "Sprachnachricht aufnehmen",
+    "viewOnce": "Einmal ansehen",
+    "viewOnceTap": "Einmal ansehen – zum Öffnen tippen",
+    "viewOnceViewing": "Verschwindet, sobald du den Chat schließt",
+    "viewOnceOpened": "Geöffnet – diese Nachricht ist weg",
+    "viewOnceSeen": "Einmal ansehen – vom Empfänger geöffnet"
   },
   "settings": {
     "title": "Einstellungen",

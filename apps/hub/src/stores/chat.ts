@@ -20,6 +20,7 @@ import { create } from 'zustand'
 import { ApiError, api } from '../lib/api.ts'
 import { encryptAndUpload } from '../lib/media.ts'
 import {
+  consumeBody,
   deleteBody,
   editBody,
   encodeBody,
@@ -34,6 +35,7 @@ import {
   applyEdit,
   applyReaction,
   bodyToStored,
+  consumeLocally,
   ingestBody,
 } from '../lib/message-ingest.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
@@ -155,12 +157,24 @@ class ChatStore {
             seq: message.seq,
             senderAccountId: message.senderAccountId ?? 'unknown',
             outgoing: false,
+            myAccountId: record.accountId,
             getList: () => useChat.getState().messages[message.groupId] ?? [],
             setList: (list) =>
               useChat.setState((s) => ({
                 messages: { ...s.messages, [message.groupId]: list },
               })),
             append: appendMessage,
+            // A recipient opened my view-once message → drop its server copies so a
+            // fresh device can't re-fetch it (DM: exactly one recipient, safe).
+            onAuthoredConsume: (target) => {
+              void api(
+                'DELETE',
+                `/api/v1/mls/groups/${target.groupId}/messages/${target.seq}`,
+              ).catch(() => {})
+              if (target.media) {
+                void api('DELETE', `/api/v1/media/${target.media.mediaId}`).catch(() => {})
+              }
+            },
           },
           body,
         )
@@ -334,13 +348,13 @@ class ChatStore {
     if (outcome === 'created') this.refreshReadiness()
   }
 
-  async send(groupId: string, text: string, replyTo?: string): Promise<void> {
+  async send(groupId: string, text: string, replyTo?: string, once?: boolean): Promise<void> {
     const engine = this.engine
     const record = this.record
     if (!engine || !record) throw new Error('locked')
 
     try {
-      const body = textBody(text, replyTo)
+      const body = textBody(text, replyTo, once)
       const { seq } = await engine.sendApplication(groupId, encodeBody(body))
       // MLS senders can't decrypt their own ciphertext → store optimistically from
       // the body (same id peers will see).
@@ -355,12 +369,18 @@ class ChatStore {
   }
 
   /** Encrypt + upload an attachment, then send it as a media message (optional caption). */
-  async sendMedia(groupId: string, file: Blob, caption?: string, replyTo?: string): Promise<void> {
+  async sendMedia(
+    groupId: string,
+    file: Blob,
+    caption?: string,
+    replyTo?: string,
+    once?: boolean,
+  ): Promise<void> {
     const engine = this.engine
     const record = this.record
     if (!engine || !record) throw new Error('locked')
     const media = await encryptAndUpload(file)
-    const body = mediaBody(media, caption, replyTo)
+    const body = mediaBody(media, caption, replyTo, once)
     const { seq } = await engine.sendApplication(groupId, encodeBody(body))
     const stored = bodyToStored(groupId, seq, record.accountId, true, body)
     if (stored) {
@@ -375,18 +395,33 @@ class ChatStore {
     blob: Blob,
     durationMs: number,
     replyTo?: string,
+    once?: boolean,
   ): Promise<void> {
     const engine = this.engine
     const record = this.record
     if (!engine || !record) throw new Error('locked')
     const media = await encryptAndUpload(blob, { durationMs })
-    const body = voiceBody(media, durationMs, replyTo)
+    const body = voiceBody(media, durationMs, replyTo, once)
     const { seq } = await engine.sendApplication(groupId, encodeBody(body))
     const stored = bodyToStored(groupId, seq, record.accountId, true, body)
     if (stored) {
       await messageStore.put(stored)
       appendMessage(stored)
     }
+  }
+
+  /** Recipient opened a view-once message: destroy the local copy immediately, then
+   *  tell the author (who deletes the server blob + record) and our own other devices. */
+  async consumeViewOnce(groupId: string, targetId: string): Promise<void> {
+    const engine = this.engine
+    const record = this.record
+    if (!engine || !record) return
+    const res = consumeLocally(useChat.getState().messages[groupId] ?? [], targetId)
+    if (res) {
+      useChat.setState((s) => ({ messages: { ...s.messages, [groupId]: res.list } }))
+      await messageStore.put(res.changed)
+    }
+    await engine.sendApplication(groupId, encodeBody(consumeBody(targetId))).catch(() => {})
   }
 
   /** Add or remove a reaction (emoji) on a message; optimistic locally + fanned out. */

@@ -54,6 +54,7 @@ import {
 } from '../lib/community-keys.ts'
 import { encryptAndUpload } from '../lib/media.ts'
 import {
+  consumeBody,
   deleteBody,
   editBody,
   encodeBody,
@@ -69,6 +70,7 @@ import {
   applyEdit,
   applyReaction,
   bodyToStored,
+  consumeLocally,
   ingestBody,
 } from '../lib/message-ingest.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
@@ -251,6 +253,7 @@ class CommunityChatStore {
             seq: message.seq,
             senderAccountId: message.senderAccountId ?? 'unknown',
             outgoing: false,
+            myAccountId: record.accountId,
             getList: () => useCommunityChat.getState().messages[message.groupId] ?? [],
             setList: (list) =>
               useCommunityChat.setState((s) => ({
@@ -632,6 +635,7 @@ class CommunityChatStore {
               seq: m.seq,
               senderAccountId: opened.senderAccountId,
               outgoing: opened.senderAccountId === this.record?.accountId,
+              myAccountId: this.record?.accountId ?? 'unknown',
               getList: () => useCommunityChat.getState().messages[channelId] ?? [],
               setList: (list) =>
                 useCommunityChat.setState((s) => ({
@@ -1041,8 +1045,8 @@ class CommunityChatStore {
     })
   }
 
-  async send(channelId: string, text: string, replyTo?: string): Promise<void> {
-    return this.sendBody(channelId, textBody(text, replyTo))
+  async send(channelId: string, text: string, replyTo?: string, once?: boolean): Promise<void> {
+    return this.sendBody(channelId, textBody(text, replyTo, once))
   }
 
   /** Encrypt + upload an attachment, then send it as a media message (optional caption). */
@@ -1051,9 +1055,10 @@ class CommunityChatStore {
     file: Blob,
     caption?: string,
     replyTo?: string,
+    once?: boolean,
   ): Promise<void> {
     const media = await encryptAndUpload(file)
-    return this.sendBody(channelId, mediaBody(media, caption, replyTo))
+    return this.sendBody(channelId, mediaBody(media, caption, replyTo, once))
   }
 
   /** Encrypt + upload a recorded voice note, then send it as a voice message. */
@@ -1062,9 +1067,27 @@ class CommunityChatStore {
     blob: Blob,
     durationMs: number,
     replyTo?: string,
+    once?: boolean,
   ): Promise<void> {
     const media = await encryptAndUpload(blob, { durationMs })
-    return this.sendBody(channelId, voiceBody(media, durationMs, replyTo))
+    return this.sendBody(channelId, voiceBody(media, durationMs, replyTo, once))
+  }
+
+  /** Recipient opened a view-once channel message: destroy the local copy, then send a
+   *  consume control message so the author + our own other devices also destroy it.
+   *  Channels skip server-side blob deletion (the sealed group_key envelope can't be
+   *  selectively deleted per-recipient); local self-destruct + TTL are the guarantee. */
+  async consumeViewOnce(channelId: string, targetId: string): Promise<void> {
+    const record = this.record
+    if (!record) return
+    const res = consumeLocally(useCommunityChat.getState().messages[channelId] ?? [], targetId)
+    if (res) {
+      useCommunityChat.setState((s) => ({ messages: { ...s.messages, [channelId]: res.list } }))
+      await messageStore.put(res.changed)
+    }
+    await this.sendBody(channelId, consumeBody(targetId)).catch((err) =>
+      console.error('consume failed', channelId, err),
+    )
   }
 
   /** Add or remove a reaction on a channel message (both MLS + group_key channels). */
