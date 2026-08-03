@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  CHANNEL_ARTIFACT_BODY_MAX_B64,
   CHANNEL_KEY_GRANT_BATCH_MAX,
   CHANNEL_MESSAGE_TTL_DAYS,
   COMMUNITY_META_MAX_B64,
@@ -229,6 +230,63 @@ export const capabilityResponseSchema = z.object({
 export type PostCapabilitiesRequest = z.infer<typeof postCapabilitiesRequestSchema>
 export type MyCapabilitiesResponse = z.infer<typeof myCapabilitiesResponseSchema>
 export type CapabilityResponse = z.infer<typeof capabilityResponseSchema>
+
+/* ------------------- pinned channel artifacts (relayed) ------------------- */
+
+/** pin (a message snapshot) | link | media | event (one-shot). */
+export const channelArtifactKindSchema = z.enum(['pin', 'link', 'media', 'event'])
+export type ChannelArtifactKind = z.infer<typeof channelArtifactKindSchema>
+
+/**
+ * A pinned channel artifact — an independent, device-signed, sealed record (not a
+ * message). `sealedBody = seal(K_meta, body)` at `sealEpoch`; the server relays it but
+ * never reads or validates it. `issuerSig = Ed25519(issuerDeviceKey, domain.channelArtifact
+ * ‖ channelId ‖ artifactId ‖ kind ‖ u64(sealEpoch) ‖ u64(expiresAtMs) ‖ H(sealedBody))`.
+ * A member's suggestion becomes an active pin when a channel manager sets `approvalSig`
+ * (over domain.channelArtifact ‖ 'approve' ‖ channelId ‖ artifactId). Clients verify both
+ * against the capability chain + the channel's pinPolicy.
+ */
+export const channelArtifactSchema = z.object({
+  artifactId: z.uuid(),
+  channelId: groupIdSchema,
+  kind: channelArtifactKindSchema,
+  sealEpoch: z.number().int().nonnegative(),
+  sealedBody: z.base64().max(CHANNEL_ARTIFACT_BODY_MAX_B64),
+  issuerDeviceId: deviceIdSchema,
+  issuerSig: z.base64(),
+  approverDeviceId: deviceIdSchema.nullable(),
+  approvalSig: z.base64().nullable(),
+  createdBy: accountIdSchema,
+  /** epoch millis (server clock) */
+  createdAt: z.number().int().nonnegative(),
+  /** epoch millis; null = pinned forever */
+  expiresAt: z.number().int().nonnegative().nullable(),
+})
+export type ChannelArtifact = z.infer<typeof channelArtifactSchema>
+
+/** Author posts a pinned artifact it minted (server relays, never validates). */
+export const postArtifactRequestSchema = z.object({
+  artifactId: z.uuid(),
+  kind: channelArtifactKindSchema,
+  sealEpoch: z.number().int().nonnegative(),
+  sealedBody: z.base64().max(CHANNEL_ARTIFACT_BODY_MAX_B64),
+  issuerDeviceId: deviceIdSchema,
+  issuerSig: z.base64(),
+  expiresAt: z.number().int().positive().nullable().optional(),
+})
+export type PostArtifactRequest = z.infer<typeof postArtifactRequestSchema>
+
+/** A channel manager approves a member's suggestion (promotes it to an active pin). */
+export const approveArtifactRequestSchema = z.object({
+  approverDeviceId: deviceIdSchema,
+  approvalSig: z.base64(),
+})
+export type ApproveArtifactRequest = z.infer<typeof approveArtifactRequestSchema>
+
+export const listArtifactsResponseSchema = z.object({
+  artifacts: z.array(channelArtifactSchema),
+})
+export type ListArtifactsResponse = z.infer<typeof listArtifactsResponseSchema>
 
 export const communityDetailResponseSchema = z.object({
   community: z.object({

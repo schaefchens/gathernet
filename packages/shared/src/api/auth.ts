@@ -35,6 +35,13 @@ export const SIG_DOMAIN = {
    *  owner's device attesting community ownership; the root all capabilities chain to
    *  (the owner accountId is pinned client-side from the out-of-band invite). */
   communityRoot: 'gathernet-community-root-v1',
+  /** Ed25519(issuerDK, domain.channelArtifact || channelId || artifactId || kind
+   *  || u64(sealEpoch) || u64(expiresAtMs) || H(sealedBody)) — the author's device
+   *  attesting a pinned channel artifact (pin/link/media/event). A separate approval
+   *  signature over (domain.channelArtifact || 'approve' || channelId || artifactId)
+   *  by a channel manager promotes a member's suggestion to an active pin. Verified
+   *  client-side against the capability chain + the channel's pinPolicy. */
+  channelArtifact: 'gathernet-channel-artifact-v1',
 } as const
 
 export const displayNameSchema = z.string().trim().min(1).max(64)

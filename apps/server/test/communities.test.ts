@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import {
   eciesOpen,
   eciesSeal,
@@ -9,6 +9,7 @@ import type { FastifyInstance } from 'fastify'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
+import { channelArtifacts } from '../src/db/schema.ts'
 import { pruneChannelInvites, pruneCommunityInvites } from '../src/modules/communities/service.ts'
 import { pruneChannelMessages } from '../src/modules/delivery/service.ts'
 import { InMemoryBlobStore } from '../src/storage/blob-store.ts'
@@ -2054,5 +2055,182 @@ describe('group_key channels (mega-community scale)', () => {
       },
     })
     expect(leak.statusCode).toBe(400)
+  })
+})
+
+describe('pinned channel artifacts (relayed, server-opaque)', () => {
+  const artifactsUrl = (communityId: string, channelId: string) =>
+    `/api/v1/communities/${communityId}/channels/${channelId}/artifacts`
+
+  async function postArtifact(
+    user: TestUser,
+    communityId: string,
+    channelId: string,
+    over: Record<string, unknown> = {},
+  ) {
+    return app.inject({
+      method: 'POST',
+      url: artifactsUrl(communityId, channelId),
+      headers: auth(user),
+      payload: {
+        artifactId: randomUUID(),
+        kind: 'pin',
+        sealEpoch: 0,
+        sealedBody: sealed(),
+        issuerDeviceId: user.deviceId,
+        issuerSig: fakeB64(64),
+        ...over,
+      },
+    })
+  }
+
+  async function listArtifacts(user: TestUser, communityId: string, channelId: string) {
+    const res = await app.inject({
+      method: 'GET',
+      url: artifactsUrl(communityId, channelId),
+      headers: auth(user),
+    })
+    return res
+  }
+
+  it('post → list round-trips the opaque record; server never validates it', async () => {
+    const owner = await createUser('ArtOwner')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    const body = sealed()
+    const artifactId = randomUUID()
+    const res = await postArtifact(owner, communityId, channelId, { artifactId, sealedBody: body })
+    expect(res.statusCode).toBe(200)
+
+    const list = await listArtifacts(owner, communityId, channelId)
+    expect(list.statusCode).toBe(200)
+    const arts = list.json().artifacts as Array<Record<string, unknown>>
+    expect(arts).toHaveLength(1)
+    expect(arts[0]).toMatchObject({
+      artifactId,
+      kind: 'pin',
+      sealEpoch: 0,
+      sealedBody: body,
+      createdBy: owner.accountId,
+      approverDeviceId: null,
+      approvalSig: null,
+      expiresAt: null,
+    })
+  })
+
+  it('refuses a body sealed under a stale K_meta epoch', async () => {
+    const owner = await createUser('ArtStale')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    const res = await postArtifact(owner, communityId, channelId, { sealEpoch: 7 })
+    expect(res.statusCode).toBe(409)
+  })
+
+  it('refuses an issuer device that is not the poster’s own', async () => {
+    const owner = await createUser('ArtOwn')
+    const stranger = await createUser('ArtStranger')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    const res = await postArtifact(owner, communityId, channelId, {
+      issuerDeviceId: stranger.deviceId,
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('delete: the author or a channel manager may unpin; a plain member may not', async () => {
+    const owner = await createUser('ArtDelOwner')
+    const member = await createUser('ArtDelMember')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    await addMember(owner, communityId, member)
+    await joinOpenChannel(member, communityId, channelId)
+
+    // The member pins something (a suggestion under the client policy; still a row).
+    const memberArtifact = randomUUID()
+    expect(
+      (await postArtifact(member, communityId, channelId, { artifactId: memberArtifact }))
+        .statusCode,
+    ).toBe(200)
+    // The owner pins something.
+    const ownerArtifact = randomUUID()
+    expect(
+      (await postArtifact(owner, communityId, channelId, { artifactId: ownerArtifact })).statusCode,
+    ).toBe(200)
+
+    const del = (user: TestUser, artifactId: string) =>
+      app.inject({
+        method: 'DELETE',
+        url: `${artifactsUrl(communityId, channelId)}/${artifactId}`,
+        headers: auth(user),
+      })
+
+    // A plain member cannot delete the owner's pin.
+    expect((await del(member, ownerArtifact)).statusCode).toBe(403)
+    // The author (member) can delete their own.
+    expect((await del(member, memberArtifact)).statusCode).toBe(200)
+    // The owner (a channel manager) can delete any.
+    expect((await del(owner, ownerArtifact)).statusCode).toBe(200)
+
+    const remaining = (await listArtifacts(owner, communityId, channelId)).json().artifacts
+    expect(remaining).toHaveLength(0)
+  })
+
+  it('approve: only a channel manager may attach an approval signature', async () => {
+    const owner = await createUser('ArtApproveOwner')
+    const member = await createUser('ArtApproveMember')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    await addMember(owner, communityId, member)
+    await joinOpenChannel(member, communityId, channelId)
+
+    const artifactId = randomUUID()
+    expect((await postArtifact(member, communityId, channelId, { artifactId })).statusCode).toBe(
+      200,
+    )
+
+    const approveUrl = `${artifactsUrl(communityId, channelId)}/${artifactId}/approve`
+    // A plain member cannot approve.
+    const denied = await app.inject({
+      method: 'POST',
+      url: approveUrl,
+      headers: auth(member),
+      payload: { approverDeviceId: member.deviceId, approvalSig: fakeB64(64) },
+    })
+    expect(denied.statusCode).toBe(403)
+
+    // The owner (channel manager) approves; the signature surfaces in the listing.
+    const sig = fakeB64(64)
+    const ok = await app.inject({
+      method: 'POST',
+      url: approveUrl,
+      headers: auth(owner),
+      payload: { approverDeviceId: owner.deviceId, approvalSig: sig },
+    })
+    expect(ok.statusCode).toBe(200)
+    const arts = (await listArtifacts(owner, communityId, channelId)).json().artifacts as Array<
+      Record<string, unknown>
+    >
+    expect(arts[0]).toMatchObject({ approverDeviceId: owner.deviceId, approvalSig: sig })
+  })
+
+  it('an expired artifact is excluded from the listing', async () => {
+    const owner = await createUser('ArtExpire')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    // Insert a past-expiry row directly (post only accepts a future expiry).
+    await testDb.db.insert(channelArtifacts).values({
+      artifactId: randomUUID(),
+      channelId,
+      communityId,
+      kind: 'pin',
+      sealEpoch: 0,
+      sealedBody: Buffer.from(sealed(), 'base64'),
+      issuerDeviceId: owner.deviceId,
+      issuerSig: Buffer.from(fakeB64(64), 'base64'),
+      createdBy: owner.accountId,
+      expiresAt: new Date(Date.now() - 1000),
+    })
+    const list = await listArtifacts(owner, communityId, channelId)
+    expect(list.json().artifacts).toHaveLength(0)
   })
 })

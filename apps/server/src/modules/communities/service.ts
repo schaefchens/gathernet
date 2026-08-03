@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import type {
   AccountId,
+  ApproveArtifactRequest,
   CapabilityResponse,
+  ChannelArtifact,
   ChannelDevicesResponse,
   ChannelJoinInfoResponse,
   ChannelMemberRole,
@@ -18,10 +20,12 @@ import type {
   CreateCommunityRequest,
   DeviceId,
   GroupId,
+  ListArtifactsResponse,
   MembershipCapability,
   MyCapabilitiesResponse,
   MyChannelKeyGrantResponse,
   MyKeyGrantResponse,
+  PostArtifactRequest,
   PostCapabilitiesRequest,
   PostChannelKeyGrantsRequest,
   PostKeyGrantsRequest,
@@ -42,6 +46,7 @@ import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import {
   accounts,
+  channelArtifacts,
   channelInvites,
   channelKeyEpochs,
   channelKeyGrants,
@@ -2032,6 +2037,161 @@ export async function getCapability(
     ),
   })
   return { capability: row ? toCapability(row) : null }
+}
+
+/* ------------------- pinned channel artifacts (relayed) ------------------- */
+
+type ArtifactRow = typeof channelArtifacts.$inferSelect
+
+function toArtifact(r: ArtifactRow): ChannelArtifact {
+  return {
+    artifactId: r.artifactId,
+    channelId: r.channelId as GroupId,
+    kind: r.kind,
+    sealEpoch: r.sealEpoch,
+    sealedBody: r.sealedBody.toString('base64'),
+    issuerDeviceId: r.issuerDeviceId as DeviceId,
+    issuerSig: r.issuerSig.toString('base64'),
+    approverDeviceId: (r.approverDeviceId as DeviceId | null) ?? null,
+    approvalSig: b64(r.approvalSig),
+    createdBy: r.createdBy as AccountId,
+    createdAt: r.createdAt.getTime(),
+    expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
+  }
+}
+
+/**
+ * Store an author-minted pinned artifact. The server is a pure relay — it never
+ * reads or validates the sealed body or the signature (clients verify `issuerSig`
+ * against the capability chain + the channel's pinPolicy). Any active member may
+ * post (a member's record is a *suggestion* until a manager approves it, which
+ * honest clients enforce). The body must be sealed under the community's current
+ * K_meta epoch so a late joiner can read it; a stale epoch is refused.
+ */
+export async function postArtifact(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  input: PostArtifactRequest,
+): Promise<void> {
+  await requireActiveMembership(db, communityId, accountId)
+  await loadChannel(db, communityId, channelId)
+  const community = await db.query.communities.findFirst({
+    where: eq(communities.communityId, communityId),
+  })
+  if (!community) throw new ServiceError(404, 'community_not_found')
+  if (input.sealEpoch !== community.keyEpoch) throw new ServiceError(409, 'key_epoch_stale')
+  // The signer's device must be one of the poster's own devices.
+  await requireOwnDevice(db, accountId, input.issuerDeviceId)
+  await db
+    .insert(channelArtifacts)
+    .values({
+      artifactId: input.artifactId,
+      channelId,
+      communityId,
+      kind: input.kind,
+      sealEpoch: input.sealEpoch,
+      sealedBody: bufOf(input.sealedBody),
+      issuerDeviceId: input.issuerDeviceId,
+      issuerSig: bufOf(input.issuerSig),
+      createdBy: accountId,
+      expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+    })
+    .onConflictDoNothing()
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_artifact_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
+}
+
+/** Active (non-expired) pinned artifacts for a channel — visible to any active member. */
+export async function listArtifacts(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+): Promise<ListArtifactsResponse> {
+  await requireActiveMembership(db, communityId, accountId)
+  await loadChannel(db, communityId, channelId)
+  const now = new Date()
+  const rows = await db
+    .select()
+    .from(channelArtifacts)
+    .where(
+      and(
+        eq(channelArtifacts.channelId, channelId),
+        or(isNull(channelArtifacts.expiresAt), gt(channelArtifacts.expiresAt, now)),
+      ),
+    )
+    .orderBy(asc(channelArtifacts.createdAt))
+  return { artifacts: rows.map(toArtifact) }
+}
+
+/**
+ * A channel manager records their signed approval of a member's suggestion (which
+ * honest clients require before they render it as an active pin under pinPolicy =
+ * moderators). Coarse server gate is `requireChannelManager`; authority is verified
+ * client-side against the capability chain.
+ */
+export async function approveArtifact(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  artifactId: string,
+  input: ApproveArtifactRequest,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  await loadChannel(db, communityId, channelId)
+  await requireChannelManager(db, channelId, membership)
+  await requireOwnDevice(db, accountId, input.approverDeviceId)
+  const artifact = await db.query.channelArtifacts.findFirst({
+    where: and(
+      eq(channelArtifacts.artifactId, artifactId),
+      eq(channelArtifacts.channelId, channelId),
+    ),
+  })
+  if (!artifact) throw new ServiceError(404, 'artifact_not_found')
+  await db
+    .update(channelArtifacts)
+    .set({ approverDeviceId: input.approverDeviceId, approvalSig: bufOf(input.approvalSig) })
+    .where(eq(channelArtifacts.artifactId, artifactId))
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_artifact_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
+}
+
+/** Unpin: the author or a channel manager removes a pinned artifact. */
+export async function deleteArtifact(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  artifactId: string,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  await loadChannel(db, communityId, channelId)
+  const artifact = await db.query.channelArtifacts.findFirst({
+    where: and(
+      eq(channelArtifacts.artifactId, artifactId),
+      eq(channelArtifacts.channelId, channelId),
+    ),
+  })
+  if (!artifact) throw new ServiceError(404, 'artifact_not_found')
+  // The author may remove their own; otherwise a channel manager may.
+  if (artifact.createdBy !== accountId) {
+    await requireChannelManager(db, channelId, membership)
+  }
+  await db.delete(channelArtifacts).where(eq(channelArtifacts.artifactId, artifactId))
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_artifact_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
 }
 
 /**

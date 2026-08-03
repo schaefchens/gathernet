@@ -127,6 +127,13 @@
       "when": 1785777576032,
       "tag": "0017_ambiguous_white_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785778168743,
+      "tag": "0018_clammy_leech",
+      "breakpoints": true
     }
   ]
 }

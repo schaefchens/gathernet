@@ -29,6 +29,10 @@ export const CHANNEL_MESSAGE_TTL_DAYS = [1, 3, 7, 14, 30] as const
 export const CHANNEL_MESSAGE_TTL_DEFAULT_DAYS = 30
 /** Sealed metadata blob cap (title+emoji+markdown description, base64). */
 export const COMMUNITY_META_MAX_B64 = 8192
+/** Sealed pinned-artifact body cap (message snapshot / link / event fields, base64). */
+export const CHANNEL_ARTIFACT_BODY_MAX_B64 = 16_384
+/** Max active pinned artifacts a client lists/renders per channel. */
+export const CHANNEL_ARTIFACT_MAX_PER_CHANNEL = 200
 
 /**
  * Channel scaling caps. 'mls' channels stay small (one MLS leaf per device,

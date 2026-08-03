@@ -522,6 +522,14 @@ export const channelMemberStatusEnum = pgEnum('channel_member_status', [
 ])
 export const channelMemberRoleEnum = pgEnum('channel_member_role', ['member', 'moderator'])
 export const channelInviteKindEnum = pgEnum('channel_invite_kind', ['code', 'targeted'])
+/** The kind of a pinned channel artifact (a message snapshot, a link, a media
+ *  item, or a one-shot event). @see channelArtifacts */
+export const channelArtifactKindEnum = pgEnum('channel_artifact_kind', [
+  'pin',
+  'link',
+  'media',
+  'event',
+])
 
 export const communities = pgTable('communities', {
   /** 'cm_' + hex(8 random bytes) */
@@ -792,6 +800,48 @@ export const channelKeyEpochs = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.channelId, t.keyEpoch] })],
+)
+
+/**
+ * Pinned channel artifacts (pins/links/media/events). A pin is decoupled from its
+ * source message — it is an independent, device-signed, sealed record that lives in
+ * channel state and is visible to all current + future members. `sealedBody` =
+ * seal(K_meta, artifact body) at `sealEpoch` (re-sealed forward on community rotation
+ * so late joiners can still read it). The server relays ciphertext only and never
+ * decides validity — clients verify `issuerSig` (+ `approvalSig` for a manager-approved
+ * suggestion) against the capability chain and the channel's pinPolicy. `expiresAt`
+ * gives an optional TTL; clients hide expired artifacts and the server may GC them.
+ */
+export const channelArtifacts = pgTable(
+  'channel_artifacts',
+  {
+    /** client-generated (a uuid); bound into `issuerSig` */
+    artifactId: text('artifact_id').primaryKey(),
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => communityChannels.channelId),
+    communityId: text('community_id')
+      .notNull()
+      .references(() => communities.communityId),
+    kind: channelArtifactKindEnum('kind').notNull(),
+    /** the K_meta epoch `sealedBody` is sealed under */
+    sealEpoch: integer('seal_epoch').notNull(),
+    sealedBody: bytea('sealed_body').notNull(),
+    issuerDeviceId: text('issuer_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    issuerSig: bytea('issuer_sig').notNull(),
+    /** set when a channel manager approves a member's suggestion (pinPolicy=moderators) */
+    approverDeviceId: text('approver_device_id').references(() => devices.deviceId),
+    approvalSig: bytea('approval_sig'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => accounts.accountId),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /** optional TTL; null = pinned forever */
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+  },
+  (t) => [index('channel_artifacts_channel_idx').on(t.channelId)],
 )
 
 /** Encrypted media (community + channel avatars); ciphertext = seal(K_meta, imageBytes). */

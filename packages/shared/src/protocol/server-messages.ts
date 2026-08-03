@@ -349,6 +349,16 @@ export const communityChannelDeletedMessage = z.object({
   }),
 })
 
+/** To channel members + community leaders: a pinned artifact was added/approved/
+ *  removed → the client re-fetches the channel's artifacts. */
+export const communityChannelArtifactUpdatedMessage = z.object({
+  type: z.literal('community.channel_artifact_updated'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+  }),
+})
+
 /** To channel moderators + community leaders: someone requested to join. */
 export const communityChannelJoinRequestMessage = z.object({
   type: z.literal('community.channel_join_request'),
@@ -442,6 +452,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   communityChannelCreatedMessage,
   communityChannelUpdatedMessage,
   communityChannelDeletedMessage,
+  communityChannelArtifactUpdatedMessage,
   communityChannelJoinRequestMessage,
   communityChannelJoinApprovedMessage,
   communityChannelJoinDeclinedMessage,

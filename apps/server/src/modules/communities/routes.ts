@@ -1,5 +1,6 @@
 import {
   acceptCommunityInviteRequestSchema,
+  approveArtifactRequestSchema,
   createChannelInviteRequestSchema,
   createChannelRequestSchema,
   createCommunityInviteRequestSchema,
@@ -8,6 +9,7 @@ import {
   type GroupId,
   joinByCodeRequestSchema,
   paginationQuerySchema,
+  postArtifactRequestSchema,
   postCapabilitiesRequestSchema,
   postChannelKeyGrantsRequestSchema,
   postCommitRequestSchema,
@@ -33,11 +35,13 @@ import { ServiceError } from '../accounts/service.ts'
 import { EpochConflictError, postCommit } from '../delivery/service.ts'
 import {
   acceptCommunityInvite,
+  approveArtifact,
   channelCommunityId,
   createChannel,
   createChannelInvite,
   createCommunity,
   createCommunityInvite,
+  deleteArtifact,
   deleteChannel,
   getCapability,
   getChannelJoinInfo,
@@ -48,6 +52,7 @@ import {
   joinChannelByCode,
   kickFromChannel,
   leaveCommunity,
+  listArtifacts,
   listChannelDevices,
   listChannelMembers,
   listCommunities,
@@ -57,6 +62,7 @@ import {
   myCapabilities,
   myChannelKeyGrant,
   myKeyGrant,
+  postArtifact,
   postCapabilities,
   postChannelKeyGrants,
   postKeyGrants,
@@ -408,6 +414,71 @@ export function registerCommunityRoutes(
         request.params.id,
         request.params.channelId,
         body,
+      )
+      return { ok: true }
+    },
+  )
+
+  /* ------------------- pinned channel artifacts (relayed) ------------------- */
+
+  app.get<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/artifacts',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      return listArtifacts(db, session.accountId, request.params.id, request.params.channelId)
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/artifacts',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = postArtifactRequestSchema.parse(request.body)
+      await postArtifact(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        body,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string; artifactId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/artifacts/:artifactId/approve',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = approveArtifactRequestSchema.parse(request.body)
+      await approveArtifact(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.artifactId,
+        body,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.delete<{ Params: { id: string; channelId: string; artifactId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/artifacts/:artifactId',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      await deleteArtifact(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.artifactId,
       )
       return { ok: true }
     },
