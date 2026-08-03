@@ -8,6 +8,8 @@
  * messages — see persistSnapshot call sites in the chat store.
  */
 
+import type { MediaRef } from './message-body.ts'
+
 const DB_NAME = 'gathernet'
 const DB_VERSION = 2
 const STORES = ['meta', 'secure', 'groups', 'kps', 'messages', 'channels'] as const
@@ -297,8 +299,23 @@ export const kpStore = {
 export interface StoredMessage {
   groupId: string
   seq: number
+  /** v2 client message id — stable across devices; target of reactions/edits/deletes.
+   *  Absent on legacy (pre-v2) messages, which therefore can't be reacted to/edited. */
+  id?: string
   senderAccountId: string
+  /** default 'text' when absent (legacy) */
+  kind?: 'text' | 'media' | 'voice'
+  /** text body, or a media caption; '' for media/voice without a caption */
   text: string
+  /** media/voice payload reference (ciphertext is server-side; the key is here) */
+  media?: MediaRef
+  /** id of the message this replies to */
+  replyTo?: string
+  /** emoji → the accountIds who reacted with it */
+  reactions?: Record<string, string[]>
+  editedAt?: number
+  /** set when deleted-for-everyone; the row is kept as a tombstone */
+  deletedAt?: number
   sentAt: number
   outgoing: boolean
 }

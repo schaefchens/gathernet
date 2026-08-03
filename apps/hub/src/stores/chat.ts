@@ -18,6 +18,8 @@ import type {
 import { KEY_PACKAGE_REPLENISH_BELOW, KEY_PACKAGE_TARGET } from '@gathernet/shared'
 import { create } from 'zustand'
 import { ApiError, api } from '../lib/api.ts'
+import { encodeBody, parseBody, reactionBody, textBody } from '../lib/message-body.ts'
+import { applyReaction, bodyToStored, ingestBody } from '../lib/message-ingest.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
 import {
   type DeviceRecord,
@@ -41,9 +43,6 @@ interface ChatUiState {
 }
 
 export const useChat = create<ChatUiState>(() => ({ groups: {}, messages: {} }))
-
-const encoder = new TextEncoder()
-const decoder = new TextDecoder()
 
 /* ---------- MlsSyncEngine ports, wired to the Hub's storage/network ---------- */
 
@@ -132,17 +131,23 @@ class ChatStore {
       cursors,
       transport,
       onApplication: async (message) => {
-        const body = JSON.parse(decoder.decode(message.plaintext)) as { t: string; ts: number }
-        const stored: StoredMessage = {
-          groupId: message.groupId,
-          seq: message.seq,
-          senderAccountId: message.senderAccountId ?? 'unknown',
-          text: body.t,
-          sentAt: body.ts,
-          outgoing: false,
-        }
-        await messageStore.put(stored)
-        appendMessage(stored)
+        const body = parseBody(message.plaintext)
+        if (!body) return
+        await ingestBody(
+          {
+            groupId: message.groupId,
+            seq: message.seq,
+            senderAccountId: message.senderAccountId ?? 'unknown',
+            outgoing: false,
+            getList: () => useChat.getState().messages[message.groupId] ?? [],
+            setList: (list) =>
+              useChat.setState((s) => ({
+                messages: { ...s.messages, [message.groupId]: list },
+              })),
+            append: appendMessage,
+          },
+          body,
+        )
       },
     })
 
@@ -313,26 +318,48 @@ class ChatStore {
     if (outcome === 'created') this.refreshReadiness()
   }
 
-  async send(groupId: string, text: string): Promise<void> {
+  async send(groupId: string, text: string, replyTo?: string): Promise<void> {
     const engine = this.engine
     const record = this.record
     if (!engine || !record) throw new Error('locked')
 
     try {
-      const plaintext = encoder.encode(JSON.stringify({ t: text, ts: Date.now() }))
-      const { seq } = await engine.sendApplication(groupId, plaintext)
-      const stored: StoredMessage = {
-        groupId,
-        seq,
-        senderAccountId: record.accountId,
-        text,
-        sentAt: Date.now(),
-        outgoing: true,
+      const body = textBody(text, replyTo)
+      const { seq } = await engine.sendApplication(groupId, encodeBody(body))
+      // MLS senders can't decrypt their own ciphertext → store optimistically from
+      // the body (same id peers will see).
+      const stored = bodyToStored(groupId, seq, record.accountId, true, body)
+      if (stored) {
+        await messageStore.put(stored)
+        appendMessage(stored)
       }
-      await messageStore.put(stored)
-      appendMessage(stored)
     } catch (err) {
       console.error('chat work failed', groupId, err)
+    }
+  }
+
+  /** Add or remove a reaction (emoji) on a message; optimistic locally + fanned out. */
+  async react(groupId: string, targetId: string, emoji: string, remove: boolean): Promise<void> {
+    const engine = this.engine
+    const record = this.record
+    if (!engine || !record) return
+    try {
+      const body = reactionBody(targetId, emoji, remove)
+      await engine.sendApplication(groupId, encodeBody(body))
+      // Apply to our own view (the control message isn't echoed back to us).
+      const res = applyReaction(
+        useChat.getState().messages[groupId] ?? [],
+        targetId,
+        emoji,
+        record.accountId,
+        remove,
+      )
+      if (res) {
+        useChat.setState((s) => ({ messages: { ...s.messages, [groupId]: res.list } }))
+        await messageStore.put(res.changed)
+      }
+    } catch (err) {
+      console.error('react failed', groupId, err)
     }
   }
 

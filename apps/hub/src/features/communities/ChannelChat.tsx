@@ -2,6 +2,7 @@ import type { ChannelAccess, ChannelPostPolicy } from '@gathernet/shared'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { communityChatStore, useCommunityChat } from '../../stores/community-chat.ts'
+import { useSession } from '../../stores/session.ts'
 import { MessageThread } from '../chat/MessageThread.tsx'
 import { ClampedMarkdown } from './ClampedMarkdown.tsx'
 import { CommunityAvatar } from './CommunityAvatar.tsx'
@@ -47,6 +48,7 @@ export function ChannelChat({
   const { t } = useTranslation()
   const status = useCommunityChat((s) => s.channels[channelId] ?? 'idle')
   const messages = useCommunityChat((s) => s.messages[channelId] ?? NO_MESSAGES)
+  const myAccountId = useSession((s) => s.accountId)
 
   useEffect(() => {
     void (async () => {
@@ -122,7 +124,11 @@ export function ChannelChat({
           <MessageThread
             messages={messages}
             ready={status === 'ready'}
-            onSend={(text) => communityChatStore.send(channelId, text)}
+            onSend={(text, replyTo) => communityChatStore.send(channelId, text, replyTo)}
+            onReact={(targetId, emoji, remove) =>
+              communityChatStore.react(channelId, targetId, emoji, remove)
+            }
+            myAccountId={myAccountId ?? undefined}
             notReadyLabel={
               status === 'rotation_pending'
                 ? t('communities.channelRotationPending')

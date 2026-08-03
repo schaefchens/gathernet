@@ -69,7 +69,6 @@ interface ChannelGrantGate {
 }
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder()
 
 /** AEAD AAD domain for group_key channel messages (binds ct to its context). */
 const MSG_AAD_DOMAIN = 'gathernet-channel-msg-aead-v1'
@@ -398,13 +397,14 @@ export async function sealChannelMessage(params: {
   epoch: number
   senderDeviceId: string
   deviceSecret: Uint8Array
-  text: string
+  /** the encoded message body (opaque plaintext — see lib/message-body.ts) */
+  body: Uint8Array
   ts: number
   senderSeq: number
   prevSenderHash: Uint8Array
 }): Promise<SealedMessage> {
   const mls = await loadCrypto()
-  const plaintext = encoder.encode(JSON.stringify({ t: params.text, ts: params.ts }))
+  const plaintext = params.body
   const aad = messageAad(
     params.communityId,
     params.channelId,
@@ -440,8 +440,8 @@ export interface OpenedMessage {
   senderAccountId: string
   senderDeviceId: string
   senderSeq: number
-  text: string
-  ts: number
+  /** the decrypted message body bytes (caller parses via lib/message-body.ts) */
+  plaintext: Uint8Array
 }
 
 /**
@@ -488,13 +488,11 @@ export async function openChannelMessage(params: {
       env.senderSeq,
     )
     const plain = mls.open(params.key, ct, aad)
-    const body = JSON.parse(decoder.decode(plain)) as { t: string; ts: number }
     return {
       senderAccountId: sender.accountId,
       senderDeviceId: env.senderDeviceId,
       senderSeq: env.senderSeq,
-      text: body.t,
-      ts: body.ts,
+      plaintext: plain,
     }
   } catch {
     return null

@@ -85,10 +85,6 @@
     "takingSpaceTitle": "Taking space from",
     "blockedUntil": "until {{date}}",
     "lift": "Lift now",
-    "remove": "Remove friend",
-    "removeConfirm": "Remove {{name}} from your friends?",
-    "block": "Block",
-    "blockConfirm": "Block {{name}}? They won't be able to reconnect with you.",
     "chat": "Chat"
   },
   "addFriend": {
@@ -116,7 +112,11 @@
     "sent": "Sent",
     "settingUp": "Setting up encryption…",
     "cannotSend": "Encryption is still being set up for this chat.",
-    "readOnly": "This channel is read-only."
+    "readOnly": "This channel is read-only.",
+    "react": "React",
+    "reply": "Reply",
+    "replyingTo": "Replying to",
+    "attachment": "Attachment"
   },
   "settings": {
     "title": "Settings",

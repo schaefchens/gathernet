@@ -6,6 +6,7 @@ import { MessageThread } from '../features/chat/MessageThread.tsx'
 import { api } from '../lib/api.ts'
 import { chatStore, useChat } from '../stores/chat.ts'
 import { usePresence } from '../stores/presence.ts'
+import { useSession } from '../stores/session.ts'
 
 export const Route = createFileRoute('/chat/$friendId')({ component: ChatScreen })
 
@@ -19,6 +20,8 @@ function ChatScreen() {
     group ? (s.messages[group.groupId] ?? NO_MESSAGES) : NO_MESSAGES,
   )
   const status = usePresence((s) => s.statuses[friendId] ?? 'offline')
+  const myAccountId = useSession((s) => s.accountId)
+  const groupId = group?.groupId ?? ''
 
   const friends = useQuery({
     queryKey: ['friends'],
@@ -44,7 +47,9 @@ function ChatScreen() {
       <MessageThread
         messages={messages}
         ready={!!group?.ready}
-        onSend={(text) => chatStore.send(group?.groupId ?? '', text)}
+        onSend={(text, replyTo) => chatStore.send(groupId, text, replyTo)}
+        onReact={(targetId, emoji, remove) => chatStore.react(groupId, targetId, emoji, remove)}
+        myAccountId={myAccountId ?? undefined}
       />
     </div>
   )

@@ -52,6 +52,14 @@ import {
   toStdB64,
   verifyCommunityRoot,
 } from '../lib/community-keys.ts'
+import {
+  encodeBody,
+  type MessageBody,
+  parseBody,
+  reactionBody,
+  textBody,
+} from '../lib/message-body.ts'
+import { applyReaction, bodyToStored, ingestBody } from '../lib/message-ingest.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
 import {
   channelStore,
@@ -86,9 +94,6 @@ interface CommunityChatState {
 }
 
 export const useCommunityChat = create<CommunityChatState>(() => ({ channels: {}, messages: {} }))
-
-const encoder = new TextEncoder()
-const decoder = new TextDecoder()
 
 /* --------- MlsSyncEngine ports — a SECOND engine, pointed at channels --------- */
 
@@ -227,17 +232,23 @@ class CommunityChatStore {
       cursors,
       transport: makeTransport(record.deviceId),
       onApplication: async (message) => {
-        const body = JSON.parse(decoder.decode(message.plaintext)) as { t: string; ts: number }
-        const stored: StoredMessage = {
-          groupId: message.groupId,
-          seq: message.seq,
-          senderAccountId: message.senderAccountId ?? 'unknown',
-          text: body.t,
-          sentAt: body.ts,
-          outgoing: false,
-        }
-        await messageStore.put(stored)
-        appendMessage(stored)
+        const body = parseBody(message.plaintext)
+        if (!body) return
+        await ingestBody(
+          {
+            groupId: message.groupId,
+            seq: message.seq,
+            senderAccountId: message.senderAccountId ?? 'unknown',
+            outgoing: false,
+            getList: () => useCommunityChat.getState().messages[message.groupId] ?? [],
+            setList: (list) =>
+              useCommunityChat.setState((s) => ({
+                messages: { ...s.messages, [message.groupId]: list },
+              })),
+            append: appendMessage,
+          },
+          body,
+        )
       },
     })
 
@@ -602,16 +613,24 @@ class CommunityChatStore {
       const seen = Number(localStorage.getItem(seqKey) ?? '-1')
       if (opened.senderSeq > seen) {
         localStorage.setItem(seqKey, String(opened.senderSeq))
-        const stored: StoredMessage = {
-          groupId: channelId,
-          seq: m.seq,
-          senderAccountId: opened.senderAccountId,
-          text: opened.text,
-          sentAt: opened.ts,
-          outgoing: opened.senderAccountId === this.record?.accountId,
+        const body = parseBody(opened.plaintext)
+        if (body) {
+          await ingestBody(
+            {
+              groupId: channelId,
+              seq: m.seq,
+              senderAccountId: opened.senderAccountId,
+              outgoing: opened.senderAccountId === this.record?.accountId,
+              getList: () => useCommunityChat.getState().messages[channelId] ?? [],
+              setList: (list) =>
+                useCommunityChat.setState((s) => ({
+                  messages: { ...s.messages, [channelId]: list },
+                })),
+              append: appendMessage,
+            },
+            body,
+          )
         }
-        await messageStore.put(stored)
-        appendMessage(stored)
       }
     }
     return true
@@ -672,7 +691,7 @@ class CommunityChatStore {
   private async sendGroupKey(
     channelId: string,
     gk: { communityId: string; keyEpoch: number },
-    text: string,
+    body: MessageBody,
   ): Promise<void> {
     const record = this.record
     if (!record) throw new Error('locked')
@@ -695,7 +714,6 @@ class CommunityChatStore {
     const key = await getKChannel(channelId, epoch)
     if (!key) throw new Error('no_channel_key')
 
-    const ts = Date.now()
     const seqStoreKey = `gn.gkseq.${channelId}`
     const hashStoreKey = `gn.gkhash.${channelId}`
     const senderSeq = Number(localStorage.getItem(seqStoreKey) ?? '0') + 1
@@ -709,8 +727,8 @@ class CommunityChatStore {
       epoch,
       senderDeviceId: record.deviceId,
       deviceSecret: record.deviceSecret,
-      text,
-      ts,
+      body: encodeBody(body),
+      ts: body.ts,
       senderSeq,
       prevSenderHash,
     })
@@ -726,16 +744,13 @@ class CommunityChatStore {
     localStorage.setItem(`gn.gkss.${channelId}.${record.deviceId}`, String(senderSeq))
     if (seq > this.cursor(channelId)) this.setCursor(channelId, seq)
 
-    const stored: StoredMessage = {
-      groupId: channelId,
-      seq,
-      senderAccountId: record.accountId,
-      text,
-      sentAt: ts,
-      outgoing: true,
+    // A display message is stored optimistically; a control message (reaction) is
+    // applied by the caller (react) — bodyToStored returns null for it.
+    const stored = bodyToStored(channelId, seq, record.accountId, true, body)
+    if (stored) {
+      await messageStore.put(stored)
+      appendMessage(stored)
     }
-    await messageStore.put(stored)
-    appendMessage(stored)
   }
 
   private setStatus(channelId: string, status: ChannelStatus): void {
@@ -1015,26 +1030,46 @@ class CommunityChatStore {
     })
   }
 
-  async send(channelId: string, text: string): Promise<void> {
+  async send(channelId: string, text: string, replyTo?: string): Promise<void> {
+    return this.sendBody(channelId, textBody(text, replyTo))
+  }
+
+  /** Add or remove a reaction on a channel message (both MLS + group_key channels). */
+  async react(channelId: string, targetId: string, emoji: string, remove: boolean): Promise<void> {
+    const record = this.record
+    if (!record) return
+    await this.sendBody(channelId, reactionBody(targetId, emoji, remove)).catch((err) =>
+      console.error('react failed', channelId, err),
+    )
+    // Apply to our own view (the control message isn't echoed back on MLS).
+    const res = applyReaction(
+      useCommunityChat.getState().messages[channelId] ?? [],
+      targetId,
+      emoji,
+      record.accountId,
+      remove,
+    )
+    if (res) {
+      useCommunityChat.setState((s) => ({ messages: { ...s.messages, [channelId]: res.list } }))
+      await messageStore.put(res.changed)
+    }
+  }
+
+  /** Encode + send a message body over the channel's transport (MLS or group_key). */
+  private async sendBody(channelId: string, body: MessageBody): Promise<void> {
     const gk = this.groupKey.get(channelId)
-    if (gk) return this.sendGroupKey(channelId, gk, text)
+    if (gk) return this.sendGroupKey(channelId, gk, body)
     const engine = this.engine
     const record = this.record
     if (!engine || !record) throw new Error('locked')
     // Containment: never emit plaintext into a channel with an unauthorised leaf.
     if (this.untrustedChannels.has(channelId)) throw new Error('untrusted')
-    const plaintext = encoder.encode(JSON.stringify({ t: text, ts: Date.now() }))
-    const { seq } = await engine.sendApplication(channelId, plaintext)
-    const stored: StoredMessage = {
-      groupId: channelId,
-      seq,
-      senderAccountId: record.accountId,
-      text,
-      sentAt: Date.now(),
-      outgoing: true,
+    const { seq } = await engine.sendApplication(channelId, encodeBody(body))
+    const stored = bodyToStored(channelId, seq, record.accountId, true, body)
+    if (stored) {
+      await messageStore.put(stored)
+      appendMessage(stored)
     }
-    await messageStore.put(stored)
-    appendMessage(stored)
   }
 
   /**

@@ -112,7 +112,11 @@
     "sent": "Gesendet",
     "settingUp": "Verschlüsselung wird eingerichtet…",
     "cannotSend": "Die Verschlüsselung für diesen Chat wird noch eingerichtet.",
-    "readOnly": "Dieser Kanal ist schreibgeschützt."
+    "readOnly": "Dieser Kanal ist schreibgeschützt.",
+    "react": "Reagieren",
+    "reply": "Antworten",
+    "replyingTo": "Antwort auf",
+    "attachment": "Anhang"
   },
   "settings": {
     "title": "Einstellungen",
