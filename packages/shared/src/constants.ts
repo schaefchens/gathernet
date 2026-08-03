@@ -22,6 +22,8 @@ export const INVITE_CODE_LENGTH = 10
 export const COMMUNITY_QR_PREFIX = 'gathernet:community:'
 /** Encrypted avatar ciphertext cap (server rejects larger blobs). */
 export const COMMUNITY_MEDIA_MAX_BYTES = 350 * 1024
+/** Encrypted chat-attachment ciphertext cap (images/files/voice). */
+export const MESSAGE_MEDIA_MAX_BYTES = 12 * 1024 * 1024
 /** Allowed disappearing-message windows (days); 1 == 24h. */
 export const CHANNEL_MESSAGE_TTL_DAYS = [1, 3, 7, 14, 30] as const
 export const CHANNEL_MESSAGE_TTL_DEFAULT_DAYS = 30

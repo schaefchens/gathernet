@@ -121,7 +121,10 @@
     "edit": "Bearbeiten",
     "delete": "Löschen",
     "edited": "bearbeitet",
-    "deleted": "Diese Nachricht wurde gelöscht"
+    "deleted": "Diese Nachricht wurde gelöscht",
+    "attach": "Datei anhängen",
+    "download": "Herunterladen",
+    "mediaFailed": "Anhang nicht verfügbar"
   },
   "settings": {
     "title": "Einstellungen",

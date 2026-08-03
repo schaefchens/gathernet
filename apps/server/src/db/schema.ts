@@ -795,6 +795,24 @@ export const communityMedia = pgTable('community_media', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+/**
+ * Encrypted chat message attachments (images/files/voice). Ciphertext ONLY — sealed
+ * client-side with a fresh per-file key that lives inside the E2EE message body and
+ * never reaches the server; `mediaId` is a high-entropy bearer token that only
+ * appears inside those bodies. Not community-scoped (used by DMs + channels alike).
+ * (Backing store is Postgres bytea for now — object storage is the production step.)
+ */
+export const messageMedia = pgTable('message_media', {
+  /** 'mm_' + hex(16 random bytes) */
+  mediaId: text('media_id').primaryKey(),
+  ciphertext: bytea('ciphertext').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  uploaderAccountId: text('uploader_account_id')
+    .notNull()
+    .references(() => accounts.accountId),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const communityInvites = pgTable(
   'community_invites',
   {

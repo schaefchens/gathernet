@@ -59,6 +59,19 @@ export function encodeBody(body: MessageBody): Uint8Array {
   return encoder.encode(JSON.stringify(body))
 }
 
+/** Build a media (image/file) message body with an optional caption + reply. */
+export function mediaBody(media: MediaRef, caption?: string, replyTo?: string): MessageBody {
+  return {
+    v: 2,
+    id: newMessageId(),
+    ts: Date.now(),
+    kind: 'media',
+    media,
+    ...(caption ? { text: caption } : {}),
+    ...(replyTo ? { replyTo } : {}),
+  }
+}
+
 /** Build a plain text (optionally reply) message body. */
 export function textBody(text: string, replyTo?: string): MessageBody {
   return {

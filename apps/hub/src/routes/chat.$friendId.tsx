@@ -48,6 +48,9 @@ function ChatScreen() {
         messages={messages}
         ready={!!group?.ready}
         onSend={(text, replyTo) => chatStore.send(groupId, text, replyTo)}
+        onSendMedia={(file, caption, replyTo) =>
+          chatStore.sendMedia(groupId, file, caption, replyTo)
+        }
         onReact={(targetId, emoji, remove) => chatStore.react(groupId, targetId, emoji, remove)}
         onEdit={(targetId, text) => void chatStore.editMessage(groupId, targetId, text)}
         onDelete={(targetId, seq) => void chatStore.deleteMessage(groupId, targetId, seq)}

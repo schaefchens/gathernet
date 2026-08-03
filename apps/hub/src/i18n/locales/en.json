@@ -121,7 +121,10 @@
     "edit": "Edit",
     "delete": "Delete",
     "edited": "edited",
-    "deleted": "This message was deleted"
+    "deleted": "This message was deleted",
+    "attach": "Attach a file",
+    "download": "Download",
+    "mediaFailed": "Attachment unavailable"
   },
   "settings": {
     "title": "Settings",

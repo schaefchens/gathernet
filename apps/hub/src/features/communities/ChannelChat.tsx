@@ -125,6 +125,9 @@ export function ChannelChat({
             messages={messages}
             ready={status === 'ready'}
             onSend={(text, replyTo) => communityChatStore.send(channelId, text, replyTo)}
+            onSendMedia={(file, caption, replyTo) =>
+              communityChatStore.sendMedia(channelId, file, caption, replyTo)
+            }
             onReact={(targetId, emoji, remove) =>
               communityChatStore.react(channelId, targetId, emoji, remove)
             }

@@ -52,11 +52,13 @@ import {
   toStdB64,
   verifyCommunityRoot,
 } from '../lib/community-keys.ts'
+import { encryptAndUpload } from '../lib/media.ts'
 import {
   deleteBody,
   editBody,
   encodeBody,
   type MessageBody,
+  mediaBody,
   parseBody,
   reactionBody,
   textBody,
@@ -1040,6 +1042,17 @@ class CommunityChatStore {
 
   async send(channelId: string, text: string, replyTo?: string): Promise<void> {
     return this.sendBody(channelId, textBody(text, replyTo))
+  }
+
+  /** Encrypt + upload an attachment, then send it as a media message (optional caption). */
+  async sendMedia(
+    channelId: string,
+    file: Blob,
+    caption?: string,
+    replyTo?: string,
+  ): Promise<void> {
+    const media = await encryptAndUpload(file)
+    return this.sendBody(channelId, mediaBody(media, caption, replyTo))
   }
 
   /** Add or remove a reaction on a channel message (both MLS + group_key channels). */

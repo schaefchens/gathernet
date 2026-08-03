@@ -22,6 +22,7 @@ import {
   postMessage,
 } from './modules/delivery/service.ts'
 import { registerFriendRoutes } from './modules/friends/routes.ts'
+import { registerMediaRoutes } from './modules/media/routes.ts'
 import { PresenceService } from './modules/presence/service.ts'
 import { registerPublicationRoutes } from './modules/publications/routes.ts'
 import { makeRoomEphemeralHandler } from './modules/rooms/ephemeral.ts'
@@ -150,6 +151,7 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
     },
   })
   registerDeliveryRoutes(app, { db, registry, authenticate })
+  registerMediaRoutes(app, { db, authenticate })
   registerPublicationRoutes(app, { db, authenticate })
   registerAppRoutes(app, { db, registry, authenticate, appAuthenticate })
   registerRoomRoutes(app, { db, registry, appAuthenticate })

@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { StoredMessage } from '../../lib/storage.ts'
+import { MediaAttachment } from './MediaAttachment.tsx'
 
 interface MessageThreadProps {
   messages: StoredMessage[]
   /** true once encryption is set up and the composer may send */
   ready: boolean
   onSend: (text: string, replyTo?: string) => Promise<void>
+  /** send an encrypted attachment (image/file) with an optional caption */
+  onSendMedia?: (file: File, caption?: string, replyTo?: string) => Promise<void>
   /** toggle a reaction on a message (by its v2 id) */
   onReact?: (targetId: string, emoji: string, remove: boolean) => void
   /** edit one of my own messages (new text) */
@@ -50,6 +53,7 @@ export function MessageThread({
   messages,
   ready,
   onSend,
+  onSendMedia,
   onReact,
   onEdit,
   onDelete,
@@ -66,6 +70,19 @@ export function MessageThread({
   const [customFor, setCustomFor] = useState<string | null>(null)
   const [editingFor, setEditingFor] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const pickFile = async (file: File | undefined) => {
+    if (!file || !onSendMedia) return
+    const caption = draft.trim() || undefined
+    setDraft('')
+    try {
+      await onSendMedia(file, caption, replyingTo ?? undefined)
+      setReplyingTo(null)
+    } catch (err) {
+      console.error('media send failed', err)
+    }
+  }
 
   const applyReactionEmoji = (messageId: string, emoji: string) => {
     const mine = messages
@@ -161,7 +178,14 @@ export function MessageThread({
                         {quoted.text || t('chat.attachment')}
                       </div>
                     )}
-                    <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                    {message.media && (
+                      <div className="mb-1">
+                        <MediaAttachment media={message.media} />
+                      </div>
+                    )}
+                    {message.text && (
+                      <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                    )}
                   </>
                 )}
                 <p className="text-[10px] text-ink-faint text-right mt-1">
@@ -314,6 +338,29 @@ export function MessageThread({
               void send()
             }}
           >
+            {onSendMedia && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    void pickFile(e.target.files?.[0])
+                    e.target.value = '' // allow re-picking the same file
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn-quiet px-3"
+                  disabled={!ready}
+                  title={t('chat.attach')}
+                  aria-label={t('chat.attach')}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  📎
+                </button>
+              </>
+            )}
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}

@@ -18,10 +18,12 @@ import type {
 import { KEY_PACKAGE_REPLENISH_BELOW, KEY_PACKAGE_TARGET } from '@gathernet/shared'
 import { create } from 'zustand'
 import { ApiError, api } from '../lib/api.ts'
+import { encryptAndUpload } from '../lib/media.ts'
 import {
   deleteBody,
   editBody,
   encodeBody,
+  mediaBody,
   parseBody,
   reactionBody,
   textBody,
@@ -348,6 +350,21 @@ class ChatStore {
       }
     } catch (err) {
       console.error('chat work failed', groupId, err)
+    }
+  }
+
+  /** Encrypt + upload an attachment, then send it as a media message (optional caption). */
+  async sendMedia(groupId: string, file: Blob, caption?: string, replyTo?: string): Promise<void> {
+    const engine = this.engine
+    const record = this.record
+    if (!engine || !record) throw new Error('locked')
+    const media = await encryptAndUpload(file)
+    const body = mediaBody(media, caption, replyTo)
+    const { seq } = await engine.sendApplication(groupId, encodeBody(body))
+    const stored = bodyToStored(groupId, seq, record.accountId, true, body)
+    if (stored) {
+      await messageStore.put(stored)
+      appendMessage(stored)
     }
   }
 
