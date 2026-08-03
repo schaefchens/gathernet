@@ -19,6 +19,7 @@
 import {
   type ChannelDevicesResponse,
   type CommunityDevice,
+  type CommunityDevicesResponse,
   type DeviceId,
   eciesOpen,
   eciesSeal,
@@ -291,22 +292,35 @@ async function verifyCommitmentAuthority(
 
 /**
  * A per-channel, locally-persisted, MONOTONIC high-water of the highest epoch we
- * have seen an AUTHORISED commitment for. It is advanced ONLY from verified
- * evidence (our own rotations; a commitment passing `verifyCommitmentAuthority`) —
- * NEVER from a raw server-reported epoch scalar, which a compromised server could
- * under-report to keep us sealing under an old (removed-member-readable) key, or
- * over-report to wedge us. `sendGroupKey` refuses to send while `latestHeldEpoch <
- * highWater`, so we never seal under a superseded key (fail closed, no leak).
+ * have seen a SIGNATURE-valid rotation commitment for (a member signed a rotation to
+ * that epoch → one happened). Advanced from our own rotations and from any sig-valid
+ * higher commitment — NEVER from a raw server-reported epoch scalar. `sendGroupKey`
+ * refuses to send while `latestHeldEpoch < highWater`, so we FAIL CLOSED: we never
+ * seal under a superseded key a removed member holds, even when we can't yet verify
+ * the rotation's authority (the documented owner-availability window).
+ *
+ * Chosen tradeoff (fail-closed): a bad actor who can get a sig-valid commitment at a
+ * higher epoch served to a target can PAUSE that target's sending until the real key
+ * is adoptable — an accepted, rare, recoverable block (never a content leak). The
+ * per-advance STEP CAP below bounds one poisoned far-future commitment so it can't
+ * store an absurd value / brick sending outright; legit rotations advance by 1 and
+ * legitimately-behind clients catch up in bounded steps. The durable removal of the
+ * block is the deferred authority-epoch redesign (see ADR 0004).
  */
 const highWaterKey = (channelId: string) => `gn.gkhw.${channelId}`
+const HIGH_WATER_MAX_STEP = 64
 
 export function channelEpochHighWater(channelId: string): number {
   return Number(localStorage.getItem(highWaterKey(channelId)) ?? '0')
 }
 
 export function bumpChannelEpochHighWater(channelId: string, epoch: number): void {
-  if (epoch > channelEpochHighWater(channelId)) {
-    localStorage.setItem(highWaterKey(channelId), String(epoch))
+  const current = channelEpochHighWater(channelId)
+  if (epoch > current) {
+    localStorage.setItem(
+      highWaterKey(channelId),
+      String(Math.min(epoch, current + HIGH_WATER_MAX_STEP)),
+    )
   }
 }
 
@@ -571,17 +585,35 @@ export async function grantChannelKey(
   // locally-held K_meta (never the relay); the issuer resolver may fetch-on-miss
   // (bounded) since a cap's issuer can be on any roster page.
   const ownerAccountId = await getPinnedOwner(communityId)
-  const communityEpoch = await getKMetaEpoch(communityId)
-  const gate: ChannelGrantGate | null =
-    ownerAccountId && communityEpoch >= 0
-      ? {
-          ownerAccountId,
-          expectedEpoch: communityEpoch,
-          myAccountId: record.accountId,
-          resolve: makeDeviceResolver([], { communityId }),
-          getCap: makeCapFetcher(communityId),
-        }
-      : null
+  let gate: ChannelGrantGate | null = null
+  if (ownerAccountId) {
+    // Enforcing mode. The gate anchors on our HELD community epoch — but it is only
+    // sound if that equals the community's CURRENT epoch. If we're stale (or hold no
+    // K_meta), a compromised server could serve stale-epoch caps that match our stale
+    // anchor and slip a removed member past the gate → FAIL CLOSED (skip granting; a
+    // current-epoch manager tops up) rather than granting under an untrustworthy gate.
+    const communityEpoch = await getKMetaEpoch(communityId)
+    if (communityEpoch < 0) return
+    let currentEpoch: number
+    try {
+      currentEpoch = (
+        await api<CommunityDevicesResponse>(
+          'GET',
+          `/api/v1/communities/${communityId}/devices?limit=1`,
+        )
+      ).keyEpoch
+    } catch {
+      return
+    }
+    if (communityEpoch !== currentEpoch) return // stale anchor → fail closed
+    gate = {
+      ownerAccountId,
+      expectedEpoch: communityEpoch,
+      myAccountId: record.accountId,
+      resolve: makeDeviceResolver([], { communityId }),
+      getCap: makeCapFetcher(communityId),
+    }
+  }
   let commitmentPosted = false
   let after: string | undefined
   // Page the (possibly 100k) device list (server caps a page at DEVICE_PAGE);

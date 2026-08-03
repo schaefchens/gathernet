@@ -50,6 +50,13 @@ for (const event of [
   wsClient.on(event, (m) => invalidateCommunity(m.payload.communityId))
 }
 
+// A member joined → an owner/leader issues their membership cap NOW (targeted), so
+// the joiner is capped before a manager tops up their key grant (else the capability
+// gate would skip them, and they'd never receive the key).
+wsClient.on('community.member_joined', (m) => {
+  void communityChatStore.issueMemberCapForJoiner(m.payload.communityId, m.payload.accountId)
+})
+
 // A K_meta grant became available for this account → a device lacking the key
 // can now fetch + open it; refresh decrypted views once it lands.
 wsClient.on('community.key_grants_available', (m) => {

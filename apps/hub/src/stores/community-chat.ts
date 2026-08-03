@@ -10,6 +10,7 @@ import {
 import type {
   ChannelJoinInfoResponse,
   CommunityDetailResponse,
+  CommunityDeviceResponse,
   CommunityDevicesResponse,
   CommunityListItem,
   CommunityRoot,
@@ -33,6 +34,7 @@ import {
 } from '../lib/channel-keys.ts'
 import {
   accountHoldsCap,
+  buildCapability,
   COMMUNITY_SCOPE,
   fetchKMetaGrant,
   forgetKMetaCache,
@@ -460,8 +462,12 @@ class CommunityChatStore {
 
   /**
    * Resolve + verify a claimed sender device's identity from its DeviceCert
-   * (signed by its account) — NEVER the server's `senderDevice` field. Cached
-   * per community (member devices verified in one fetch); a cache miss reloads.
+   * (signed by its account) — NEVER the server's `senderDevice` field. Resolves ONE
+   * device by id via the targeted endpoint (NOT the full member-device list): at
+   * mega-community scale the list is capped/paged, so pulling it would (a) fail to
+   * resolve any sender beyond the first page — silently dropping broadcast posts —
+   * and (b) leak the roster to a regular member. Cached per (community, device); a
+   * not-found id is negative-cached to bound an inject-random-ids amplification DoS.
    */
   private async resolveSender(
     communityId: string,
@@ -469,21 +475,18 @@ class CommunityChatStore {
   ): Promise<{ devicePk: Uint8Array; accountId: string } | null> {
     const cached = this.senderCerts.get(communityId)
     if (cached?.has(deviceId)) return cached.get(deviceId) ?? null
-    // A device id we already looked up and didn't find → don't refetch the whole
-    // list again (bounds an inject-random-ids amplification DoS). Cleared on
-    // reconnect so a genuinely-new device gets resolved.
     if (this.unresolvedSenders.has(`${communityId}:${deviceId}`)) return null
     try {
-      const { devices } = await api<CommunityDevicesResponse>(
+      const { device } = await api<CommunityDeviceResponse>(
         'GET',
-        `/api/v1/communities/${communityId}/devices`,
+        `/api/v1/communities/${communityId}/devices/${deviceId}`,
       )
-      const map = new Map<string, { devicePk: Uint8Array; accountId: string } | null>()
-      for (const d of devices) map.set(d.deviceId, await verifyChannelSender(d))
+      const identity = device ? await verifyChannelSender(device) : null
+      const map = cached ?? new Map<string, { devicePk: Uint8Array; accountId: string } | null>()
+      map.set(deviceId, identity)
       this.senderCerts.set(communityId, map)
-      const resolved = map.get(deviceId) ?? null
-      if (!map.has(deviceId)) this.unresolvedSenders.add(`${communityId}:${deviceId}`)
-      return resolved
+      if (!device) this.unresolvedSenders.add(`${communityId}:${deviceId}`)
+      return identity
     } catch {
       return null
     }
@@ -501,8 +504,7 @@ class CommunityChatStore {
     const epoch = await getKMetaEpoch(communityId)
     if (!ownerAccountId || epoch < 0) return true // legacy/degraded — can't verify
     const cacheKey = `${communityId}:${epoch}:${accountId}`
-    const cached = this.memberCapCache.get(cacheKey)
-    if (cached !== undefined) return cached
+    if (this.memberCapCache.get(cacheKey)) return true // cache POSITIVES only
     const resolve = makeDeviceResolver([], { communityId })
     const getCap = makeCapFetcher(communityId)
     const ok = await accountHoldsCap(
@@ -513,7 +515,10 @@ class CommunityChatStore {
       getCap,
       epoch,
     )
-    this.memberCapCache.set(cacheKey, ok)
+    // Only cache a positive: a negative may be a cap that hasn't propagated yet
+    // (a just-issued joiner) — caching it would drop their messages until reconnect.
+    // Re-checking a negative is bounded (only cert-verified real accounts reach here).
+    if (ok) this.memberCapCache.set(cacheKey, true)
     return ok
   }
 
@@ -837,7 +842,11 @@ class CommunityChatStore {
     } catch {
       return true // offline — don't flip a channel untrusted on a fetch failure
     }
-    const resolve = makeDeviceResolver(devices)
+    // Seed with the fetched page, but allow bounded fetch-on-miss: an MLS leaf (or a
+    // cap issuer in its chain) can be a device beyond the first roster page, and
+    // without fetch-on-miss it would fail to resolve → the channel would be falsely
+    // flipped untrusted (composer wedge) in a >page-size community.
+    const resolve = makeDeviceResolver(devices, { communityId, maxFetch: 256 })
     const getCap = makeCapFetcher(communityId)
     let trusted = true
     for (const leaf of engine.members(channelId)) {
@@ -1101,6 +1110,35 @@ class CommunityChatStore {
   ): Promise<void> {
     if (!this.record) return
     await issueCapabilities(communityId, epoch, myRole, this.record).catch(() => {})
+  }
+
+  /**
+   * Owner/leader: issue a single community MEMBER cap for a just-joined account,
+   * TARGETED (one cap, no roster sweep — scale-safe at 100k) so the joiner is capped
+   * before a manager tops up their key grant (else the grant gate would skip them).
+   * Fired on the `community.member_joined` event. Fresh community joiners are always
+   * role 'member'. No-op unless we're owner/leader and hold the current K_meta.
+   */
+  async issueMemberCapForJoiner(communityId: string, joinerAccountId: string): Promise<void> {
+    if (!this.record) return
+    const epoch = await getKMetaEpoch(communityId)
+    if (epoch < 0) return
+    const detail = await api<CommunityDetailResponse>(
+      'GET',
+      `/api/v1/communities/${communityId}`,
+    ).catch(() => null)
+    if (!detail || (detail.myRole !== 'owner' && detail.myRole !== 'leader')) return
+    const cap = await buildCapability(
+      communityId,
+      COMMUNITY_SCOPE,
+      joinerAccountId,
+      'member',
+      epoch,
+      this.record,
+    )
+    await api('POST', `/api/v1/communities/${communityId}/capabilities`, {
+      capabilities: [cap],
+    }).catch(() => {})
   }
 
   /** Owner/leader: issue channel-moderator caps (the group_key rotation-minter authority). */
