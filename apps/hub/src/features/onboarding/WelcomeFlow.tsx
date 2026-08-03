@@ -202,6 +202,18 @@ function NameStep(props: { onBack(): void; onNext(name: string): void }) {
 function PhraseStep(props: { phrase: string; onBack(): void; onNext(): void }) {
   const { t } = useTranslation()
   const words = useMemo(() => props.phrase.split(' '), [props.phrase])
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(props.phrase)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // clipboard unavailable (permissions / insecure context) — no-op
+    }
+  }
+
   return (
     <div className="card space-y-4">
       <h2 className="font-display text-2xl">{t('create.phraseTitle')}</h2>
@@ -215,6 +227,9 @@ function PhraseStep(props: { phrase: string; onBack(): void; onNext(): void }) {
           </li>
         ))}
       </ol>
+      <button type="button" className="btn-quiet text-sm w-full" onClick={copy}>
+        {copied ? t('common.copied') : t('common.copy')}
+      </button>
       <StepButtons
         onBack={props.onBack}
         nextLabel={t('create.phraseWritten')}
