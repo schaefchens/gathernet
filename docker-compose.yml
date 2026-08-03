@@ -18,5 +18,27 @@ services:
       timeout: 3s
       retries: 10
 
+  # S3-compatible object storage for encrypted message/community media blobs.
+  # Ciphertext ONLY ever reaches it (the per-file key stays in the E2EE message body),
+  # and it is a PROXIED backend: the browser never talks to it — only our server does.
+  #   DEV: bound to 127.0.0.1:9000 so the host-run `pnpm dev` server can reach it. Our
+  #   client code never references it. PROD: do NOT publish these ports — run the
+  #   server in a container on this network and let it reach rustfs:9000 internally,
+  #   so the store is not an externally reachable attack surface.
+  # Pinned by digest (tested rustfs/rustfs:latest, 2026-08) for reproducibility.
+  rustfs:
+    image: rustfs/rustfs@sha256:41fe89380f4120a337790c02af192c3fe7bb55c3edc2e6e9357b487b47c6ab21
+    command: ['server', '/data']
+    environment:
+      RUSTFS_ACCESS_KEY: gathernet
+      RUSTFS_SECRET_KEY: gathernet_dev_secret
+      RUSTFS_VOLUMES: /data
+    ports:
+      # DEV ONLY, localhost-bound. Remove in production (keep rustfs internal).
+      - '127.0.0.1:9000:9000'
+    volumes:
+      - rustfsdata:/data
+
 volumes:
   pgdata:
+  rustfsdata:

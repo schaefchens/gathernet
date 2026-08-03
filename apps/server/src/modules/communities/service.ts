@@ -62,6 +62,7 @@ import {
   welcomes,
 } from '../../db/schema.ts'
 import { newCrockfordCode, newHexId } from '../../lib/codes.ts'
+import type { BlobStore } from '../../storage/blob-store.ts'
 import type { ConnectionRegistry } from '../../ws/registry.ts'
 import { ServiceError } from '../accounts/service.ts'
 import { satisfiesChannelAccess } from '../delivery/service.ts'
@@ -513,8 +514,12 @@ export async function updateCommunity(
 
 /* ---------------------------------- media --------------------------------- */
 
+/** Object key for a community media blob (avatar ciphertext). */
+export const communityBlobKey = (mediaId: string) => `community/${mediaId}`
+
 export async function uploadCommunityMedia(
   db: Db,
+  blob: BlobStore,
   accountId: string,
   communityId: string,
   ciphertextB64: string,
@@ -525,13 +530,16 @@ export async function uploadCommunityMedia(
     throw new ServiceError(413, 'media_too_large')
   }
   const mediaId = newHexId('md', 16)
-  await db.insert(communityMedia).values({ mediaId, communityId, ciphertext })
+  // Ciphertext → object storage; the row is metadata + the community binding.
+  await blob.put(communityBlobKey(mediaId), ciphertext, 'application/octet-stream')
+  await db.insert(communityMedia).values({ mediaId, communityId })
   return { mediaId }
 }
 
-/** Streams encrypted avatar ciphertext to any active member of its community. */
+/** Streams encrypted avatar ciphertext (from object storage) to any active member. */
 export async function getCommunityMedia(
   db: Db,
+  blob: BlobStore,
   accountId: string,
   mediaId: string,
 ): Promise<Buffer> {
@@ -540,7 +548,9 @@ export async function getCommunityMedia(
   })
   if (!media) throw new ServiceError(404, 'media_not_found')
   await requireActiveMembership(db, media.communityId, accountId)
-  return media.ciphertext
+  const bytes = await blob.get(communityBlobKey(mediaId))
+  if (!bytes) throw new ServiceError(404, 'media_not_found')
+  return bytes
 }
 
 /* --------------------------------- invites -------------------------------- */
@@ -2027,6 +2037,7 @@ export async function getCapability(
 export async function rotateCommunity(
   db: Db,
   registry: ConnectionRegistry,
+  blob: BlobStore,
   accountId: string,
   communityId: string,
   input: RotateRequest,
@@ -2063,14 +2074,9 @@ export async function rotateCommunity(
           ),
         )
     }
-    for (const m of input.media) {
-      await tx
-        .update(communityMedia)
-        .set({ ciphertext: bufOf(m.ciphertext) })
-        .where(
-          and(eq(communityMedia.mediaId, m.mediaId), eq(communityMedia.communityId, communityId)),
-        )
-    }
+    // Media (avatars) re-encrypted under the new key are re-uploaded to object
+    // storage AFTER the tx commits (S3 isn't transactional; a failed re-upload only
+    // leaves a cosmetically-stale avatar, which the client already tolerates).
 
     // Old-epoch grants + commitments (incl. any to the removed member) become
     // useless — drop them (K_meta re-encrypts metadata, unlike K_channel).
@@ -2135,6 +2141,27 @@ export async function rotateCommunity(
       )
     return new Set(owners.map((o) => o.accountId))
   })
+
+  // Re-upload re-encrypted avatars to object storage (post-commit, best-effort),
+  // but only for media that actually belongs to this community — never let a leader
+  // overwrite a foreign blob by passing an arbitrary mediaId.
+  if (input.media.length > 0) {
+    const owned = new Set(
+      (
+        await db
+          .select({ mediaId: communityMedia.mediaId })
+          .from(communityMedia)
+          .where(eq(communityMedia.communityId, communityId))
+      ).map((r) => r.mediaId),
+    )
+    for (const m of input.media) {
+      if (owned.has(m.mediaId)) {
+        await blob
+          .put(communityBlobKey(m.mediaId), bufOf(m.ciphertext), 'application/octet-stream')
+          .catch(() => {})
+      }
+    }
+  }
 
   // Members refetch metadata (new epoch); grantees' other devices fetch the key.
   await emitToMembers(db, registry, communityId, {

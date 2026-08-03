@@ -791,7 +791,8 @@ export const communityMedia = pgTable('community_media', {
   communityId: text('community_id')
     .notNull()
     .references(() => communities.communityId),
-  ciphertext: bytea('ciphertext').notNull(),
+  /** ciphertext lives in object storage (BlobStore), keyed by mediaId; this row is
+   *  metadata + the membership/community binding used to authorize downloads. */
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -805,7 +806,8 @@ export const communityMedia = pgTable('community_media', {
 export const messageMedia = pgTable('message_media', {
   /** 'mm_' + hex(16 random bytes) */
   mediaId: text('media_id').primaryKey(),
-  ciphertext: bytea('ciphertext').notNull(),
+  /** ciphertext lives in object storage (BlobStore), keyed by mediaId; this row is
+   *  metadata — sizeBytes + uploader (for delete-authorization) + existence. */
   sizeBytes: integer('size_bytes').notNull(),
   uploaderAccountId: text('uploader_account_id')
     .notNull()

@@ -30,6 +30,7 @@ import { registerRoomRoutes } from './modules/rooms/routes.ts'
 import { resolveAppDevice } from './modules/rooms/service.ts'
 import { makeAppAuthenticate } from './plugins/app-auth.ts'
 import { makeAuthenticate } from './plugins/auth.ts'
+import { type BlobStore, S3BlobStore } from './storage/blob-store.ts'
 import { registerWsGateway, type WsAuthenticator, type WsMessageHandler } from './ws/gateway.ts'
 import { ConnectionRegistry } from './ws/registry.ts'
 
@@ -38,6 +39,8 @@ export interface BuildAppOptions {
   db: Db
   /** Test seam; defaults to real session-token verification. */
   authenticator?: WsAuthenticator
+  /** Test seam; defaults to the S3/RustFS store. Tests inject an in-memory one. */
+  blobStore?: BlobStore
 }
 
 export interface GathernetApp {
@@ -48,6 +51,22 @@ export interface GathernetApp {
 
 export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> {
   const { config, db } = options
+  // Object storage for encrypted media. Tests inject an in-memory store; otherwise
+  // the S3/RustFS-backed store (bucket ensured to exist on boot).
+  let blobStore: BlobStore
+  if (options.blobStore) {
+    blobStore = options.blobStore
+  } else {
+    const s3 = new S3BlobStore({
+      endpoint: config.S3_ENDPOINT,
+      region: config.S3_REGION,
+      accessKey: config.S3_ACCESS_KEY,
+      secretKey: config.S3_SECRET_KEY,
+      bucket: config.S3_BUCKET,
+    })
+    await s3.ensureBucket()
+    blobStore = s3
+  }
   const app = Fastify({
     logger: { level: config.LOG_LEVEL },
   })
@@ -151,11 +170,11 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
     },
   })
   registerDeliveryRoutes(app, { db, registry, authenticate })
-  registerMediaRoutes(app, { db, authenticate })
+  registerMediaRoutes(app, { db, blobStore, authenticate })
   registerPublicationRoutes(app, { db, authenticate })
   registerAppRoutes(app, { db, registry, authenticate, appAuthenticate })
   registerRoomRoutes(app, { db, registry, appAuthenticate })
-  registerCommunityRoutes(app, { db, registry, authenticate })
+  registerCommunityRoutes(app, { db, registry, blobStore, authenticate })
 
   const chatSendHandler: WsMessageHandler = async (session, message) => {
     if (message.type !== 'chat.send') return

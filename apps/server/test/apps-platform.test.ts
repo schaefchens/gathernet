@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
+import { InMemoryBlobStore } from '../src/storage/blob-store.ts'
 import { buildEnrollment, generateEd25519 } from './helpers/client-crypto.ts'
 import { makeTestDb, type TestDb } from './helpers/db.ts'
 
@@ -13,6 +14,7 @@ beforeAll(async () => {
   const built = await buildApp({
     config: loadConfig({ LOG_LEVEL: 'error', RATE_LIMIT_ENABLED: 'false' }),
     db: testDb.db,
+    blobStore: new InMemoryBlobStore(),
   })
   app = built.app
   await app.ready()

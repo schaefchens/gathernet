@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
+import { InMemoryBlobStore } from '../src/storage/blob-store.ts'
 import { makeTestDb, type TestDb } from './helpers/db.ts'
 
 let testDb: TestDb
@@ -16,6 +17,7 @@ beforeAll(async () => {
   const built = await buildApp({
     config: loadConfig({ LOG_LEVEL: 'error', RATE_LIMIT_ENABLED: 'false' }),
     db: testDb.db,
+    blobStore: new InMemoryBlobStore(),
     authenticator: {
       async verifyToken(token: string) {
         if (token !== 'dev-token') return null

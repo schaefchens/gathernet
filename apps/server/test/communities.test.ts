@@ -11,6 +11,7 @@ import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
 import { pruneChannelInvites, pruneCommunityInvites } from '../src/modules/communities/service.ts'
 import { pruneChannelMessages } from '../src/modules/delivery/service.ts'
+import { InMemoryBlobStore } from '../src/storage/blob-store.ts'
 import { buildEnrollment, generateEd25519 } from './helpers/client-crypto.ts'
 import { makeTestDb, type TestDb } from './helpers/db.ts'
 import { TestWsClient } from './helpers/ws-client.ts'
@@ -24,6 +25,7 @@ beforeAll(async () => {
   const built = await buildApp({
     config: loadConfig({ LOG_LEVEL: 'error', RATE_LIMIT_ENABLED: 'false' }),
     db: testDb.db,
+    blobStore: new InMemoryBlobStore(),
   })
   app = built.app
   await app.listen({ port: 0, host: '127.0.0.1' })

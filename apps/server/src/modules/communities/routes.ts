@@ -27,6 +27,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { Db } from '../../db/index.ts'
+import type { BlobStore } from '../../storage/blob-store.ts'
 import type { ConnectionRegistry } from '../../ws/registry.ts'
 import { ServiceError } from '../accounts/service.ts'
 import { EpochConflictError, postCommit } from '../delivery/service.ts'
@@ -77,6 +78,7 @@ import {
 export interface CommunityRoutesOptions {
   db: Db
   registry: ConnectionRegistry
+  blobStore: BlobStore
   authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>
 }
 
@@ -97,7 +99,7 @@ const capabilityQuerySchema = z.object({
 
 export function registerCommunityRoutes(
   app: FastifyInstance,
-  { db, registry, authenticate }: CommunityRoutesOptions,
+  { db, registry, blobStore, authenticate }: CommunityRoutesOptions,
 ): void {
   const auth = { preHandler: authenticate }
 
@@ -128,7 +130,12 @@ export function registerCommunityRoutes(
     auth,
     async (request, reply) => {
       const session = requireSession(request)
-      const bytes = await getCommunityMedia(db, session.accountId, request.params.mediaId)
+      const bytes = await getCommunityMedia(
+        db,
+        blobStore,
+        session.accountId,
+        request.params.mediaId,
+      )
       reply.header('cache-control', 'private, max-age=31536000, immutable')
       reply.type('application/octet-stream')
       return reply.send(bytes)
@@ -250,7 +257,13 @@ export function registerCommunityRoutes(
       const session = requireSession(request)
       const body = uploadMediaRequestSchema.parse(request.body)
       reply.status(201)
-      return uploadCommunityMedia(db, session.accountId, request.params.id, body.ciphertext)
+      return uploadCommunityMedia(
+        db,
+        blobStore,
+        session.accountId,
+        request.params.id,
+        body.ciphertext,
+      )
     },
   )
 
@@ -294,7 +307,7 @@ export function registerCommunityRoutes(
   app.post<{ Params: { id: string } }>('/api/v1/communities/:id/rotate', auth, async (request) => {
     const session = requireSession(request)
     const body = rotateRequestSchema.parse(request.body)
-    await rotateCommunity(db, registry, session.accountId, request.params.id, body)
+    await rotateCommunity(db, registry, blobStore, session.accountId, request.params.id, body)
     return { ok: true }
   })
 
