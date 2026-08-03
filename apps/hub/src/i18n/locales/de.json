@@ -116,7 +116,8 @@
     "react": "Reagieren",
     "reply": "Antworten",
     "replyingTo": "Antwort auf",
-    "attachment": "Anhang"
+    "attachment": "Anhang",
+    "moreEmoji": "Mehr Emojis"
   },
   "settings": {
     "title": "Einstellungen",

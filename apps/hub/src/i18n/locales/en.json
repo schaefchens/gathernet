@@ -116,7 +116,8 @@
     "react": "React",
     "reply": "Reply",
     "replyingTo": "Replying to",
-    "attachment": "Attachment"
+    "attachment": "Attachment",
+    "moreEmoji": "More emoji"
   },
   "settings": {
     "title": "Settings",

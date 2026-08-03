@@ -22,6 +22,20 @@ interface MessageThreadProps {
 /** Quick-reaction palette — prayer-first, a small deliberate set (not a full picker). */
 const REACTIONS = ['🙏', '❤️', '👍', '😀', '😢', '🎉']
 
+/** First grapheme of an input string (so a multi-codepoint emoji stays intact). */
+function firstEmoji(s: string): string | null {
+  const trimmed = s.trim()
+  if (!trimmed) return null
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    for (const { segment } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(
+      trimmed,
+    )) {
+      return segment
+    }
+  }
+  return [...trimmed][0] ?? null
+}
+
 /**
  * The scrollable decrypted-message list plus the send composer, shared by DM
  * chats and community channels. Renders replies + reactions and offers a per-message
@@ -43,6 +57,16 @@ export function MessageThread({
   const [sending, setSending] = useState(false)
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
   const [pickerFor, setPickerFor] = useState<string | null>(null)
+  const [customFor, setCustomFor] = useState<string | null>(null)
+
+  const applyReactionEmoji = (messageId: string, emoji: string) => {
+    const mine = messages
+      .find((m) => m.id === messageId)
+      ?.reactions?.[emoji]?.includes(myAccountId ?? '')
+    onReact?.(messageId, emoji, mine ?? false)
+    setPickerFor(null)
+    setCustomFor(null)
+  }
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const byId = useMemo(() => {
@@ -147,9 +171,10 @@ export function MessageThread({
                   <button
                     type="button"
                     className="text-xs text-ink-faint hover:text-ink"
-                    onClick={() =>
+                    onClick={() => {
                       setPickerFor(pickerFor === message.id ? null : (message.id ?? null))
-                    }
+                      setCustomFor(null)
+                    }}
                   >
                     {t('chat.react')}
                   </button>
@@ -163,24 +188,41 @@ export function MessageThread({
                 </div>
               )}
               {pickerFor === message.id && (
-                <div className={`flex gap-1 mt-1 ${message.outgoing ? 'justify-end' : ''}`}>
-                  {REACTIONS.map((emoji) => {
-                    const mine =
-                      !!myAccountId && (message.reactions?.[emoji]?.includes(myAccountId) ?? false)
-                    return (
-                      <button
-                        key={emoji}
-                        type="button"
-                        className="text-base hover:scale-125 transition-transform"
-                        onClick={() => {
-                          if (message.id) onReact?.(message.id, emoji, mine)
-                          setPickerFor(null)
-                        }}
-                      >
-                        {emoji}
-                      </button>
-                    )
-                  })}
+                <div
+                  className={`flex items-center gap-1 mt-1 ${message.outgoing ? 'justify-end' : ''}`}
+                >
+                  {REACTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      className="text-base hover:scale-125 transition-transform"
+                      onClick={() => message.id && applyReactionEmoji(message.id, emoji)}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                  {customFor === message.id ? (
+                    <input
+                      // biome-ignore lint/a11y/noAutofocus: focus is required to open the native emoji picker
+                      autoFocus
+                      className="w-14 text-base px-1 py-0.5"
+                      placeholder="🙂"
+                      aria-label={t('chat.moreEmoji')}
+                      onChange={(e) => {
+                        const emoji = firstEmoji(e.target.value)
+                        if (emoji && message.id) applyReactionEmoji(message.id, emoji)
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-base text-ink-faint hover:text-ink px-1"
+                      title={t('chat.moreEmoji')}
+                      onClick={() => setCustomFor(message.id ?? null)}
+                    >
+                      ＋
+                    </button>
+                  )}
                 </div>
               )}
             </div>
