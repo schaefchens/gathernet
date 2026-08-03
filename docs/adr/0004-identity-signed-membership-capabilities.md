@@ -161,6 +161,28 @@ milestone closes the "who may mint" + "never send under a superseded key" gaps:
 
 ## Deferred (explicit follow-ups)
 
+> **Status (2026-08-03): crypto hardening is intentionally PAUSED here.** The team is
+> moving to a feature-completion phase and will return for a dedicated
+> crypto-optimization phase against the finished feature set. The items below are the
+> pickup list for that phase. All deterministic checks (typecheck, 128 server + 18
+> mls-sync tests, Biome) are green at the pause point; the group_key e2e regression is
+> fixed. Two multi-client e2e tests (`communities.spec.ts:256`, `:311`) are FLAKY
+> (pass in isolation) — stabilise them in the crypto phase.
+
+- **Capability + key-grant slot squatting (confirmed DoS).** `postCapabilities` /
+  `postKeyGrants` / channel-grant inserts use `onConflictDoNothing` on a PK that does
+  NOT include the issuer/creator, and `getCapability`/`myKeyGrant` return a single
+  row. A malicious member can POST a bogus cap/grant for a victim's
+  `(scope, subject, epoch)` slot FIRST → the honest one is dropped → the victim is
+  treated as un-capped and skipped (per-epoch, re-griefable availability DoS). Fix:
+  add issuer/`createdBy` to the natural key and have the fetch endpoints return ALL
+  candidates so the client picks one that chains to the pinned owner / passes the
+  commitment. Needs a migration + a response-shape change + client "try each".
+- **Enforce the no-roster / active-member model.** `listCommunityMembers` +
+  `listCommunityDevices` still hand any member the full roster; per the product
+  decision (see the `big-groups-no-roster` memory) normal users get an *active
+  members* view (recent writers, local) and managers get the full list only for small
+  communities. Endpoints + member-list UI change.
 - **Decouple channel-minter authority from the K_meta epoch (owner-availability
   liveness).** Moderator caps chain through a community-LEADER cap, which only the
   OWNER mints. After a *leader-driven* K_meta rotation, no leader cap exists at the
