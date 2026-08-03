@@ -120,6 +120,13 @@
       "when": 1785764469056,
       "tag": "0016_spooky_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785777576032,
+      "tag": "0017_ambiguous_white_tiger",
+      "breakpoints": true
     }
   ]
 }

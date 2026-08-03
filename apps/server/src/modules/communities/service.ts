@@ -362,6 +362,7 @@ export async function getCommunityDetail(
       visibility: communityChannels.visibility,
       joinPolicy: communityChannels.joinPolicy,
       postPolicy: communityChannels.postPolicy,
+      pinPolicy: communityChannels.pinPolicy,
       messageTtlDays: communityChannels.messageTtlDays,
       position: communityChannels.position,
       encryptionMode: communityChannels.encryptionMode,
@@ -409,6 +410,7 @@ export async function getCommunityDetail(
         visibility: c.visibility,
         joinPolicy: c.joinPolicy,
         postPolicy: c.postPolicy,
+        pinPolicy: c.pinPolicy,
         messageTtlDays: c.messageTtlDays,
         position: c.position,
         myStatus,
@@ -708,6 +710,10 @@ export async function createChannel(
       visibility: input.visibility,
       joinPolicy: input.joinPolicy,
       postPolicy: input.postPolicy,
+      // Default the pin policy from the encryption mode: small MLS channels let
+      // everyone pin; big group_key channels default to suggest→approve.
+      pinPolicy:
+        input.pinPolicy ?? (input.encryptionMode === 'group_key' ? 'moderators' : 'everyone'),
       messageTtlDays: input.messageTtlDays,
       encryptionMode: input.encryptionMode,
       position,
@@ -765,6 +771,7 @@ export async function updateChannel(
   if (input.visibility !== undefined) patch.visibility = input.visibility
   if (input.joinPolicy !== undefined) patch.joinPolicy = input.joinPolicy
   if (input.postPolicy !== undefined) patch.postPolicy = input.postPolicy
+  if (input.pinPolicy !== undefined) patch.pinPolicy = input.pinPolicy
   if (input.messageTtlDays !== undefined) patch.messageTtlDays = input.messageTtlDays
   if (input.position !== undefined) patch.position = input.position
   await db.update(communityChannels).set(patch).where(eq(communityChannels.channelId, channelId))

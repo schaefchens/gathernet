@@ -237,6 +237,8 @@ function channelsOf(res: Awaited<ReturnType<typeof detail>>) {
     access: string
     visibility: string
     joinPolicy: string
+    postPolicy: string
+    pinPolicy: string
     messageTtlDays: number
     myStatus: string
     myRole: string
@@ -977,6 +979,42 @@ describe('moderators + channel kicks', () => {
     await expect(
       postMessage(testDb.db, member.deviceId, channelId, epoch2, fakeB64(48)),
     ).resolves.toMatchObject({ senderDevice: member.deviceId })
+  })
+
+  it('pinPolicy: defaults from encryption mode; only a manager may change it', async () => {
+    const owner = await createUser('OwnerPin')
+    const member = await createUser('MemberPin')
+    const communityId = await createCommunity(owner)
+    // MLS (small) channel defaults to everyone-pins.
+    const mlsChan = await createChannel(owner, communityId)
+    // group_key (big) channel defaults to moderators (members suggest).
+    const gkChan = await createGroupKeyChannel(owner, communityId)
+    await addMember(owner, communityId, member)
+
+    const chans = channelsOf(await detail(owner, communityId))
+    expect(chans.find((c) => c.channelId === mlsChan)?.pinPolicy).toBe('everyone')
+    expect(chans.find((c) => c.channelId === gkChan)?.pinPolicy).toBe('moderators')
+
+    // A non-manager member cannot change the pin policy.
+    await joinOpenChannel(member, communityId, mlsChan)
+    const denied = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/communities/${communityId}/channels/${mlsChan}`,
+      headers: auth(member),
+      payload: { pinPolicy: 'moderators' },
+    })
+    expect(denied.statusCode).toBe(403)
+
+    // The owner (a channel manager) can.
+    const ok = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/communities/${communityId}/channels/${mlsChan}`,
+      headers: auth(owner),
+      payload: { pinPolicy: 'moderators' },
+    })
+    expect(ok.statusCode).toBe(200)
+    const after = channelsOf(await detail(owner, communityId))
+    expect(after.find((c) => c.channelId === mlsChan)?.pinPolicy).toBe('moderators')
   })
 
   it('mute: a muted member keeps read access but is refused posting; unmute restores', async () => {

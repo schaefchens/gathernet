@@ -500,6 +500,13 @@ export const channelVisibilityEnum = pgEnum('channel_visibility', ['listed', 'un
 export const channelJoinPolicyEnum = pgEnum('channel_join_policy', ['open', 'request'])
 export const channelPostPolicyEnum = pgEnum('channel_post_policy', ['everyone', 'moderators'])
 /**
+ * Who may pin channel artifacts. 'everyone' = any member pins directly (default for
+ * small MLS channels). 'moderators' = only managers pin; members create suggestions a
+ * manager approves (default for big group_key channels). Enforced client-side against
+ * the capability chain — the server relays opaque records only.
+ */
+export const channelPinPolicyEnum = pgEnum('channel_pin_policy', ['everyone', 'moderators'])
+/**
  * How a channel's messages are encrypted. 'mls' = one MLS group (per-message
  * forward secrecy, immediate removal) — the default, best for small/sensitive
  * channels. 'group_key' = a shared per-channel content key K_channel (epoch'd,
@@ -667,6 +674,9 @@ export const communityChannels = pgTable(
     joinPolicy: channelJoinPolicyEnum('join_policy').notNull().default('open'),
     /** everyone = any active member may post; moderators = read-only for non-mods */
     postPolicy: channelPostPolicyEnum('post_policy').notNull().default('everyone'),
+    /** who may pin artifacts; default derived from encryptionMode at creation
+     *  (mls → everyone, group_key → moderators). @see channelPinPolicyEnum */
+    pinPolicy: channelPinPolicyEnum('pin_policy').notNull().default('everyone'),
     /** disappearing-message window in days (server prunes; clients also prune locally) */
     messageTtlDays: integer('message_ttl_days').notNull().default(30),
     /** mls (default, small/sensitive) vs group_key (scalable). @see channelEncryptionModeEnum */

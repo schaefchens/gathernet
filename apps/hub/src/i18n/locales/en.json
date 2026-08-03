@@ -310,6 +310,13 @@
       "everyone": "All members",
       "moderators": "Only moderators"
     },
+    "pinPolicy": {
+      "label": "Who can pin",
+      "everyone": "All members",
+      "moderators": "Moderators (members suggest)",
+      "everyoneHint": "Any member can pin a message directly.",
+      "moderatorsHint": "Members suggest pins; a moderator approves them."
+    },
     "encryptionMode": {
       "label": "Channel type",
       "mls": "Small — strongest privacy",

@@ -2,6 +2,7 @@ import type {
   ChannelAccess,
   ChannelEncryptionMode,
   ChannelJoinPolicy,
+  ChannelPinPolicy,
   ChannelPostPolicy,
   ChannelVisibility,
   CommunityChannel,
@@ -68,10 +69,20 @@ export function ChannelSettingsForm({
   const [visibility, setVisibility] = useState<ChannelVisibility>(channel?.visibility ?? 'listed')
   const [joinPolicy, setJoinPolicy] = useState<ChannelJoinPolicy>(channel?.joinPolicy ?? 'open')
   const [postPolicy, setPostPolicy] = useState<ChannelPostPolicy>(channel?.postPolicy ?? 'everyone')
+  const [pinPolicy, setPinPolicy] = useState<ChannelPinPolicy>(channel?.pinPolicy ?? 'everyone')
+  // In create mode, let the pin policy track the encryption-mode default (mls →
+  // everyone, group_key → moderators) until the user explicitly overrides it.
+  const [pinPolicyTouched, setPinPolicyTouched] = useState(false)
   // Encryption mode is fixed at creation (no migration between modes).
   const [encryptionMode, setEncryptionMode] = useState<ChannelEncryptionMode>(
     channel?.encryptionMode ?? 'mls',
   )
+  const effectivePinPolicy: ChannelPinPolicy =
+    mode === 'create' && !pinPolicyTouched
+      ? encryptionMode === 'group_key'
+        ? 'moderators'
+        : 'everyone'
+      : pinPolicy
   const [ttl, setTtl] = useState<number>(channel?.messageTtlDays ?? 30)
   const [avatarMediaId, setAvatarMediaId] = useState<string | null>(channel?.avatarMediaId ?? null)
   const [busy, setBusy] = useState(false)
@@ -100,6 +111,7 @@ export function ChannelSettingsForm({
             visibility,
             joinPolicy,
             postPolicy,
+            pinPolicy: effectivePinPolicy,
             messageTtlDays: ttl,
             encryptionMode,
           },
@@ -121,6 +133,7 @@ export function ChannelSettingsForm({
           visibility,
           joinPolicy,
           postPolicy,
+          pinPolicy: effectivePinPolicy,
           messageTtlDays: ttl,
         }
         if (avatarMediaId !== channel.avatarMediaId) {
@@ -238,6 +251,26 @@ export function ChannelSettingsForm({
           <option value="everyone">{t('communities.postPolicy.everyone')}</option>
           <option value="moderators">{t('communities.postPolicy.moderators')}</option>
         </select>
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.pinPolicy.label')}</span>
+        <select
+          className={SELECT_CLASS}
+          value={effectivePinPolicy}
+          onChange={(e) => {
+            setPinPolicy(e.target.value as ChannelPinPolicy)
+            setPinPolicyTouched(true)
+          }}
+        >
+          <option value="everyone">{t('communities.pinPolicy.everyone')}</option>
+          <option value="moderators">{t('communities.pinPolicy.moderators')}</option>
+        </select>
+        <p className="text-[11px] text-ink-faint">
+          {effectivePinPolicy === 'everyone'
+            ? t('communities.pinPolicy.everyoneHint')
+            : t('communities.pinPolicy.moderatorsHint')}
+        </p>
       </label>
 
       <label className="block space-y-1">

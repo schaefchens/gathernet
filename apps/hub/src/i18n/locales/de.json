@@ -310,6 +310,13 @@
       "everyone": "Alle Mitglieder",
       "moderators": "Nur Moderatoren"
     },
+    "pinPolicy": {
+      "label": "Wer darf anpinnen",
+      "everyone": "Alle Mitglieder",
+      "moderators": "Moderatoren (Mitglieder schlagen vor)",
+      "everyoneHint": "Jedes Mitglied kann eine Nachricht direkt anpinnen.",
+      "moderatorsHint": "Mitglieder schlagen Pins vor; ein Moderator bestätigt sie."
+    },
     "encryptionMode": {
       "label": "Kanaltyp",
       "mls": "Klein — höchste Privatsphäre",

@@ -48,6 +48,10 @@ export type ChannelJoinPolicy = z.infer<typeof channelJoinPolicySchema>
 export const channelPostPolicySchema = z.enum(['everyone', 'moderators'])
 export type ChannelPostPolicy = z.infer<typeof channelPostPolicySchema>
 
+/** everyone = any member pins directly; moderators = members suggest, managers approve. */
+export const channelPinPolicySchema = z.enum(['everyone', 'moderators'])
+export type ChannelPinPolicy = z.infer<typeof channelPinPolicySchema>
+
 /**
  * mls = one MLS group per channel (per-message forward secrecy, immediate
  * removal), the default for small/sensitive channels. group_key = a shared
@@ -139,6 +143,7 @@ export const communityChannelSchema = z.object({
   visibility: channelVisibilitySchema,
   joinPolicy: channelJoinPolicySchema,
   postPolicy: channelPostPolicySchema,
+  pinPolicy: channelPinPolicySchema,
   messageTtlDays: z.number().int(),
   position: z.number().int(),
   /** the caller's channel-membership state */
@@ -298,6 +303,8 @@ export const createChannelRequestSchema = z.object({
   visibility: channelVisibilitySchema.default('listed'),
   joinPolicy: channelJoinPolicySchema.default('open'),
   postPolicy: channelPostPolicySchema.default('everyone'),
+  /** omit to derive from encryptionMode (mls → everyone, group_key → moderators). */
+  pinPolicy: channelPinPolicySchema.optional(),
   messageTtlDays: messageTtlDaysSchema.default(30),
   /** mls (default) vs group_key. group_key channels publish no MLS GroupInfo. */
   encryptionMode: channelEncryptionModeSchema.default('mls'),
@@ -315,6 +322,7 @@ export const updateChannelRequestSchema = z
     visibility: channelVisibilitySchema.optional(),
     joinPolicy: channelJoinPolicySchema.optional(),
     postPolicy: channelPostPolicySchema.optional(),
+    pinPolicy: channelPinPolicySchema.optional(),
     messageTtlDays: messageTtlDaysSchema.optional(),
     position: z.number().int().min(0).optional(),
   })
