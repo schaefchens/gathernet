@@ -9,6 +9,10 @@ interface MessageThreadProps {
   onSend: (text: string, replyTo?: string) => Promise<void>
   /** toggle a reaction on a message (by its v2 id) */
   onReact?: (targetId: string, emoji: string, remove: boolean) => void
+  /** edit one of my own messages (new text) */
+  onEdit?: (targetId: string, text: string) => void
+  /** delete one of my own messages for everyone (needs the mailbox seq too) */
+  onDelete?: (targetId: string, seq: number) => void
   /** the current account id — to show which reactions are mine + toggle correctly */
   myAccountId?: string | undefined
   /** shown in the body while `ready` is false */
@@ -47,6 +51,8 @@ export function MessageThread({
   ready,
   onSend,
   onReact,
+  onEdit,
+  onDelete,
   myAccountId,
   notReadyLabel,
   readOnly,
@@ -58,6 +64,8 @@ export function MessageThread({
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
   const [pickerFor, setPickerFor] = useState<string | null>(null)
   const [customFor, setCustomFor] = useState<string | null>(null)
+  const [editingFor, setEditingFor] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
 
   const applyReactionEmoji = (messageId: string, emoji: string) => {
     const mine = messages
@@ -112,7 +120,8 @@ export function MessageThread({
         {messages.map((message) => {
           const quoted = message.replyTo ? byId.get(message.replyTo) : null
           const reactions = Object.entries(message.reactions ?? {})
-          const canAct = !!message.id && !!onReact
+          const canAct = !!message.id && !!onReact && !message.deletedAt
+          const canEdit = !!message.id && message.outgoing && !message.deletedAt
           return (
             <div
               key={message.seq}
@@ -125,13 +134,38 @@ export function MessageThread({
                     : 'bg-raised border border-edge'
                 }`}
               >
-                {quoted && (
-                  <div className="mb-1 border-l-2 border-indigo-soft/60 pl-2 text-xs text-ink-faint truncate">
-                    {quoted.text || t('chat.attachment')}
-                  </div>
+                {message.deletedAt ? (
+                  <p className="italic text-ink-faint">{t('chat.deleted')}</p>
+                ) : editingFor === message.id ? (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      const text = editDraft.trim()
+                      if (text && message.id) onEdit?.(message.id, text)
+                      setEditingFor(null)
+                    }}
+                  >
+                    {/* biome-ignore lint/a11y/noAutofocus: focus the edit field on open */}
+                    <input
+                      autoFocus
+                      value={editDraft}
+                      onChange={(e) => setEditDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Escape' && setEditingFor(null)}
+                      className="text-sm w-full"
+                    />
+                  </form>
+                ) : (
+                  <>
+                    {quoted && (
+                      <div className="mb-1 border-l-2 border-indigo-soft/60 pl-2 text-xs text-ink-faint truncate">
+                        {quoted.text || t('chat.attachment')}
+                      </div>
+                    )}
+                    <p className="whitespace-pre-wrap break-words">{message.text}</p>
+                  </>
                 )}
-                <p className="whitespace-pre-wrap break-words">{message.text}</p>
                 <p className="text-[10px] text-ink-faint text-right mt-1">
+                  {message.editedAt && !message.deletedAt && `${t('chat.edited')} · `}
                   {new Date(message.sentAt).toLocaleTimeString([], {
                     hour: '2-digit',
                     minute: '2-digit',
@@ -185,6 +219,27 @@ export function MessageThread({
                   >
                     {t('chat.reply')}
                   </button>
+                  {canEdit && onEdit && (
+                    <button
+                      type="button"
+                      className="text-xs text-ink-faint hover:text-ink"
+                      onClick={() => {
+                        setEditingFor(message.id ?? null)
+                        setEditDraft(message.text)
+                      }}
+                    >
+                      {t('chat.edit')}
+                    </button>
+                  )}
+                  {canEdit && onDelete && (
+                    <button
+                      type="button"
+                      className="text-xs text-danger/80 hover:text-danger"
+                      onClick={() => message.id && onDelete(message.id, message.seq)}
+                    >
+                      {t('chat.delete')}
+                    </button>
+                  )}
                 </div>
               )}
               {pickerFor === message.id && (

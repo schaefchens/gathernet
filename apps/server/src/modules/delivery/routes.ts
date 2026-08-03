@@ -13,6 +13,7 @@ import { ServiceError } from '../accounts/service.ts'
 import {
   claimKeyPackages,
   countKeyPackages,
+  deleteOwnMessage,
   EpochConflictError,
   listGroups,
   listMessages,
@@ -123,6 +124,18 @@ export function registerDeliveryRoutes(
       return {
         messages: await listMessages(db, session.accountId, request.params.groupId, query.after),
       }
+    },
+  )
+
+  app.delete<{ Params: { groupId: string; seq: string } }>(
+    '/api/v1/mls/groups/:groupId/messages/:seq',
+    { preHandler: authenticate },
+    async (request) => {
+      const session = requireSession(request)
+      const seq = Number.parseInt(request.params.seq, 10)
+      if (!Number.isInteger(seq) || seq < 0) throw new ServiceError(400, 'bad_seq')
+      await deleteOwnMessage(db, session.accountId, request.params.groupId, seq)
+      return { ok: true }
     },
   )
 

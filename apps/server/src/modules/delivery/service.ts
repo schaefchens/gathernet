@@ -783,6 +783,33 @@ export async function listMessages(
   }))
 }
 
+/**
+ * Delete-for-everyone (defense-in-depth): remove a delivered message's stored
+ * ciphertext so a device that hasn't fetched it yet — or fetches later — never
+ * receives the plaintext. Authorised to the ORIGINAL AUTHOR'S ACCOUNT (any of their
+ * devices), resolved from the row's senderDevice. Idempotent (already-gone → ok). The
+ * separate delete tombstone (a normal E2EE message) is what marks it deleted for
+ * devices that already have it.
+ */
+export async function deleteOwnMessage(
+  db: Db,
+  accountId: string,
+  groupId: string,
+  seq: number,
+): Promise<void> {
+  const row = await db.query.mlsMessages.findFirst({
+    where: and(eq(mlsMessages.groupId, groupId), eq(mlsMessages.seq, seq)),
+  })
+  if (!row) return // already gone / never existed — idempotent
+  const sender = await db.query.devices.findFirst({
+    where: eq(devices.deviceId, row.senderDevice),
+  })
+  if (!sender || sender.accountId !== accountId) throw new ServiceError(403, 'not_author')
+  await db
+    .delete(mlsMessages)
+    .where(and(eq(mlsMessages.groupId, groupId), eq(mlsMessages.seq, seq)))
+}
+
 export async function ackCursor(
   db: Db,
   deviceId: string,

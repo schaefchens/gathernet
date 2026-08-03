@@ -128,6 +128,12 @@ export function ChannelChat({
             onReact={(targetId, emoji, remove) =>
               communityChatStore.react(channelId, targetId, emoji, remove)
             }
+            onEdit={(targetId, text) =>
+              void communityChatStore.editMessage(channelId, targetId, text)
+            }
+            onDelete={(targetId, seq) =>
+              void communityChatStore.deleteMessage(channelId, targetId, seq)
+            }
             myAccountId={myAccountId ?? undefined}
             notReadyLabel={
               status === 'rotation_pending'

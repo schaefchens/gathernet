@@ -316,6 +316,30 @@ describe('messages', () => {
     await bobWs.close()
   })
 
+  it('delete-for-everyone: author removes the stored ciphertext; non-author refused', async () => {
+    const { alice, bob, groupId } = await setupChat()
+    const bobWs = await TestWsClient.connect(port, bob.token)
+
+    const msgId = bobWs.send('chat.send', { groupId, epoch: 1, ciphertext: fakeBytes(64) })
+    await bobWs.waitFor((m) => m.type === 'ack' && m.replyTo === msgId) // message is seq 2
+
+    const url = `/api/v1/mls/groups/${groupId}/messages/2`
+    // A non-author (alice) cannot delete bob's message.
+    expect((await app.inject({ method: 'DELETE', url, headers: auth(alice) })).statusCode).toBe(403)
+    // The author (bob) can — the row is gone from the mailbox afterwards.
+    expect((await app.inject({ method: 'DELETE', url, headers: auth(bob) })).statusCode).toBe(200)
+    const mailbox = await app.inject({
+      method: 'GET',
+      url: `/api/v1/mls/groups/${groupId}/messages?after=1`,
+      headers: auth(alice),
+    })
+    expect(mailbox.json().messages).toHaveLength(0)
+    // Deleting again is idempotent (already gone).
+    expect((await app.inject({ method: 'DELETE', url, headers: auth(bob) })).statusCode).toBe(200)
+
+    await bobWs.close()
+  })
+
   it('wrong epoch is rejected; one epoch behind is tolerated', async () => {
     const { alice, bob, groupId } = await setupChat()
     const bobWs = await TestWsClient.connect(port, bob.token)

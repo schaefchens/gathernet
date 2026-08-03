@@ -64,6 +64,59 @@ export function applyReaction(
   return { list: newList, changed }
 }
 
+/** Replace `idx` in `list` with `changed` (immutably) — small shared helper. */
+function replaceAt(list: StoredMessage[], idx: number, changed: StoredMessage) {
+  const newList = [...list]
+  newList[idx] = changed
+  return { list: newList, changed }
+}
+
+/**
+ * Apply an edit to the target — ONLY if `actor` is the original author (the control
+ * message's authenticated sender must match the target's sender) and it isn't already
+ * deleted. Returns the new list + changed message, or null.
+ */
+export function applyEdit(
+  list: StoredMessage[],
+  targetId: string,
+  text: string,
+  ts: number,
+  actor: string,
+): { list: StoredMessage[]; changed: StoredMessage } | null {
+  const idx = list.findIndex((m) => m.id === targetId)
+  const msg = idx >= 0 ? list[idx] : undefined
+  if (!msg || msg.senderAccountId !== actor || msg.deletedAt) return null
+  return replaceAt(list, idx, { ...msg, text, editedAt: ts })
+}
+
+/**
+ * Apply a delete-for-everyone tombstone — ONLY if `actor` is the original author. The
+ * row is KEPT (a tombstone) but its content is cleared so the UI can render a
+ * "deleted" placeholder while preserving ordering. Returns the new list + changed, or null.
+ */
+export function applyDelete(
+  list: StoredMessage[],
+  targetId: string,
+  ts: number,
+  actor: string,
+): { list: StoredMessage[]; changed: StoredMessage } | null {
+  const idx = list.findIndex((m) => m.id === targetId)
+  const msg = idx >= 0 ? list[idx] : undefined
+  if (!msg || msg.senderAccountId !== actor) return null
+  const changed: StoredMessage = {
+    groupId: msg.groupId,
+    seq: msg.seq,
+    ...(msg.id ? { id: msg.id } : {}),
+    senderAccountId: msg.senderAccountId,
+    kind: 'text',
+    text: '',
+    sentAt: msg.sentAt,
+    outgoing: msg.outgoing,
+    deletedAt: ts,
+  }
+  return replaceAt(list, idx, changed)
+}
+
 /**
  * Ingest one decrypted body into a message list (persist + UI), branching on kind:
  * a display message is stored + appended; a control message (reaction; edit/delete in
@@ -90,18 +143,23 @@ export async function ingestBody(
     ctx.append(stored)
     return stored
   }
+  let res: { list: StoredMessage[]; changed: StoredMessage } | null = null
   if (body.kind === 'reaction') {
-    const res = applyReaction(
+    res = applyReaction(
       ctx.getList(),
       body.targetId,
       body.emoji,
       ctx.senderAccountId,
       !!body.remove,
     )
-    if (res) {
-      ctx.setList(res.list)
-      await messageStore.put(res.changed)
-    }
+  } else if (body.kind === 'edit') {
+    res = applyEdit(ctx.getList(), body.targetId, body.text, body.ts, ctx.senderAccountId)
+  } else if (body.kind === 'delete') {
+    res = applyDelete(ctx.getList(), body.targetId, body.ts, ctx.senderAccountId)
+  }
+  if (res) {
+    ctx.setList(res.list)
+    await messageStore.put(res.changed)
   }
   return null
 }

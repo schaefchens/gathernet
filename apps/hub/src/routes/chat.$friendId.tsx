@@ -49,6 +49,8 @@ function ChatScreen() {
         ready={!!group?.ready}
         onSend={(text, replyTo) => chatStore.send(groupId, text, replyTo)}
         onReact={(targetId, emoji, remove) => chatStore.react(groupId, targetId, emoji, remove)}
+        onEdit={(targetId, text) => void chatStore.editMessage(groupId, targetId, text)}
+        onDelete={(targetId, seq) => void chatStore.deleteMessage(groupId, targetId, seq)}
         myAccountId={myAccountId ?? undefined}
       />
     </div>

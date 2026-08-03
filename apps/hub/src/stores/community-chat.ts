@@ -53,13 +53,21 @@ import {
   verifyCommunityRoot,
 } from '../lib/community-keys.ts'
 import {
+  deleteBody,
+  editBody,
   encodeBody,
   type MessageBody,
   parseBody,
   reactionBody,
   textBody,
 } from '../lib/message-body.ts'
-import { applyReaction, bodyToStored, ingestBody } from '../lib/message-ingest.ts'
+import {
+  applyDelete,
+  applyEdit,
+  applyReaction,
+  bodyToStored,
+  ingestBody,
+} from '../lib/message-ingest.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
 import {
   channelStore,
@@ -1053,6 +1061,48 @@ class CommunityChatStore {
       useCommunityChat.setState((s) => ({ messages: { ...s.messages, [channelId]: res.list } }))
       await messageStore.put(res.changed)
     }
+  }
+
+  /** Edit one of my own channel messages (honored only if I'm the author). */
+  async editMessage(channelId: string, targetId: string, text: string): Promise<void> {
+    const record = this.record
+    if (!record) return
+    const body = editBody(targetId, text)
+    await this.sendBody(channelId, body).catch((err) =>
+      console.error('edit failed', channelId, err),
+    )
+    const res = applyEdit(
+      useCommunityChat.getState().messages[channelId] ?? [],
+      targetId,
+      text,
+      body.ts,
+      record.accountId,
+    )
+    if (res) {
+      useCommunityChat.setState((s) => ({ messages: { ...s.messages, [channelId]: res.list } }))
+      await messageStore.put(res.changed)
+    }
+  }
+
+  /** Delete one of my channel messages for everyone: tombstone + remove server record. */
+  async deleteMessage(channelId: string, targetId: string, targetSeq: number): Promise<void> {
+    const record = this.record
+    if (!record) return
+    const body = deleteBody(targetId)
+    await this.sendBody(channelId, body).catch((err) =>
+      console.error('delete failed', channelId, err),
+    )
+    const res = applyDelete(
+      useCommunityChat.getState().messages[channelId] ?? [],
+      targetId,
+      body.ts,
+      record.accountId,
+    )
+    if (res) {
+      useCommunityChat.setState((s) => ({ messages: { ...s.messages, [channelId]: res.list } }))
+      await messageStore.put(res.changed)
+    }
+    await api('DELETE', `/api/v1/mls/groups/${channelId}/messages/${targetSeq}`).catch(() => {})
   }
 
   /** Encode + send a message body over the channel's transport (MLS or group_key). */

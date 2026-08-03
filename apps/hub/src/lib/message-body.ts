@@ -76,6 +76,16 @@ export function reactionBody(targetId: string, emoji: string, remove: boolean): 
   return { v: 2, id: newMessageId(), ts: Date.now(), kind: 'reaction', targetId, emoji, remove }
 }
 
+/** Build an edit control message (new text for an existing message). */
+export function editBody(targetId: string, text: string): MessageBody {
+  return { v: 2, id: newMessageId(), ts: Date.now(), kind: 'edit', targetId, text }
+}
+
+/** Build a delete-for-everyone tombstone targeting `targetId`. */
+export function deleteBody(targetId: string): MessageBody {
+  return { v: 2, id: newMessageId(), ts: Date.now(), kind: 'delete', targetId }
+}
+
 /**
  * Parse a decrypted plaintext into a MessageBody, tolerating the legacy `{ t, ts }`
  * text shape. Returns null on garbage (caller drops it).

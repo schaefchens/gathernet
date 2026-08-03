@@ -18,8 +18,21 @@ import type {
 import { KEY_PACKAGE_REPLENISH_BELOW, KEY_PACKAGE_TARGET } from '@gathernet/shared'
 import { create } from 'zustand'
 import { ApiError, api } from '../lib/api.ts'
-import { encodeBody, parseBody, reactionBody, textBody } from '../lib/message-body.ts'
-import { applyReaction, bodyToStored, ingestBody } from '../lib/message-ingest.ts'
+import {
+  deleteBody,
+  editBody,
+  encodeBody,
+  parseBody,
+  reactionBody,
+  textBody,
+} from '../lib/message-body.ts'
+import {
+  applyDelete,
+  applyEdit,
+  applyReaction,
+  bodyToStored,
+  ingestBody,
+} from '../lib/message-ingest.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
 import {
   type DeviceRecord,
@@ -361,6 +374,47 @@ class ChatStore {
     } catch (err) {
       console.error('react failed', groupId, err)
     }
+  }
+
+  /** Edit one of my own messages (new text); honored only if I'm the author. */
+  async editMessage(groupId: string, targetId: string, text: string): Promise<void> {
+    const engine = this.engine
+    const record = this.record
+    if (!engine || !record) return
+    const body = editBody(targetId, text)
+    await engine.sendApplication(groupId, encodeBody(body))
+    const res = applyEdit(
+      useChat.getState().messages[groupId] ?? [],
+      targetId,
+      text,
+      body.ts,
+      record.accountId,
+    )
+    if (res) {
+      useChat.setState((s) => ({ messages: { ...s.messages, [groupId]: res.list } }))
+      await messageStore.put(res.changed)
+    }
+  }
+
+  /** Delete one of my messages for everyone: tombstone + remove the server record. */
+  async deleteMessage(groupId: string, targetId: string, targetSeq: number): Promise<void> {
+    const engine = this.engine
+    const record = this.record
+    if (!engine || !record) return
+    const body = deleteBody(targetId)
+    await engine.sendApplication(groupId, encodeBody(body))
+    const res = applyDelete(
+      useChat.getState().messages[groupId] ?? [],
+      targetId,
+      body.ts,
+      record.accountId,
+    )
+    if (res) {
+      useChat.setState((s) => ({ messages: { ...s.messages, [groupId]: res.list } }))
+      await messageStore.put(res.changed)
+    }
+    // Defense-in-depth: drop the stored ciphertext so an un-fetched device never gets it.
+    await api('DELETE', `/api/v1/mls/groups/${groupId}/messages/${targetSeq}`).catch(() => {})
   }
 
   /**

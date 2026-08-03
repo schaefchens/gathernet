@@ -117,7 +117,11 @@
     "reply": "Antworten",
     "replyingTo": "Antwort auf",
     "attachment": "Anhang",
-    "moreEmoji": "Mehr Emojis"
+    "moreEmoji": "Mehr Emojis",
+    "edit": "Bearbeiten",
+    "delete": "Löschen",
+    "edited": "bearbeitet",
+    "deleted": "Diese Nachricht wurde gelöscht"
   },
   "settings": {
     "title": "Einstellungen",
