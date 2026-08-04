@@ -161,7 +161,8 @@
     "eventStart": "Starts",
     "eventEnd": "Ends (optional)",
     "eventLocationPlaceholder": "Location (optional)",
-    "pinEvent": "Pin event"
+    "pinEvent": "Pin event",
+    "going": "Going ({{count}})"
   },
   "settings": {
     "title": "Settings",

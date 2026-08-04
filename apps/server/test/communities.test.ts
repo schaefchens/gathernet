@@ -2308,4 +2308,44 @@ describe('pinned channel artifacts (relayed, server-opaque)', () => {
     const list = await listArtifacts(owner, communityId, channelId)
     expect(list.json().artifacts).toHaveLength(0)
   })
+
+  it('participation: own-account RSVP toggles, surfaced in the listing', async () => {
+    const owner = await createUser('RsvpOwner')
+    const member = await createUser('RsvpMember')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    await addMember(owner, communityId, member)
+    await joinOpenChannel(member, communityId, channelId)
+
+    const artifactId = randomUUID()
+    expect((await postArtifact(owner, communityId, channelId, { artifactId })).statusCode).toBe(200)
+
+    const partUrl = `${artifactsUrl(communityId, channelId)}/${artifactId}/participate`
+    // Member joins.
+    const join = await app.inject({
+      method: 'POST',
+      url: partUrl,
+      headers: auth(member),
+      payload: { deviceId: member.deviceId, sig: fakeB64(64) },
+    })
+    expect(join.statusCode).toBe(200)
+
+    const listed = (await listArtifacts(owner, communityId, channelId)).json().artifacts as Array<{
+      artifactId: string
+      participants: Array<{ accountId: string }>
+    }>
+    const art = listed.find((a) => a.artifactId === artifactId)
+    expect(art?.participants).toHaveLength(1)
+    expect(art?.participants[0]?.accountId).toBe(member.accountId)
+
+    // Member leaves → participant list empties.
+    expect(
+      (await app.inject({ method: 'DELETE', url: partUrl, headers: auth(member) })).statusCode,
+    ).toBe(200)
+    const after = (await listArtifacts(owner, communityId, channelId)).json().artifacts as Array<{
+      artifactId: string
+      participants: unknown[]
+    }>
+    expect(after.find((a) => a.artifactId === artifactId)?.participants).toHaveLength(0)
+  })
 })

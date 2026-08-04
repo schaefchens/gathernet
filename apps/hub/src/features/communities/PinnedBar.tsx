@@ -117,6 +117,11 @@ export function PinnedBar({
     void channelArtifactsStore.approve(communityId, channelId, artifactId).then(reload)
   const unpin = (artifactId: string) =>
     void channelArtifactsStore.unpin(communityId, channelId, artifactId).then(reload)
+  const toggleGoing = (a: VerifiedArtifact) =>
+    void channelArtifactsStore
+      .participate(communityId, channelId, a.artifact.artifactId, !a.tally.mine)
+      .then(reload)
+      .catch((err) => console.error('rsvp failed', err))
 
   const pinLink = async () => {
     const url = linkUrl.trim()
@@ -337,6 +342,18 @@ export function PinnedBar({
                         {a.body.location ? ` · 📍 ${a.body.location}` : ''}
                       </span>
                     </span>
+                    <button
+                      type="button"
+                      aria-pressed={a.tally.mine}
+                      className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
+                        a.tally.mine
+                          ? 'border-indigo-soft bg-indigo/20 text-ink'
+                          : 'border-edge text-ink-faint hover:text-ink'
+                      }`}
+                      onClick={() => toggleGoing(a)}
+                    >
+                      {t('pins.going', { count: a.tally.count })}
+                    </button>
                     {canRemove(a) && (
                       <button
                         type="button"

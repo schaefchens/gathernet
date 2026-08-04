@@ -14,6 +14,7 @@ import {
   postChannelKeyGrantsRequestSchema,
   postCommitRequestSchema,
   postKeyGrantsRequestSchema,
+  postParticipationRequestSchema,
   publishChannelGroupInfoRequestSchema,
   resolveJoinRequestSchema,
   rotateChannelRequestSchema,
@@ -43,6 +44,7 @@ import {
   createCommunityInvite,
   deleteArtifact,
   deleteChannel,
+  deleteParticipation,
   getCapability,
   getChannelJoinInfo,
   getCommunityDetail,
@@ -66,6 +68,7 @@ import {
   postCapabilities,
   postChannelKeyGrants,
   postKeyGrants,
+  postParticipation,
   publishChannelGroupInfo,
   removeMember,
   resolveJoinRequest,
@@ -473,6 +476,42 @@ export function registerCommunityRoutes(
     async (request) => {
       const session = requireSession(request)
       await deleteArtifact(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.artifactId,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string; artifactId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/artifacts/:artifactId/participate',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = postParticipationRequestSchema.parse(request.body)
+      await postParticipation(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.artifactId,
+        body,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.delete<{ Params: { id: string; channelId: string; artifactId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/artifacts/:artifactId/participate',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      await deleteParticipation(
         db,
         registry,
         session.accountId,

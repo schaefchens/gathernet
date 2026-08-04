@@ -844,6 +844,37 @@ export const channelArtifacts = pgTable(
   (t) => [index('channel_artifacts_channel_idx').on(t.channelId)],
 )
 
+/**
+ * Participation in a pinned artifact (RSVP for events) — each member owns exactly one
+ * row per artifact (own-account-only write). `sig` is the participant device's
+ * attestation (verified client-side) so the count can't be forged by the server. The
+ * count is derived client-side; big channels render count-only (no name list) to
+ * honour the no-roster rule.
+ */
+export const channelArtifactParticipants = pgTable(
+  'channel_artifact_participants',
+  {
+    artifactId: text('artifact_id')
+      .notNull()
+      .references(() => channelArtifacts.artifactId, { onDelete: 'cascade' }),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => accounts.accountId),
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => communityChannels.channelId),
+    deviceId: text('device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    sig: bytea('sig').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.artifactId, t.accountId] }),
+    index('channel_artifact_participants_channel_idx').on(t.channelId),
+  ],
+)
+
 /** Encrypted media (community + channel avatars); ciphertext = seal(K_meta, imageBytes). */
 export const communityMedia = pgTable('community_media', {
   /** 'md_' + hex(16 random bytes) */

@@ -161,7 +161,8 @@
     "eventStart": "Beginn",
     "eventEnd": "Ende (optional)",
     "eventLocationPlaceholder": "Ort (optional)",
-    "pinEvent": "Termin anpinnen"
+    "pinEvent": "Termin anpinnen",
+    "going": "Dabei ({{count}})"
   },
   "settings": {
     "title": "Einstellungen",

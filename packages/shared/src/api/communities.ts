@@ -246,6 +246,15 @@ export type ChannelArtifactKind = z.infer<typeof channelArtifactKindSchema>
  * (over domain.channelArtifact ‖ 'approve' ‖ channelId ‖ artifactId). Clients verify both
  * against the capability chain + the channel's pinPolicy.
  */
+/** One member's participation (RSVP) in an artifact; `sig` is device-signed so the
+ *  count can't be server-forged. */
+export const artifactParticipantSchema = z.object({
+  accountId: accountIdSchema,
+  deviceId: deviceIdSchema,
+  sig: z.base64(),
+})
+export type ArtifactParticipant = z.infer<typeof artifactParticipantSchema>
+
 export const channelArtifactSchema = z.object({
   artifactId: z.uuid(),
   channelId: groupIdSchema,
@@ -261,8 +270,17 @@ export const channelArtifactSchema = z.object({
   createdAt: z.number().int().nonnegative(),
   /** epoch millis; null = pinned forever */
   expiresAt: z.number().int().nonnegative().nullable(),
+  /** RSVP participants (events); each verified client-side before counting */
+  participants: z.array(artifactParticipantSchema).default([]),
 })
 export type ChannelArtifact = z.infer<typeof channelArtifactSchema>
+
+/** A member records/withdraws their own participation (RSVP). */
+export const postParticipationRequestSchema = z.object({
+  deviceId: deviceIdSchema,
+  sig: z.base64(),
+})
+export type PostParticipationRequest = z.infer<typeof postParticipationRequestSchema>
 
 /** Author posts a pinned artifact it minted (server relays, never validates). */
 export const postArtifactRequestSchema = z.object({

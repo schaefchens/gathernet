@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type {
   AccountId,
   ApproveArtifactRequest,
+  ArtifactParticipant,
   CapabilityResponse,
   ChannelArtifact,
   ChannelDevicesResponse,
@@ -29,6 +30,7 @@ import type {
   PostCapabilitiesRequest,
   PostChannelKeyGrantsRequest,
   PostKeyGrantsRequest,
+  PostParticipationRequest,
   RotateChannelRequest,
   RotateRequest,
   ServerMessage,
@@ -46,6 +48,7 @@ import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import {
   accounts,
+  channelArtifactParticipants,
   channelArtifacts,
   channelInvites,
   channelKeyEpochs,
@@ -2047,7 +2050,7 @@ export async function getCapability(
 
 type ArtifactRow = typeof channelArtifacts.$inferSelect
 
-function toArtifact(r: ArtifactRow): ChannelArtifact {
+function toArtifact(r: ArtifactRow, participants: ArtifactParticipant[] = []): ChannelArtifact {
   return {
     artifactId: r.artifactId,
     channelId: r.channelId as GroupId,
@@ -2061,6 +2064,7 @@ function toArtifact(r: ArtifactRow): ChannelArtifact {
     createdBy: r.createdBy as AccountId,
     createdAt: r.createdAt.getTime(),
     expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
+    participants,
   }
 }
 
@@ -2133,7 +2137,82 @@ export async function listArtifacts(
       ),
     )
     .orderBy(asc(channelArtifacts.createdAt))
-  return { artifacts: rows.map(toArtifact) }
+  const partRows = await db
+    .select()
+    .from(channelArtifactParticipants)
+    .where(eq(channelArtifactParticipants.channelId, channelId))
+  const byArtifact = new Map<string, ArtifactParticipant[]>()
+  for (const p of partRows) {
+    const list = byArtifact.get(p.artifactId) ?? []
+    list.push({
+      accountId: p.accountId as AccountId,
+      deviceId: p.deviceId as DeviceId,
+      sig: p.sig.toString('base64'),
+    })
+    byArtifact.set(p.artifactId, list)
+  }
+  return { artifacts: rows.map((r) => toArtifact(r, byArtifact.get(r.artifactId) ?? [])) }
+}
+
+/**
+ * Record or withdraw the caller's OWN participation (RSVP) in an artifact. The row is
+ * keyed by the caller's account (own-account-only), device-signed for client-side
+ * verification. The server relays the change; clients derive the count.
+ */
+export async function postParticipation(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  artifactId: string,
+  input: PostParticipationRequest,
+): Promise<void> {
+  await requireActiveMembership(db, communityId, accountId)
+  await loadChannel(db, communityId, channelId)
+  await requireOwnDevice(db, accountId, input.deviceId)
+  const artifact = await db.query.channelArtifacts.findFirst({
+    where: and(
+      eq(channelArtifacts.artifactId, artifactId),
+      eq(channelArtifacts.channelId, channelId),
+    ),
+  })
+  if (!artifact) throw new ServiceError(404, 'artifact_not_found')
+  await db
+    .insert(channelArtifactParticipants)
+    .values({ artifactId, accountId, channelId, deviceId: input.deviceId, sig: bufOf(input.sig) })
+    .onConflictDoUpdate({
+      target: [channelArtifactParticipants.artifactId, channelArtifactParticipants.accountId],
+      set: { deviceId: input.deviceId, sig: bufOf(input.sig) },
+    })
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_artifact_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
+}
+
+/** Withdraw the caller's own participation. */
+export async function deleteParticipation(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  artifactId: string,
+): Promise<void> {
+  await requireActiveMembership(db, communityId, accountId)
+  await db
+    .delete(channelArtifactParticipants)
+    .where(
+      and(
+        eq(channelArtifactParticipants.artifactId, artifactId),
+        eq(channelArtifactParticipants.accountId, accountId),
+      ),
+    )
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_artifact_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
 }
 
 /**

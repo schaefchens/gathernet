@@ -134,6 +134,13 @@
       "when": 1785778168743,
       "tag": "0018_clammy_leech",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785851819017,
+      "tag": "0019_mighty_leech",
+      "breakpoints": true
     }
   ]
 }

@@ -68,6 +68,8 @@ export interface VerifiedArtifact {
   /** active = a real pin; suggested = awaiting manager approval; invalid = failed verification */
   status: ArtifactStatus
   issuerAccountId: string | null
+  /** RSVP tally (events): count of verified participants + whether the current user is in */
+  tally: { count: number; mine: boolean }
 }
 
 export type ArtifactStatus = 'active' | 'suggested' | 'invalid'
@@ -125,6 +127,51 @@ function approvalTuple(channelId: string, artifactId: string): Uint8Array {
     encoder.encode(channelId),
     encoder.encode(artifactId),
   )
+}
+
+/** The bytes a member signs to attest their participation (RSVP) in an artifact. */
+function participationTuple(channelId: string, artifactId: string): Uint8Array {
+  return concat(
+    encoder.encode(SIG_DOMAIN.channelArtifact),
+    encoder.encode('participate'),
+    encoder.encode(channelId),
+    encoder.encode(artifactId),
+  )
+}
+
+/** Sign a participation record (this device attests the account is participating). */
+export async function buildParticipation(
+  channelId: string,
+  artifactId: string,
+  record: DeviceRecord,
+): Promise<{ deviceId: string; sig: string }> {
+  const mls = await loadCrypto()
+  const sig = mls.ed25519Sign(record.deviceSecret, participationTuple(channelId, artifactId))
+  return { deviceId: record.deviceId, sig: toStdB64(sig) }
+}
+
+/**
+ * Count the DISTINCT accounts genuinely participating in an artifact: each row's
+ * device signature must verify and the device must resolve to the claimed account
+ * (so the server can't inflate the count). Returns the count + whether `me` is in.
+ */
+export async function tallyParticipants(
+  a: ChannelArtifact,
+  me: string | null,
+  resolve: DeviceResolver,
+): Promise<{ count: number; mine: boolean }> {
+  const mls = await loadCrypto()
+  const tuple = participationTuple(a.channelId, a.artifactId)
+  const accounts = new Set<string>()
+  let mine = false
+  for (const p of a.participants) {
+    const dev = await resolve(p.deviceId)
+    if (!dev || dev.accountId !== p.accountId) continue
+    if (!mls.ed25519Verify(dev.devicePk, tuple, fromStdB64(p.sig))) continue
+    accounts.add(p.accountId)
+    if (p.accountId === me) mine = true
+  }
+  return { count: accounts.size, mine }
 }
 
 /** What `buildArtifact` returns — shaped for the POST /artifacts body. */

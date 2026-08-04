@@ -14,9 +14,11 @@ import {
   type ArtifactBody,
   buildApproval,
   buildArtifact,
+  buildParticipation,
   isExpired,
   openArtifactRaw,
   parseArtifactBody,
+  tallyParticipants,
   type VerifiedArtifact,
   verifyArtifact,
 } from '../lib/artifacts.ts'
@@ -51,6 +53,7 @@ export const channelArtifactsStore = {
     const kMeta = await getKMeta(communityId)
     const ownerAccountId = await getPinnedOwner(communityId)
     const epoch = await getKMetaEpoch(communityId)
+    const me = (await secureStore.getDevice())?.accountId ?? null
     const resolve = makeDeviceResolver([], { communityId })
     const getCap = makeCapFetcher(communityId)
     const now = Date.now()
@@ -70,7 +73,11 @@ export const channelArtifactsStore = {
         epoch,
       )
       if (status === 'invalid') continue
-      out.push({ artifact: a, body, status, issuerAccountId })
+      const tally =
+        a.participants.length > 0
+          ? await tallyParticipants(a, me, resolve)
+          : { count: 0, mine: false }
+      out.push({ artifact: a, body, status, issuerAccountId, tally })
     }
     out.sort((x, y) => y.artifact.createdAt - x.artifact.createdAt)
     useChannelArtifacts.setState((s) => ({ byChannel: { ...s.byChannel, [channelId]: out } }))
@@ -102,6 +109,23 @@ export const channelArtifactsStore = {
   /** Unpin (author or manager). */
   async unpin(communityId: string, channelId: string, artifactId: string): Promise<void> {
     await api('DELETE', `${base(communityId, channelId)}/${artifactId}`)
+  },
+
+  /** Toggle the current user's participation (RSVP) in an event artifact. */
+  async participate(
+    communityId: string,
+    channelId: string,
+    artifactId: string,
+    join: boolean,
+  ): Promise<void> {
+    const url = `${base(communityId, channelId)}/${artifactId}/participate`
+    if (!join) {
+      await api('DELETE', url)
+      return
+    }
+    const record = await secureStore.getDevice()
+    if (!record) throw new Error('locked')
+    await api('POST', url, await buildParticipation(channelId, artifactId, record))
   },
 
   /** Drop a channel's cached artifacts (e.g. on leave). */
