@@ -23,6 +23,12 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,png,svg,woff2,wasm}'],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
+      // Run the service worker in dev too, so push (which needs the SW) is testable
+      // without a production build. type:'module' because our SW is ESM.
+      devOptions: {
+        enabled: true,
+        type: 'module',
+      },
       manifest: {
         name: 'Gathernet',
         short_name: 'Gathernet',
