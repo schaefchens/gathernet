@@ -1,6 +1,7 @@
 import type { ChannelAccess, ChannelPinPolicy, ChannelPostPolicy } from '@gathernet/shared'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ApiError } from '../../lib/api.ts'
 import { channelArtifactsStore } from '../../stores/channel-artifacts.ts'
 import { communityChatStore, useCommunityChat } from '../../stores/community-chat.ts'
 import { useSession } from '../../stores/session.ts'
@@ -58,10 +59,12 @@ export function ChannelChat({
   const messages = useCommunityChat((s) => s.messages[channelId] ?? NO_MESSAGES)
   const myAccountId = useSession((s) => s.accountId)
   const threadRef = useRef<HTMLDivElement>(null)
+  const [pinError, setPinError] = useState<string | null>(null)
 
   /** Build a pin snapshot from a channel message and post it (a suggestion under
    *  moderators policy; the pinned bar reflects its status once it round-trips). */
   const pinMessage = (message: (typeof messages)[number]) => {
+    setPinError(null)
     void channelArtifactsStore
       .pin(communityId, channelId, {
         v: 1,
@@ -71,7 +74,10 @@ export function ChannelChat({
         ...(message.id ? { originalMessageId: message.id } : {}),
       })
       .then(() => channelArtifactsStore.load(communityId, channelId, pinPolicy))
-      .catch((err) => console.error('pin failed', err))
+      .catch((err: unknown) => {
+        console.error('pin failed', err)
+        setPinError(err instanceof ApiError ? err.message : String(err))
+      })
   }
 
   /** Best-effort scroll to a pinned message's source (if it's still in view). */
@@ -149,6 +155,11 @@ export function ChannelChat({
           {status === 'rotation_pending' && (
             <div className="mt-3 rounded-md border border-gold/50 bg-gold/10 px-3 py-2 text-sm text-gold">
               {t('communities.channelRotationPending')}
+            </div>
+          )}
+          {pinError && (
+            <div className="mt-3 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-xs text-danger">
+              {t('pins.pinFailed')}: {pinError}
             </div>
           )}
           <PinnedBar

@@ -141,7 +141,8 @@
     "dismiss": "Verwerfen",
     "unpin": "Lösen",
     "jump": "Zur Nachricht springen",
-    "untitled": "Angepinntes Element"
+    "untitled": "Angepinntes Element",
+    "pinFailed": "Anpinnen fehlgeschlagen"
   },
   "settings": {
     "title": "Einstellungen",

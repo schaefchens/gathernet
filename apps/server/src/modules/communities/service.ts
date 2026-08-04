@@ -2082,7 +2082,10 @@ export async function postArtifact(
     where: eq(communities.communityId, communityId),
   })
   if (!community) throw new ServiceError(404, 'community_not_found')
-  if (input.sealEpoch !== community.keyEpoch) throw new ServiceError(409, 'key_epoch_stale')
+  // The body must be sealed under a K_meta epoch the community has actually reached —
+  // a future epoch is bogus. A member whose held epoch lags the server is still
+  // accepted (they can only seal under the key they hold); rotation re-seals forward.
+  if (input.sealEpoch > community.keyEpoch) throw new ServiceError(409, 'key_epoch_stale')
   // The signer's device must be one of the poster's own devices.
   await requireOwnDevice(db, accountId, input.issuerDeviceId)
   await db

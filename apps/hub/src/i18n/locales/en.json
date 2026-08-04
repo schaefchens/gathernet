@@ -141,7 +141,8 @@
     "dismiss": "Dismiss",
     "unpin": "Unpin",
     "jump": "Jump to message",
-    "untitled": "Pinned item"
+    "untitled": "Pinned item",
+    "pinFailed": "Couldn't pin"
   },
   "settings": {
     "title": "Settings",
