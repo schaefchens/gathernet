@@ -16,11 +16,19 @@ declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<{ url: str
 // App shell (incl. wasm) — offline unlock + history must work with no network.
 precacheAndRoute(self.__WB_MANIFEST)
 // SPA fallback: serve index.html for navigations, except the API/WS/health paths.
-registerRoute(
-  new NavigationRoute(createHandlerBoundToURL('index.html'), {
-    denylist: [/^\/api\//, /^\/ws/, /^\/healthz/],
-  }),
-)
+// In dev the manifest is empty, so index.html isn't precached and
+// createHandlerBoundToURL throws — which would kill the whole SW (and with it push).
+// Guard it: without a precached shell, navigations just hit the network (the dev
+// server serves index.html anyway); push handlers below still register.
+try {
+  registerRoute(
+    new NavigationRoute(createHandlerBoundToURL('index.html'), {
+      denylist: [/^\/api\//, /^\/ws/, /^\/healthz/],
+    }),
+  )
+} catch {
+  // No precached app shell (dev) — skip the offline navigation fallback.
+}
 
 // Prompt-to-update flow (registerType: 'prompt'): the page posts SKIP_WAITING.
 self.addEventListener('message', (event) => {
