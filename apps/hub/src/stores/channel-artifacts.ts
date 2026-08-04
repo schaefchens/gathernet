@@ -15,7 +15,8 @@ import {
   buildApproval,
   buildArtifact,
   isExpired,
-  openArtifactBody,
+  openArtifactRaw,
+  parseArtifactBody,
   type VerifiedArtifact,
   verifyArtifact,
 } from '../lib/artifacts.ts'
@@ -56,10 +57,12 @@ export const channelArtifactsStore = {
     const out: VerifiedArtifact[] = []
     for (const a of res.artifacts) {
       if (isExpired(a, now)) continue
-      const body = await openArtifactBody(kMeta, a.sealedBody)
-      if (!body) continue // no K_meta or corrupt → can't render
+      const raw = await openArtifactRaw(kMeta, a.sealedBody)
+      const body = parseArtifactBody(raw)
+      if (!raw || !body) continue // no K_meta or corrupt → can't render
       const { status, issuerAccountId } = await verifyArtifact(
         a,
+        raw,
         pinPolicy,
         ownerAccountId,
         resolve,

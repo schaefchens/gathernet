@@ -93,23 +93,27 @@ async function sha256(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(data)))
 }
 
-/** The bytes an artifact's issuer signs — binds every field a server could tamper with. */
+/**
+ * The bytes an artifact's issuer signs. It binds the PLAINTEXT (not the ciphertext)
+ * and omits `sealEpoch`, so re-sealing the same body under a new K_meta on community
+ * rotation keeps the signature valid — a leader can re-seal every member's pin forward
+ * without re-signing. A server still can't forge or alter the content: it can only
+ * re-encrypt the *same* plaintext (harmless); any different plaintext fails the hash.
+ */
 async function artifactTuple(
   channelId: string,
   artifactId: string,
   kind: ChannelArtifactKind,
-  sealEpoch: number,
   expiresAtMs: number,
-  sealedBody: Uint8Array,
+  plaintext: Uint8Array,
 ): Promise<Uint8Array> {
   return concat(
     encoder.encode(SIG_DOMAIN.channelArtifact),
     encoder.encode(channelId),
     encoder.encode(artifactId),
     encoder.encode(kind),
-    u64le(sealEpoch),
     u64le(expiresAtMs),
-    await sha256(sealedBody),
+    await sha256(plaintext),
   )
 }
 
@@ -145,15 +149,9 @@ export async function buildArtifact(
 ): Promise<BuiltArtifact> {
   const mls = await loadCrypto()
   const artifactId = crypto.randomUUID()
-  const sealed = mls.seal(kMeta, encoder.encode(JSON.stringify(body)), ARTIFACT_AAD)
-  const tuple = await artifactTuple(
-    channelId,
-    artifactId,
-    body.kind,
-    sealEpoch,
-    expiresAt ?? 0,
-    sealed,
-  )
+  const raw = encoder.encode(JSON.stringify(body))
+  const sealed = mls.seal(kMeta, raw, ARTIFACT_AAD)
+  const tuple = await artifactTuple(channelId, artifactId, body.kind, expiresAt ?? 0, raw)
   const sig = mls.ed25519Sign(record.deviceSecret, tuple)
   return {
     artifactId,
@@ -177,20 +175,51 @@ export async function buildApproval(
   return { approverDeviceId: record.deviceId, approvalSig: toStdB64(sig) }
 }
 
-/** Decrypt an artifact's sealed body; null if K_meta is wrong/absent or the JSON is bad. */
-export async function openArtifactBody(
+/** Decrypt an artifact's sealed body to its raw plaintext bytes (needed both to parse
+ *  the body AND to recompute the signature hash); null if K_meta is wrong/absent. */
+export async function openArtifactRaw(
   kMeta: Uint8Array | null,
   sealedBodyB64: string,
-): Promise<ArtifactBody | null> {
+): Promise<Uint8Array | null> {
   if (!kMeta) return null
   try {
     const mls = await loadCrypto()
-    const plain = mls.open(kMeta, fromStdB64(sealedBodyB64), ARTIFACT_AAD)
-    const body = JSON.parse(decoder.decode(plain)) as ArtifactBody
+    return mls.open(kMeta, fromStdB64(sealedBodyB64), ARTIFACT_AAD)
+  } catch {
+    return null
+  }
+}
+
+/** Parse raw artifact-body bytes into a typed body; null on garbage. */
+export function parseArtifactBody(raw: Uint8Array | null): ArtifactBody | null {
+  if (!raw) return null
+  try {
+    const body = JSON.parse(decoder.decode(raw)) as ArtifactBody
     return body && body.v === 1 && typeof body.kind === 'string' ? body : null
   } catch {
     return null
   }
+}
+
+/** Decrypt + parse an artifact body (convenience for callers that don't need raw bytes). */
+export async function openArtifactBody(
+  kMeta: Uint8Array | null,
+  sealedBodyB64: string,
+): Promise<ArtifactBody | null> {
+  return parseArtifactBody(await openArtifactRaw(kMeta, sealedBodyB64))
+}
+
+/** Re-seal an artifact's body under a new K_meta (community rotation). The plaintext —
+ *  and therefore the issuer signature — is unchanged; only the ciphertext + epoch move. */
+export async function resealArtifactBody(
+  oldKMeta: Uint8Array,
+  newKMeta: Uint8Array,
+  sealedBodyB64: string,
+): Promise<string | null> {
+  const raw = await openArtifactRaw(oldKMeta, sealedBodyB64)
+  if (!raw) return null
+  const mls = await loadCrypto()
+  return toStdB64(mls.seal(newKMeta, raw, ARTIFACT_AAD))
 }
 
 /** Verify a manager's approval signature over an artifact + that the approver is authorized. */
@@ -237,6 +266,7 @@ async function verifyApproval(
  */
 export async function verifyArtifact(
   a: ChannelArtifact,
+  plaintext: Uint8Array,
   pinPolicy: ChannelPinPolicy,
   ownerAccountId: string | null,
   resolve: DeviceResolver,
@@ -246,14 +276,7 @@ export async function verifyArtifact(
   const mls = await loadCrypto()
   const issuer = await resolve(a.issuerDeviceId)
   if (!issuer) return { status: 'invalid', issuerAccountId: null }
-  const tuple = await artifactTuple(
-    a.channelId,
-    a.artifactId,
-    a.kind,
-    a.sealEpoch,
-    a.expiresAt ?? 0,
-    fromStdB64(a.sealedBody),
-  )
+  const tuple = await artifactTuple(a.channelId, a.artifactId, a.kind, a.expiresAt ?? 0, plaintext)
   if (!mls.ed25519Verify(issuer.devicePk, tuple, fromStdB64(a.issuerSig))) {
     return { status: 'invalid', issuerAccountId: issuer.accountId }
   }

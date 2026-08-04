@@ -1434,6 +1434,58 @@ describe('K_meta rotation on removal (Phase B)', () => {
     expect(stale.json().error).toBe('rotation_stale')
   })
 
+  it('re-seals pinned artifacts under the new epoch (survive rotation)', async () => {
+    const owner = await createUserWithReceipt('OwnerRotArt')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+
+    // Pin something (sealed under epoch 0).
+    const artifactId = randomUUID()
+    const oldBody = sealed()
+    const post = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/artifacts`,
+      headers: auth(owner),
+      payload: {
+        artifactId,
+        kind: 'pin',
+        sealEpoch: 0,
+        sealedBody: oldBody,
+        issuerDeviceId: owner.deviceId,
+        issuerSig: fakeB64(64),
+      },
+    })
+    expect(post.statusCode).toBe(200)
+
+    // Rotate, carrying the re-sealed body (issuerSig unchanged on the server).
+    const newBody = sealed()
+    const rot = await app.inject({
+      method: 'POST',
+      url: rotateUrl(communityId),
+      headers: auth(owner),
+      payload: {
+        fromEpoch: 0,
+        commitment: fakeCommitment(owner),
+        community: { metaCiphertext: sealed() },
+        channels: [],
+        media: [],
+        grants: [await grantFor(owner, randomBytes(32))],
+        artifacts: [{ artifactId, sealEpoch: 1, sealedBody: newBody }],
+      },
+    })
+    expect(rot.statusCode).toBe(200)
+
+    const list = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/artifacts`,
+      headers: auth(owner),
+    })
+    const art = (list.json().artifacts as Array<Record<string, unknown>>).find(
+      (a) => a.artifactId === artifactId,
+    )
+    expect(art).toMatchObject({ sealEpoch: 1, sealedBody: newBody })
+  })
+
   it('removal flags rotation + notifies leaders; rotating excludes the removed member', async () => {
     const owner = await createUserWithReceipt('OwnerRot2')
     const member = await createUserWithReceipt('MemberRot2')

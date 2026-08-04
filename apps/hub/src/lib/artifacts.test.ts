@@ -8,6 +8,8 @@ import {
   buildApproval,
   buildArtifact,
   openArtifactBody,
+  openArtifactRaw,
+  resealArtifactBody,
   verifyArtifact,
 } from './artifacts.ts'
 import {
@@ -68,6 +70,21 @@ function record(
   }
 }
 
+/** Decrypt the body (as load() does) then verify — the plaintext feeds the signature. */
+async function verify(
+  rec: ChannelArtifact,
+  policy: 'everyone' | 'moderators',
+  owner: string | null,
+  resolve: DeviceResolver,
+  getCap: CapabilityFetcher,
+  epoch: number,
+  kMeta = KMETA,
+) {
+  const raw = await openArtifactRaw(kMeta, rec.sealedBody)
+  if (!raw) throw new Error('decrypt failed')
+  return verifyArtifact(rec, raw, policy, owner, resolve, getCap, epoch)
+}
+
 beforeAll(async () => {
   // The Hub's loadCrypto() calls initMls() with no bytes (URL fetch) — unavailable
   // under node/vitest, so pre-init the WASM from disk (idempotent).
@@ -97,7 +114,7 @@ describe('pinned artifacts — crypto + verification', () => {
       OWNER,
     )
     for (const policy of ['everyone', 'moderators'] as const) {
-      const v = await verifyArtifact(rec, policy, OWNER, resolve, getCap, 0)
+      const v = await verify(rec, policy, OWNER, resolve, getCap, 0)
       expect(v.status).toBe('active')
       expect(v.issuerAccountId).toBe(OWNER)
     }
@@ -114,9 +131,7 @@ describe('pinned artifacts — crypto + verification', () => {
       await buildArtifact(CHANNEL, { v: 1, kind: 'pin', text: 'x' }, KMETA, 0, owner.record),
       OWNER,
     )
-    expect((await verifyArtifact(rec, 'everyone', OWNER, resolve, getCap, 0)).status).toBe(
-      'invalid',
-    )
+    expect((await verify(rec, 'everyone', OWNER, resolve, getCap, 0)).status).toBe('invalid')
   })
 
   it('under moderators policy a member is a suggestion until a manager approves', async () => {
@@ -145,19 +160,15 @@ describe('pinned artifacts — crypto + verification', () => {
     const rec = record(built, MEMBER)
 
     // A member holding a valid cap → a suggestion (awaiting approval).
-    expect((await verifyArtifact(rec, 'moderators', OWNER, resolve, getCap, 0)).status).toBe(
-      'suggested',
-    )
+    expect((await verify(rec, 'moderators', OWNER, resolve, getCap, 0)).status).toBe('suggested')
     // Under 'everyone' the same member's pin is immediately active.
-    expect((await verifyArtifact(rec, 'everyone', OWNER, resolve, getCap, 0)).status).toBe('active')
+    expect((await verify(rec, 'everyone', OWNER, resolve, getCap, 0)).status).toBe('active')
 
     // A manager (owner) approves → active under 'moderators'.
     const approval = await buildApproval(CHANNEL, built.artifactId, owner.record)
     rec.approverDeviceId = approval.approverDeviceId as ChannelArtifact['approverDeviceId']
     rec.approvalSig = approval.approvalSig
-    expect((await verifyArtifact(rec, 'moderators', OWNER, resolve, getCap, 0)).status).toBe(
-      'active',
-    )
+    expect((await verify(rec, 'moderators', OWNER, resolve, getCap, 0)).status).toBe('active')
   })
 
   it('fails open to member-level when the cap chain cannot be walked (feature-phase)', async () => {
@@ -172,9 +183,30 @@ describe('pinned artifacts — crypto + verification', () => {
       await buildArtifact(CHANNEL, { v: 1, kind: 'pin', text: 'x' }, KMETA, 0, member.record),
       MEMBER,
     )
-    expect((await verifyArtifact(rec, 'moderators', OWNER, resolve, getCap, 0)).status).toBe(
-      'suggested',
+    expect((await verify(rec, 'moderators', OWNER, resolve, getCap, 0)).status).toBe('suggested')
+    expect((await verify(rec, 'everyone', OWNER, resolve, getCap, 0)).status).toBe('active')
+  })
+
+  it('survives a K_meta rotation: re-sealed body still verifies + decrypts', async () => {
+    const owner = await makeDevice('devOwner', OWNER)
+    const resolve = resolverOf(owner)
+    const getCap: CapabilityFetcher = async () => null
+    const body: ArtifactBody = { v: 1, kind: 'pin', text: 'hold fast' }
+    const rec = record(await buildArtifact(CHANNEL, body, KMETA, 0, owner.record), OWNER)
+
+    // Rotate: re-seal the same body under a NEW K_meta (as rotateCommunity does).
+    const newKMeta = new Uint8Array(32).fill(42)
+    const resealed = await resealArtifactBody(KMETA, newKMeta, rec.sealedBody)
+    expect(resealed).not.toBeNull()
+    rec.sealedBody = resealed as string
+    rec.sealEpoch = 1
+
+    // The old key can no longer open it; the new key does; and the ORIGINAL issuer
+    // signature (which binds the plaintext, not the ciphertext) still verifies.
+    expect(await openArtifactBody(KMETA, rec.sealedBody)).toBeNull()
+    expect(await openArtifactBody(newKMeta, rec.sealedBody)).toEqual(body)
+    expect((await verify(rec, 'everyone', OWNER, resolve, getCap, 1, newKMeta)).status).toBe(
+      'active',
     )
-    expect((await verifyArtifact(rec, 'everyone', OWNER, resolve, getCap, 0)).status).toBe('active')
   })
 })

@@ -2248,6 +2248,21 @@ export async function rotateCommunity(
           ),
         )
     }
+    // Pinned artifacts re-sealed under the new K_meta: swap ciphertext + epoch in
+    // place, keeping issuerSig (it binds the plaintext, so authorship survives).
+    // Without this, every pin sealed under the old epoch becomes undecryptable once
+    // members hold only the new key.
+    for (const a of input.artifacts ?? []) {
+      await tx
+        .update(channelArtifacts)
+        .set({ sealEpoch: a.sealEpoch, sealedBody: bufOf(a.sealedBody) })
+        .where(
+          and(
+            eq(channelArtifacts.artifactId, a.artifactId),
+            eq(channelArtifacts.communityId, communityId),
+          ),
+        )
+    }
     // Media (avatars) re-encrypted under the new key are re-uploaded to object
     // storage AFTER the tx commits (S3 isn't transactional; a failed re-upload only
     // leaves a cosmetically-stale avatar, which the client already tolerates).

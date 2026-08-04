@@ -551,6 +551,17 @@ export const rotateRequestSchema = z.object({
   media: z.array(z.object({ mediaId: mediaIdSchema, ciphertext: z.base64() })),
   /** new-epoch grants sealed to every remaining active-member device */
   grants: z.array(keyGrantSchema),
+  /** pinned artifacts re-sealed under the new K_meta (issuerSig unchanged — it binds
+   *  the plaintext, not the ciphertext — so authorship survives). Body + epoch only. */
+  artifacts: z
+    .array(
+      z.object({
+        artifactId: z.uuid(),
+        sealEpoch: z.number().int().nonnegative(),
+        sealedBody: z.base64().max(CHANNEL_ARTIFACT_BODY_MAX_B64),
+      }),
+    )
+    .optional(),
 })
 
 export const channelMembersResponseSchema = z.object({

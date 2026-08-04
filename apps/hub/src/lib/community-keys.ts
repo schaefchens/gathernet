@@ -33,11 +33,15 @@ import {
   eciesSeal,
   importEciesPrivateKey,
   type KeyCommitment,
+  type ListArtifactsResponse,
   type MembershipCapability,
   type MyKeyGrantResponse,
   SIG_DOMAIN,
 } from '@gathernet/shared'
 import { ApiError, api, apiBytes } from './api.ts'
+// resealArtifactBody lives in artifacts.ts (which imports from here); the cycle is
+// safe because both sides use each other's exports only inside function bodies.
+import { resealArtifactBody } from './artifacts.ts'
 import { loadCrypto } from './mls.ts'
 import { type DeviceRecord, secureStore } from './storage.ts'
 
@@ -1039,6 +1043,27 @@ export async function rotateCommunity(communityId: string, record: DeviceRecord)
     })
   }
 
+  // Re-seal pinned artifacts forward so they survive the rotation (otherwise every
+  // pin sealed under the old epoch becomes undecryptable once members hold only the
+  // new key). issuerSig binds the plaintext, so it stays valid across the re-seal.
+  const artifacts: { artifactId: string; sealEpoch: number; sealedBody: string }[] = []
+  for (const ch of detail.channels) {
+    try {
+      const { artifacts: list } = await api<ListArtifactsResponse>(
+        'GET',
+        `/api/v1/communities/${communityId}/channels/${ch.channelId}/artifacts`,
+      )
+      for (const a of list) {
+        const resealed = await resealArtifactBody(oldKMeta, newKMeta, a.sealedBody)
+        if (resealed) {
+          artifacts.push({ artifactId: a.artifactId, sealEpoch: newEpoch, sealedBody: resealed })
+        }
+      }
+    } catch {
+      // channel artifacts unreadable/unavailable — skip (cosmetic loss of a pin)
+    }
+  }
+
   const mediaIds = new Set<string>()
   if (detail.community.avatarMediaId) mediaIds.add(detail.community.avatarMediaId)
   for (const ch of detail.channels) if (ch.avatarMediaId) mediaIds.add(ch.avatarMediaId)
@@ -1080,6 +1105,7 @@ export async function rotateCommunity(communityId: string, record: DeviceRecord)
       channels,
       media,
       grants,
+      artifacts,
     })
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
