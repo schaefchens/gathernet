@@ -176,6 +176,7 @@ export function ChannelChat({
             channelId={channelId}
             pinPolicy={pinPolicy}
             isManager={isManager}
+            canCreate={status !== 'untrusted'}
             myAccountId={myAccountId ?? null}
             onJump={jumpTo}
           />

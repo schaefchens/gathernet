@@ -148,7 +148,12 @@
     "duration1h": "1 Stunde",
     "duration1d": "1 Tag",
     "duration1w": "1 Woche",
-    "expires": "läuft {{when}} ab"
+    "expires": "läuft {{when}} ab",
+    "add": "Etwas anpinnen",
+    "linkUrlPlaceholder": "https://…",
+    "linkTitlePlaceholder": "Titel (optional)",
+    "pinLink": "Link anpinnen",
+    "pinFile": "Datei anpinnen"
   },
   "settings": {
     "title": "Einstellungen",

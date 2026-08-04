@@ -1,11 +1,21 @@
 import type { ChannelPinPolicy } from '@gathernet/shared'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ArtifactBody, VerifiedArtifact } from '../../lib/artifacts.ts'
+import { encryptAndUpload } from '../../lib/media.ts'
 import { wsClient } from '../../lib/ws-client.ts'
 import { channelArtifactsStore, useChannelArtifacts } from '../../stores/channel-artifacts.ts'
+import { MediaAttachment } from '../chat/MediaAttachment.tsx'
 
 const EMPTY: VerifiedArtifact[] = []
+
+/** Emoji marker for each artifact kind. */
+const KIND_ICON: Record<ArtifactBody['kind'], string> = {
+  pin: '📌',
+  link: '🔗',
+  media: '📎',
+  event: '📅',
+}
 
 /** A short locale-aware "in 2h / in 3d" for a pin's expiry, or null if none. */
 function relativeExpiry(expiresAt: number | null, locale: string): string | null {
@@ -27,7 +37,7 @@ function summarize(body: ArtifactBody, attachmentLabel: string): string {
     case 'link':
       return body.title || body.url
     case 'media':
-      return body.caption || attachmentLabel
+      return body.caption || body.media.name || attachmentLabel
     case 'event':
       return body.title
   }
@@ -36,14 +46,15 @@ function summarize(body: ArtifactBody, attachmentLabel: string): string {
 /**
  * The sticky pinned-artifacts bar at the top of a channel. Shows active pins
  * (newest first, collapsible) that every visitor sees; managers additionally see a
- * "suggested pins" queue (members' pins awaiting approval under pinPolicy=moderators)
- * with approve/dismiss. Tapping a pin scrolls to its source message if it still exists.
+ * "suggested pins" queue with approve/dismiss. Members can create link/media pins
+ * directly via the ＋ affordance. Tapping a message-pin scrolls to its source.
  */
 export function PinnedBar({
   communityId,
   channelId,
   pinPolicy,
   isManager,
+  canCreate,
   myAccountId,
   onJump,
 }: {
@@ -51,19 +62,28 @@ export function PinnedBar({
   channelId: string
   pinPolicy: ChannelPinPolicy
   isManager: boolean
+  /** the current user may create/suggest pins here */
+  canCreate: boolean
   myAccountId: string | null
   onJump: (messageId: string) => void
 }) {
   const { t, i18n } = useTranslation()
   const artifacts = useChannelArtifacts((s) => s.byChannel[channelId] ?? EMPTY)
   const [collapsed, setCollapsed] = useState(false)
+  const [composing, setComposing] = useState(false)
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkTitle, setLinkTitle] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const reload = () => channelArtifactsStore.load(communityId, channelId, pinPolicy)
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload is derived from stable ids
   useEffect(() => {
-    void channelArtifactsStore.load(communityId, channelId, pinPolicy)
+    void reload()
     const off = wsClient.on('community.channel_artifact_updated', (m) => {
-      if (m.payload.channelId === channelId) {
-        void channelArtifactsStore.load(communityId, channelId, pinPolicy)
-      }
+      if (m.payload.channelId === channelId) void reload()
     })
     return off
   }, [communityId, channelId, pinPolicy])
@@ -73,71 +93,191 @@ export function PinnedBar({
   const suggested = artifacts.filter(
     (a) => a.status === 'suggested' && (isManager || a.artifact.createdBy === myAccountId),
   )
-  if (active.length === 0 && suggested.length === 0) return null
+  if (active.length === 0 && suggested.length === 0 && !canCreate) return null
 
   const canRemove = (a: VerifiedArtifact) => isManager || a.artifact.createdBy === myAccountId
   const attachmentLabel = t('chat.attachment')
 
+  const create = (body: ArtifactBody) =>
+    channelArtifactsStore.pin(communityId, channelId, body).then(reload)
   const approve = (artifactId: string) =>
-    void channelArtifactsStore
-      .approve(communityId, channelId, artifactId)
-      .then(() => channelArtifactsStore.load(communityId, channelId, pinPolicy))
+    void channelArtifactsStore.approve(communityId, channelId, artifactId).then(reload)
   const unpin = (artifactId: string) =>
-    void channelArtifactsStore
-      .unpin(communityId, channelId, artifactId)
-      .then(() => channelArtifactsStore.load(communityId, channelId, pinPolicy))
+    void channelArtifactsStore.unpin(communityId, channelId, artifactId).then(reload)
+
+  const pinLink = async () => {
+    const url = linkUrl.trim()
+    if (!url || busy) return
+    setBusy(true)
+    try {
+      await create({
+        v: 1,
+        kind: 'link',
+        url,
+        ...(linkTitle.trim() ? { title: linkTitle.trim() } : {}),
+      })
+      setLinkUrl('')
+      setLinkTitle('')
+      setComposing(false)
+    } catch (err) {
+      console.error('pin link failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const pinFile = async (file: File | undefined) => {
+    if (!file || busy) return
+    setBusy(true)
+    try {
+      const media = await encryptAndUpload(file, { name: file.name })
+      await create({ v: 1, kind: 'media', media })
+      setComposing(false)
+    } catch (err) {
+      console.error('pin file failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="mt-3 rounded-md border border-edge bg-overlay/40 text-sm">
-      <button
-        type="button"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-ink-soft"
-        onClick={() => setCollapsed((c) => !c)}
-      >
-        <span aria-hidden>📌</span>
-        <span className="flex-1">{t('pins.title', { count: active.length })}</span>
-        <span aria-hidden>{collapsed ? '▸' : '▾'}</span>
-      </button>
+      <div className="flex w-full items-center gap-2 px-3 py-2 text-xs text-ink-soft">
+        <button
+          type="button"
+          className="flex flex-1 items-center gap-2 text-left"
+          onClick={() => setCollapsed((c) => !c)}
+        >
+          <span aria-hidden>📌</span>
+          <span className="flex-1">{t('pins.title', { count: active.length })}</span>
+        </button>
+        {canCreate && (
+          <button
+            type="button"
+            className="text-ink-faint hover:text-ink"
+            title={t('pins.add')}
+            aria-label={t('pins.add')}
+            onClick={() => {
+              setComposing((c) => !c)
+              setCollapsed(false)
+            }}
+          >
+            ＋
+          </button>
+        )}
+        <button
+          type="button"
+          aria-label={t('pins.title', { count: active.length })}
+          onClick={() => setCollapsed((c) => !c)}
+        >
+          <span aria-hidden>{collapsed ? '▸' : '▾'}</span>
+        </button>
+      </div>
 
-      {!collapsed && (
-        <div className="space-y-1 px-3 pb-2">
+      {composing && canCreate && (
+        <div className="space-y-2 border-t border-edge px-3 py-2">
+          <input
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            placeholder={t('pins.linkUrlPlaceholder')}
+            className="text-sm"
+            inputMode="url"
+          />
+          <input
+            value={linkTitle}
+            onChange={(e) => setLinkTitle(e.target.value)}
+            placeholder={t('pins.linkTitlePlaceholder')}
+            className="text-sm"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="btn-gold text-xs px-3"
+              disabled={!linkUrl.trim() || busy}
+              onClick={() => void pinLink()}
+            >
+              {t('pins.pinLink')}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                void pinFile(e.target.files?.[0])
+                e.target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              className="btn-quiet text-xs px-3"
+              disabled={busy}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {t('pins.pinFile')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!collapsed && (active.length > 0 || suggested.length > 0) && (
+        <div className="space-y-1 border-t border-edge px-3 py-2">
           {active.map((a) => {
-            const text = summarize(a.body, attachmentLabel)
-            const jumpable = a.body.kind === 'pin' && a.body.originalMessageId
             const expiry = relativeExpiry(a.artifact.expiresAt, i18n.language)
+            const media =
+              a.body.kind === 'media' ? a.body.media : a.body.kind === 'pin' ? a.body.media : null
+            const expanded = expandedId === a.artifact.artifactId
             return (
-              <div key={a.artifact.artifactId} className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={!jumpable}
-                  className="flex-1 truncate text-left text-ink hover:text-indigo-soft disabled:hover:text-ink"
-                  onClick={() =>
-                    a.body.kind === 'pin' &&
-                    a.body.originalMessageId &&
-                    onJump(a.body.originalMessageId)
-                  }
-                  title={jumpable ? t('pins.jump') : undefined}
-                >
-                  {text || t('pins.untitled')}
-                </button>
-                {expiry && (
-                  <span
-                    className="shrink-0 text-[10px] text-ink-faint"
-                    title={t('pins.expires', { when: expiry })}
-                  >
-                    ⏳ {expiry}
-                  </span>
-                )}
-                {canRemove(a) && (
-                  <button
-                    type="button"
-                    className="text-xs text-ink-faint hover:text-danger"
-                    onClick={() => unpin(a.artifact.artifactId)}
-                    aria-label={t('pins.unpin')}
-                    title={t('pins.unpin')}
-                  >
-                    ✕
-                  </button>
+              <div key={a.artifact.artifactId}>
+                <div className="flex items-center gap-2">
+                  <span aria-hidden>{KIND_ICON[a.body.kind]}</span>
+                  {a.body.kind === 'link' ? (
+                    <a
+                      href={a.body.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 truncate text-indigo-soft hover:underline"
+                    >
+                      {summarize(a.body, attachmentLabel)}
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      className="flex-1 truncate text-left text-ink hover:text-indigo-soft"
+                      onClick={() => {
+                        if (media) {
+                          setExpandedId(expanded ? null : a.artifact.artifactId)
+                        } else if (a.body.kind === 'pin' && a.body.originalMessageId) {
+                          onJump(a.body.originalMessageId)
+                        }
+                      }}
+                    >
+                      {summarize(a.body, attachmentLabel) || t('pins.untitled')}
+                    </button>
+                  )}
+                  {expiry && (
+                    <span
+                      className="shrink-0 text-[10px] text-ink-faint"
+                      title={t('pins.expires', { when: expiry })}
+                    >
+                      ⏳ {expiry}
+                    </span>
+                  )}
+                  {canRemove(a) && (
+                    <button
+                      type="button"
+                      className="text-xs text-ink-faint hover:text-danger"
+                      onClick={() => unpin(a.artifact.artifactId)}
+                      aria-label={t('pins.unpin')}
+                      title={t('pins.unpin')}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                {media && expanded && (
+                  <div className="mt-1 mb-2 pl-6">
+                    <MediaAttachment media={media} />
+                  </div>
                 )}
               </div>
             )
@@ -150,6 +290,7 @@ export function PinnedBar({
               </p>
               {suggested.map((a) => (
                 <div key={a.artifact.artifactId} className="flex items-center gap-2">
+                  <span aria-hidden>{KIND_ICON[a.body.kind]}</span>
                   <span className="flex-1 truncate text-ink-soft">
                     {summarize(a.body, attachmentLabel) || t('pins.untitled')}
                     {!isManager && (

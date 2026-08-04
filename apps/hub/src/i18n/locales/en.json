@@ -148,7 +148,12 @@
     "duration1h": "1 hour",
     "duration1d": "1 day",
     "duration1w": "1 week",
-    "expires": "expires {{when}}"
+    "expires": "expires {{when}}",
+    "add": "Pin something",
+    "linkUrlPlaceholder": "https://…",
+    "linkTitlePlaceholder": "Title (optional)",
+    "pinLink": "Pin link",
+    "pinFile": "Pin a file"
   },
   "settings": {
     "title": "Settings",
