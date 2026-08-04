@@ -26,7 +26,7 @@ import { registerMediaRoutes } from './modules/media/routes.ts'
 import { PresenceService } from './modules/presence/service.ts'
 import { registerPublicationRoutes } from './modules/publications/routes.ts'
 import { registerPushRoutes } from './modules/push/routes.ts'
-import { configureWebPush } from './modules/push/service.ts'
+import { configureWebPush, notifyMessageActivity } from './modules/push/service.ts'
 import { makeRoomEphemeralHandler } from './modules/rooms/ephemeral.ts'
 import { registerRoomRoutes } from './modules/rooms/routes.ts'
 import { resolveAppDevice } from './modules/rooms/service.ts'
@@ -211,6 +211,13 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
               sentAt: Date.now(),
             },
           })
+        }
+        // Offline-fallback Web Push: a recipient device with no live socket gets a
+        // content-free category ping (coalesced). Fire-and-forget — never blocks/breaks
+        // message delivery.
+        const offline = fanout.recipients.filter((d) => !registry.isDeviceOnline(d))
+        if (offline.length > 0) {
+          void notifyMessageActivity(db, message.payload.groupId, offline)
         }
       }
       session.send({

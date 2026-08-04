@@ -7,11 +7,16 @@ import type {
 import { and, eq } from 'drizzle-orm'
 import webpush from 'web-push'
 import type { Db } from '../../db/index.ts'
-import { pushSubscriptions } from '../../db/schema.ts'
+import { communityChannels, groups, pushSubscriptions } from '../../db/schema.ts'
 
 /** Constant target size (chars) for the JSON payload — padded so the push service
  *  can't infer the category from length. */
 const PAYLOAD_TARGET = 320
+
+/** Coalesce: at most one push per device per window — caps notification noise AND the
+ *  timing signal a channel fan-out would otherwise leak to the push service. */
+const COALESCE_MS = 60_000
+const lastPush = new Map<string, number>()
 
 let configured = false
 
@@ -145,4 +150,44 @@ export async function sendToDevicePush(
       // best-effort fallback, never a hard dependency of message delivery.
     }
   }
+}
+
+/** Push to a device only if it hasn't been pushed within the coalesce window. */
+export async function coalescedPush(
+  db: Db,
+  deviceId: string,
+  payload: PushPayload,
+  now = Date.now(),
+): Promise<void> {
+  if (now - (lastPush.get(deviceId) ?? 0) < COALESCE_MS) return
+  lastPush.set(deviceId, now)
+  await sendToDevicePush(db, deviceId, payload)
+}
+
+/**
+ * Fire an offline-fallback push for a new message. Categorizes the group (dm vs
+ * community channel, with the channel's communityId for mute gating); rooms and
+ * group_key channels are skipped. Caller passes the already-offline recipient
+ * devices. Best-effort — never throws.
+ */
+export async function notifyMessageActivity(
+  db: Db,
+  groupId: string,
+  offlineDeviceIds: string[],
+): Promise<void> {
+  if (!configured || offlineDeviceIds.length === 0) return
+  const group = await db.query.groups.findFirst({ where: eq(groups.groupId, groupId) })
+  if (!group) return
+  let payload: PushPayload
+  if (group.kind === 'dm') {
+    payload = buildPushPayload('dm')
+  } else if (group.kind === 'channel') {
+    const channel = await db.query.communityChannels.findFirst({
+      where: eq(communityChannels.channelId, groupId),
+    })
+    payload = buildPushPayload('channel', channel?.communityId)
+  } else {
+    return // rooms etc. — no push
+  }
+  await Promise.all(offlineDeviceIds.map((d) => coalescedPush(db, d, payload).catch(() => {})))
 }
