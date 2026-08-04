@@ -70,12 +70,14 @@ export function PinnedBar({
   const { t, i18n } = useTranslation()
   const artifacts = useChannelArtifacts((s) => s.byChannel[channelId] ?? EMPTY)
   const [collapsed, setCollapsed] = useState(false)
-  const [composing, setComposing] = useState(false)
+  const [composeMode, setComposeMode] = useState<'none' | 'link' | 'event'>('none')
   const [linkUrl, setLinkUrl] = useState('')
   const [linkTitle, setLinkTitle] = useState('')
+  const [ev, setEv] = useState({ title: '', starts: '', ends: '', location: '' })
   const [busy, setBusy] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const composing = composeMode !== 'none'
 
   const reload = () => channelArtifactsStore.load(communityId, channelId, pinPolicy)
 
@@ -88,12 +90,23 @@ export function PinnedBar({
     return off
   }, [communityId, channelId, pinPolicy])
 
+  const now = Date.now()
   const active = artifacts.filter((a) => a.status === 'active')
+  // Pins/links/media (newest-first) vs one-shot events (upcoming/ongoing only, soonest
+  // first). A past event auto-archives ~2h after it ends (or starts, if no end).
+  const pins = active.filter((a) => a.body.kind !== 'event')
+  const events = active
+    .filter((a): a is VerifiedArtifact & { body: Extract<ArtifactBody, { kind: 'event' }> } => {
+      if (a.body.kind !== 'event') return false
+      const end = (a.body.endsAt ?? a.body.startsAt) + 2 * 3_600_000
+      return end >= now
+    })
+    .sort((x, y) => x.body.startsAt - y.body.startsAt)
   // Managers see all suggestions (to approve); a member sees their own (as pending).
   const suggested = artifacts.filter(
     (a) => a.status === 'suggested' && (isManager || a.artifact.createdBy === myAccountId),
   )
-  if (active.length === 0 && suggested.length === 0 && !canCreate) return null
+  if (pins.length === 0 && events.length === 0 && suggested.length === 0 && !canCreate) return null
 
   const canRemove = (a: VerifiedArtifact) => isManager || a.artifact.createdBy === myAccountId
   const attachmentLabel = t('chat.attachment')
@@ -118,7 +131,7 @@ export function PinnedBar({
       })
       setLinkUrl('')
       setLinkTitle('')
-      setComposing(false)
+      setComposeMode('none')
     } catch (err) {
       console.error('pin link failed', err)
     } finally {
@@ -132,9 +145,33 @@ export function PinnedBar({
     try {
       const media = await encryptAndUpload(file, { name: file.name })
       await create({ v: 1, kind: 'media', media })
-      setComposing(false)
+      setComposeMode('none')
     } catch (err) {
       console.error('pin file failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const pinEvent = async () => {
+    const title = ev.title.trim()
+    const startsAt = ev.starts ? new Date(ev.starts).getTime() : 0
+    if (!title || !Number.isFinite(startsAt) || startsAt === 0 || busy) return
+    const endsAt = ev.ends ? new Date(ev.ends).getTime() : undefined
+    setBusy(true)
+    try {
+      await create({
+        v: 1,
+        kind: 'event',
+        title,
+        startsAt,
+        ...(endsAt && Number.isFinite(endsAt) ? { endsAt } : {}),
+        ...(ev.location.trim() ? { location: ev.location.trim() } : {}),
+      })
+      setEv({ title: '', starts: '', ends: '', location: '' })
+      setComposeMode('none')
+    } catch (err) {
+      console.error('pin event failed', err)
     } finally {
       setBusy(false)
     }
@@ -149,7 +186,7 @@ export function PinnedBar({
           onClick={() => setCollapsed((c) => !c)}
         >
           <span aria-hidden>📌</span>
-          <span className="flex-1">{t('pins.title', { count: active.length })}</span>
+          <span className="flex-1">{t('pins.title', { count: pins.length + events.length })}</span>
         </button>
         {canCreate && (
           <button
@@ -158,7 +195,7 @@ export function PinnedBar({
             title={t('pins.add')}
             aria-label={t('pins.add')}
             onClick={() => {
-              setComposing((c) => !c)
+              setComposeMode((m) => (m === 'none' ? 'link' : 'none'))
               setCollapsed(false)
             }}
           >
@@ -167,61 +204,156 @@ export function PinnedBar({
         )}
         <button
           type="button"
-          aria-label={t('pins.title', { count: active.length })}
+          aria-label={t('pins.title', { count: pins.length + events.length })}
           onClick={() => setCollapsed((c) => !c)}
         >
           <span aria-hidden>{collapsed ? '▸' : '▾'}</span>
         </button>
       </div>
 
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => {
+          void pinFile(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
       {composing && canCreate && (
         <div className="space-y-2 border-t border-edge px-3 py-2">
-          <input
-            value={linkUrl}
-            onChange={(e) => setLinkUrl(e.target.value)}
-            placeholder={t('pins.linkUrlPlaceholder')}
-            className="text-sm"
-            inputMode="url"
-          />
-          <input
-            value={linkTitle}
-            onChange={(e) => setLinkTitle(e.target.value)}
-            placeholder={t('pins.linkTitlePlaceholder')}
-            className="text-sm"
-          />
-          <div className="flex gap-2">
+          <div className="flex gap-2 text-xs">
+            {(['link', 'event'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={`rounded-full border px-2 py-0.5 ${
+                  composeMode === m ? 'border-indigo-soft bg-indigo/20' : 'border-edge'
+                }`}
+                onClick={() => setComposeMode(m)}
+              >
+                {t(m === 'link' ? 'pins.composeLink' : 'pins.composeEvent')}
+              </button>
+            ))}
             <button
               type="button"
-              className="btn-gold text-xs px-3"
-              disabled={!linkUrl.trim() || busy}
-              onClick={() => void pinLink()}
-            >
-              {t('pins.pinLink')}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="hidden"
-              onChange={(e) => {
-                void pinFile(e.target.files?.[0])
-                e.target.value = ''
-              }}
-            />
-            <button
-              type="button"
-              className="btn-quiet text-xs px-3"
+              className="rounded-full border border-edge px-2 py-0.5"
               disabled={busy}
               onClick={() => fileInputRef.current?.click()}
             >
-              {t('pins.pinFile')}
+              {t('pins.composeFile')}
             </button>
           </div>
+
+          {composeMode === 'link' && (
+            <>
+              <input
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder={t('pins.linkUrlPlaceholder')}
+                className="text-sm"
+                inputMode="url"
+              />
+              <input
+                value={linkTitle}
+                onChange={(e) => setLinkTitle(e.target.value)}
+                placeholder={t('pins.linkTitlePlaceholder')}
+                className="text-sm"
+              />
+              <button
+                type="button"
+                className="btn-gold text-xs px-3"
+                disabled={!linkUrl.trim() || busy}
+                onClick={() => void pinLink()}
+              >
+                {t('pins.pinLink')}
+              </button>
+            </>
+          )}
+
+          {composeMode === 'event' && (
+            <>
+              <input
+                value={ev.title}
+                onChange={(e) => setEv({ ...ev, title: e.target.value })}
+                placeholder={t('pins.eventTitlePlaceholder')}
+                className="text-sm"
+              />
+              <label className="block text-[11px] text-ink-faint">
+                {t('pins.eventStart')}
+                <input
+                  type="datetime-local"
+                  value={ev.starts}
+                  onChange={(e) => setEv({ ...ev, starts: e.target.value })}
+                  className="text-sm w-full"
+                />
+              </label>
+              <label className="block text-[11px] text-ink-faint">
+                {t('pins.eventEnd')}
+                <input
+                  type="datetime-local"
+                  value={ev.ends}
+                  onChange={(e) => setEv({ ...ev, ends: e.target.value })}
+                  className="text-sm w-full"
+                />
+              </label>
+              <input
+                value={ev.location}
+                onChange={(e) => setEv({ ...ev, location: e.target.value })}
+                placeholder={t('pins.eventLocationPlaceholder')}
+                className="text-sm"
+              />
+              <button
+                type="button"
+                className="btn-gold text-xs px-3"
+                disabled={!ev.title.trim() || !ev.starts || busy}
+                onClick={() => void pinEvent()}
+              >
+                {t('pins.pinEvent')}
+              </button>
+            </>
+          )}
         </div>
       )}
 
-      {!collapsed && (active.length > 0 || suggested.length > 0) && (
+      {!collapsed && (pins.length > 0 || events.length > 0 || suggested.length > 0) && (
         <div className="space-y-1 border-t border-edge px-3 py-2">
-          {active.map((a) => {
+          {events.length > 0 && (
+            <div className="mb-1 space-y-1">
+              {events.map((a) => {
+                const startRel = relativeExpiry(a.body.startsAt, i18n.language)
+                const when = new Date(a.body.startsAt).toLocaleString(i18n.language, {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })
+                return (
+                  <div key={a.artifact.artifactId} className="flex items-center gap-2">
+                    <span aria-hidden>{KIND_ICON.event}</span>
+                    <span className="flex-1 truncate">
+                      <span className="text-ink">{a.body.title}</span>
+                      <span className="ml-1 text-[11px] text-ink-faint">
+                        · {when}
+                        {startRel ? ` · ${startRel}` : ''}
+                        {a.body.location ? ` · 📍 ${a.body.location}` : ''}
+                      </span>
+                    </span>
+                    {canRemove(a) && (
+                      <button
+                        type="button"
+                        className="text-xs text-ink-faint hover:text-danger"
+                        onClick={() => unpin(a.artifact.artifactId)}
+                        aria-label={t('pins.unpin')}
+                        title={t('pins.unpin')}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {pins.map((a) => {
             const expiry = relativeExpiry(a.artifact.expiresAt, i18n.language)
             const media =
               a.body.kind === 'media' ? a.body.media : a.body.kind === 'pin' ? a.body.media : null

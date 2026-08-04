@@ -153,7 +153,15 @@
     "linkUrlPlaceholder": "https://…",
     "linkTitlePlaceholder": "Titel (optional)",
     "pinLink": "Link anpinnen",
-    "pinFile": "Datei anpinnen"
+    "pinFile": "Datei anpinnen",
+    "composeLink": "Link",
+    "composeFile": "Datei",
+    "composeEvent": "Termin",
+    "eventTitlePlaceholder": "Titel des Termins",
+    "eventStart": "Beginn",
+    "eventEnd": "Ende (optional)",
+    "eventLocationPlaceholder": "Ort (optional)",
+    "pinEvent": "Termin anpinnen"
   },
   "settings": {
     "title": "Einstellungen",

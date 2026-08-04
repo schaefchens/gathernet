@@ -153,7 +153,15 @@
     "linkUrlPlaceholder": "https://…",
     "linkTitlePlaceholder": "Title (optional)",
     "pinLink": "Pin link",
-    "pinFile": "Pin a file"
+    "pinFile": "Pin a file",
+    "composeLink": "Link",
+    "composeFile": "File",
+    "composeEvent": "Event",
+    "eventTitlePlaceholder": "Event title",
+    "eventStart": "Starts",
+    "eventEnd": "Ends (optional)",
+    "eventLocationPlaceholder": "Location (optional)",
+    "pinEvent": "Pin event"
   },
   "settings": {
     "title": "Settings",
