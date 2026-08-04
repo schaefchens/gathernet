@@ -161,6 +161,7 @@
     "eventStart": "Beginn",
     "eventEnd": "Ende (optional)",
     "eventLocationPlaceholder": "Ort (optional)",
+    "eventUrlPlaceholder": "Link (optional)",
     "pinEvent": "Termin anpinnen",
     "going": "Dabei ({{count}})"
   },

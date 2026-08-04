@@ -59,6 +59,8 @@ export type ArtifactBody =
       startsAt: number
       endsAt?: number
       location?: string
+      /** optional link (meeting/registration/details) — plain anchor, no preview */
+      url?: string
     }
 
 /** A verified artifact ready to render: the record, its decrypted body, and its trust status. */

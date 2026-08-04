@@ -1,6 +1,7 @@
 import type { ChannelPinPolicy } from '@gathernet/shared'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ApiError } from '../../lib/api.ts'
 import type { ArtifactBody, VerifiedArtifact } from '../../lib/artifacts.ts'
 import { encryptAndUpload } from '../../lib/media.ts'
 import { wsClient } from '../../lib/ws-client.ts'
@@ -73,8 +74,9 @@ export function PinnedBar({
   const [composeMode, setComposeMode] = useState<'none' | 'link' | 'event'>('none')
   const [linkUrl, setLinkUrl] = useState('')
   const [linkTitle, setLinkTitle] = useState('')
-  const [ev, setEv] = useState({ title: '', starts: '', ends: '', location: '' })
+  const [ev, setEv] = useState({ title: '', starts: '', ends: '', location: '', url: '' })
   const [busy, setBusy] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composing = composeMode !== 'none'
@@ -123,10 +125,16 @@ export function PinnedBar({
       .then(reload)
       .catch((err) => console.error('rsvp failed', err))
 
+  const fail = (label: string, err: unknown) => {
+    console.error(label, err)
+    setCreateError(err instanceof ApiError ? err.message : String(err))
+  }
+
   const pinLink = async () => {
     const url = linkUrl.trim()
     if (!url || busy) return
     setBusy(true)
+    setCreateError(null)
     try {
       await create({
         v: 1,
@@ -138,7 +146,7 @@ export function PinnedBar({
       setLinkTitle('')
       setComposeMode('none')
     } catch (err) {
-      console.error('pin link failed', err)
+      fail('pin link failed', err)
     } finally {
       setBusy(false)
     }
@@ -147,12 +155,13 @@ export function PinnedBar({
   const pinFile = async (file: File | undefined) => {
     if (!file || busy) return
     setBusy(true)
+    setCreateError(null)
     try {
       const media = await encryptAndUpload(file, { name: file.name })
       await create({ v: 1, kind: 'media', media })
       setComposeMode('none')
     } catch (err) {
-      console.error('pin file failed', err)
+      fail('pin file failed', err)
     } finally {
       setBusy(false)
     }
@@ -164,6 +173,7 @@ export function PinnedBar({
     if (!title || !Number.isFinite(startsAt) || startsAt === 0 || busy) return
     const endsAt = ev.ends ? new Date(ev.ends).getTime() : undefined
     setBusy(true)
+    setCreateError(null)
     try {
       await create({
         v: 1,
@@ -172,11 +182,12 @@ export function PinnedBar({
         startsAt,
         ...(endsAt && Number.isFinite(endsAt) ? { endsAt } : {}),
         ...(ev.location.trim() ? { location: ev.location.trim() } : {}),
+        ...(ev.url.trim() ? { url: ev.url.trim() } : {}),
       })
-      setEv({ title: '', starts: '', ends: '', location: '' })
+      setEv({ title: '', starts: '', ends: '', location: '', url: '' })
       setComposeMode('none')
     } catch (err) {
-      console.error('pin event failed', err)
+      fail('pin event failed', err)
     } finally {
       setBusy(false)
     }
@@ -250,6 +261,12 @@ export function PinnedBar({
             </button>
           </div>
 
+          {createError && (
+            <p className="rounded-md border border-danger/50 bg-danger/10 px-2 py-1 text-[11px] text-danger">
+              {t('pins.pinFailed')}: {createError}
+            </p>
+          )}
+
           {composeMode === 'link' && (
             <>
               <input
@@ -308,6 +325,13 @@ export function PinnedBar({
                 placeholder={t('pins.eventLocationPlaceholder')}
                 className="text-sm"
               />
+              <input
+                value={ev.url}
+                onChange={(e) => setEv({ ...ev, url: e.target.value })}
+                placeholder={t('pins.eventUrlPlaceholder')}
+                className="text-sm"
+                inputMode="url"
+              />
               <button
                 type="button"
                 className="btn-gold text-xs px-3"
@@ -335,7 +359,18 @@ export function PinnedBar({
                   <div key={a.artifact.artifactId} className="flex items-center gap-2">
                     <span aria-hidden>{KIND_ICON.event}</span>
                     <span className="flex-1 truncate">
-                      <span className="text-ink">{a.body.title}</span>
+                      {a.body.url ? (
+                        <a
+                          href={a.body.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-soft hover:underline"
+                        >
+                          {a.body.title}
+                        </a>
+                      ) : (
+                        <span className="text-ink">{a.body.title}</span>
+                      )}
                       <span className="ml-1 text-[11px] text-ink-faint">
                         · {when}
                         {startRel ? ` · ${startRel}` : ''}

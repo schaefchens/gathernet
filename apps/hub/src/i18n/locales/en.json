@@ -161,6 +161,7 @@
     "eventStart": "Starts",
     "eventEnd": "Ends (optional)",
     "eventLocationPlaceholder": "Location (optional)",
+    "eventUrlPlaceholder": "Link (optional)",
     "pinEvent": "Pin event",
     "going": "Going ({{count}})"
   },
