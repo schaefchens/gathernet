@@ -71,6 +71,28 @@ export const metaStore = {
   put: (record: MetaRecord) => tx('meta', 'readwrite', (s) => s.put(record, 'v1')),
 }
 
+/**
+ * Push notification DISPLAY prefs — how a notification is shown. Stored PLAINTEXT in
+ * the `meta` store (key 'push') so the service worker can read them while the app is
+ * locked (the DMK is unavailable in a background worker). These aren't secrets; the
+ * server-side prefs (which categories to push, muted communities) live server-side.
+ */
+export interface PushDisplayPrefs {
+  /** coarse = show the category; generic = "new activity" only */
+  contentLevel: 'coarse' | 'generic'
+  /** override the notification title (lock-screen anonymization); default 'Gathernet' */
+  title?: string
+  /** override the notification icon URL */
+  icon?: string
+  /** locale for the SW-composed text */
+  locale: string
+}
+
+export const pushPrefsStore = {
+  get: () => tx<PushDisplayPrefs | undefined>('meta', 'readonly', (s) => s.get('push')),
+  put: (prefs: PushDisplayPrefs) => tx('meta', 'readwrite', (s) => s.put(prefs, 'push')),
+}
+
 /* ---------- encrypted stores ---------- */
 
 export interface CryptoBox {

@@ -177,7 +177,22 @@
     "revoke": "Revoke",
     "revokeConfirm": "Revoke {{name}}? It will be signed out immediately and removed from your encrypted chats.",
     "revoked": "Revoked",
-    "addDevice": "To add a device, open Gathernet there and choose “I have a recovery phrase”."
+    "addDevice": "To add a device, open Gathernet there and choose “I have a recovery phrase”.",
+    "push": {
+      "title": "Notifications",
+      "explainer": "Get notified when the app is closed. The server can't see message content — a notification only tells your device the kind of activity, never who or what.",
+      "unsupported": "This browser doesn't support notifications.",
+      "enable": "Enable notifications",
+      "disable": "Turn off notifications",
+      "blocked": "Notifications are blocked in your browser settings — allow them there first.",
+      "content": "What a notification shows",
+      "coarse": "The kind of activity (e.g. “new message”)",
+      "generic": "Only “new activity” (most private)",
+      "categories": "Notify me about",
+      "cat_dm": "Direct messages",
+      "cat_channel": "Channel messages",
+      "cat_moderation": "Things needing my review (moderation)"
+    }
   },
   "qr": {
     "unsupported": "Camera scanning isn't supported in this browser — enter the code instead."

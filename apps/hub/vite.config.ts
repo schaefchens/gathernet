@@ -14,6 +14,15 @@ export default defineConfig({
     VitePWA({
       // Never silently swap a crypto app under the user.
       registerType: 'prompt',
+      // Custom SW (src/sw.ts) so we can add the Web Push handler; it re-implements the
+      // precache + SPA navigation fallback that generateSW gave us.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,png,svg,woff2,wasm}'],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+      },
       manifest: {
         name: 'Gathernet',
         short_name: 'Gathernet',
@@ -32,16 +41,6 @@ export default defineConfig({
             purpose: 'maskable',
           },
         ],
-      },
-      workbox: {
-        // Precache the app shell INCLUDING the wasm module: offline unlock
-        // and reading history must work with no network.
-        globPatterns: ['**/*.{js,css,html,png,svg,woff2,wasm}'],
-        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
-        // The API and WS are never served from cache — privacy first.
-        navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/ws/, /^\/healthz/],
-        runtimeCaching: [],
       },
     }),
   ],

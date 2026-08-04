@@ -177,7 +177,22 @@
     "revoke": "Widerrufen",
     "revokeConfirm": "{{name}} widerrufen? Das Gerät wird sofort abgemeldet und aus deinen verschlüsselten Chats entfernt.",
     "revoked": "Widerrufen",
-    "addDevice": "Um ein Gerät hinzuzufügen, öffne Gathernet dort und wähle „Ich habe eine Wiederherstellungsphrase“."
+    "addDevice": "Um ein Gerät hinzuzufügen, öffne Gathernet dort und wähle „Ich habe eine Wiederherstellungsphrase“.",
+    "push": {
+      "title": "Benachrichtigungen",
+      "explainer": "Werde benachrichtigt, wenn die App geschlossen ist. Der Server sieht keine Nachrichteninhalte — eine Benachrichtigung nennt deinem Gerät nur die Art der Aktivität, nie wer oder was.",
+      "unsupported": "Dieser Browser unterstützt keine Benachrichtigungen.",
+      "enable": "Benachrichtigungen aktivieren",
+      "disable": "Benachrichtigungen ausschalten",
+      "blocked": "Benachrichtigungen sind in deinen Browsereinstellungen blockiert — erlaube sie zuerst dort.",
+      "content": "Was eine Benachrichtigung zeigt",
+      "coarse": "Die Art der Aktivität (z. B. „neue Nachricht“)",
+      "generic": "Nur „neue Aktivität“ (am privatesten)",
+      "categories": "Benachrichtige mich über",
+      "cat_dm": "Direktnachrichten",
+      "cat_channel": "Kanalnachrichten",
+      "cat_moderation": "Dinge, die meine Prüfung brauchen (Moderation)"
+    }
   },
   "qr": {
     "unsupported": "Kamera-Scan wird in diesem Browser nicht unterstützt — gib stattdessen den Code ein."

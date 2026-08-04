@@ -4,6 +4,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AppIcon, SCOPE_CHIP_KEYS } from '../features/apps/ConsentCard.tsx'
+import { PushSettings } from '../features/pwa/PushSettings.tsx'
 import { setLanguage } from '../i18n/index.ts'
 import { api } from '../lib/api.ts'
 import { chatStore } from '../stores/chat.ts'
@@ -101,6 +102,8 @@ function SettingsScreen() {
           </select>
         </label>
       </section>
+
+      <PushSettings />
 
       <section className="card space-y-3">
         <h2 className="font-medium text-ink-soft">{t('settings.devices')}</h2>
