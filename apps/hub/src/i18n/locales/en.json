@@ -142,7 +142,13 @@
     "unpin": "Unpin",
     "jump": "Jump to message",
     "untitled": "Pinned item",
-    "pinFailed": "Couldn't pin"
+    "pinFailed": "Couldn't pin",
+    "pinFor": "Pin for:",
+    "durationForever": "Forever",
+    "duration1h": "1 hour",
+    "duration1d": "1 day",
+    "duration1w": "1 week",
+    "expires": "expires {{when}}"
   },
   "settings": {
     "title": "Settings",

@@ -142,7 +142,13 @@
     "unpin": "Lösen",
     "jump": "Zur Nachricht springen",
     "untitled": "Angepinntes Element",
-    "pinFailed": "Anpinnen fehlgeschlagen"
+    "pinFailed": "Anpinnen fehlgeschlagen",
+    "pinFor": "Anpinnen für:",
+    "durationForever": "Für immer",
+    "duration1h": "1 Stunde",
+    "duration1d": "1 Tag",
+    "duration1w": "1 Woche",
+    "expires": "läuft {{when}} ab"
   },
   "settings": {
     "title": "Einstellungen",

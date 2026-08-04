@@ -21,8 +21,9 @@ interface MessageThreadProps {
   onDelete?: (targetId: string, seq: number) => void
   /** recipient opened a view-once message → destroy it locally + tell author/own devices */
   onConsume?: (targetId: string) => void
-  /** pin/suggest this message as a channel artifact (channels only) */
-  onPin?: (message: StoredMessage) => void
+  /** pin/suggest this message as a channel artifact (channels only); expiresAt is
+   *  epoch-millis for a time-limited pin, or null for "forever" */
+  onPin?: (message: StoredMessage, expiresAt: number | null) => void
   /** the current account id — to show which reactions are mine + toggle correctly */
   myAccountId?: string | undefined
   /** shown in the body while `ready` is false */
@@ -35,6 +36,16 @@ interface MessageThreadProps {
 
 /** Quick-reaction palette — prayer-first, a small deliberate set (not a full picker). */
 const REACTIONS = ['🙏', '❤️', '👍', '😀', '😢', '🎉']
+
+const HOUR_MS = 3_600_000
+/** Pin-duration choices; `ms: null` = pinned forever. Labels are literal i18n keys
+ *  (kept `as const` so the typed `t()` accepts them). */
+const PIN_DURATIONS = [
+  { key: 'pins.durationForever', ms: null },
+  { key: 'pins.duration1h', ms: HOUR_MS },
+  { key: 'pins.duration1d', ms: 24 * HOUR_MS },
+  { key: 'pins.duration1w', ms: 7 * 24 * HOUR_MS },
+] as const
 
 /** First grapheme of an input string (so a multi-codepoint emoji stays intact). */
 function firstEmoji(s: string): string | null {
@@ -78,6 +89,8 @@ export function MessageThread({
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
   const [pickerFor, setPickerFor] = useState<string | null>(null)
   const [customFor, setCustomFor] = useState<string | null>(null)
+  /** message id whose pin-duration menu is open */
+  const [pinningFor, setPinningFor] = useState<string | null>(null)
   const [editingFor, setEditingFor] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
   const [viewOnce, setViewOnce] = useState(false)
@@ -315,7 +328,9 @@ export function MessageThread({
                     <button
                       type="button"
                       className="text-xs text-ink-faint hover:text-ink"
-                      onClick={() => onPin(message)}
+                      onClick={() =>
+                        setPinningFor(pinningFor === message.id ? null : (message.id ?? null))
+                      }
                     >
                       {t('chat.pin')}
                     </button>
@@ -379,6 +394,26 @@ export function MessageThread({
                       ＋
                     </button>
                   )}
+                </div>
+              )}
+              {onPin && pinningFor === message.id && (
+                <div
+                  className={`flex items-center gap-1 mt-1 ${message.outgoing ? 'justify-end' : ''}`}
+                >
+                  <span className="text-[11px] text-ink-faint">{t('pins.pinFor')}</span>
+                  {PIN_DURATIONS.map((d) => (
+                    <button
+                      key={d.key}
+                      type="button"
+                      className="text-xs rounded-full border border-edge bg-overlay/40 px-1.5 py-0.5 hover:border-indigo-soft"
+                      onClick={() => {
+                        onPin(message, d.ms === null ? null : Date.now() + d.ms)
+                        setPinningFor(null)
+                      }}
+                    >
+                      {t(d.key)}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>

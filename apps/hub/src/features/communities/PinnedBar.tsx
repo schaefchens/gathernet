@@ -7,6 +7,18 @@ import { channelArtifactsStore, useChannelArtifacts } from '../../stores/channel
 
 const EMPTY: VerifiedArtifact[] = []
 
+/** A short locale-aware "in 2h / in 3d" for a pin's expiry, or null if none. */
+function relativeExpiry(expiresAt: number | null, locale: string): string | null {
+  if (expiresAt === null) return null
+  const ms = expiresAt - Date.now()
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' })
+  const mins = Math.round(ms / 60_000)
+  if (Math.abs(mins) < 60) return rtf.format(mins, 'minute')
+  const hours = Math.round(ms / 3_600_000)
+  if (Math.abs(hours) < 24) return rtf.format(hours, 'hour')
+  return rtf.format(Math.round(ms / 86_400_000), 'day')
+}
+
 /** A one-line summary of an artifact body for the compact pinned card. */
 function summarize(body: ArtifactBody, attachmentLabel: string): string {
   switch (body.kind) {
@@ -42,7 +54,7 @@ export function PinnedBar({
   myAccountId: string | null
   onJump: (messageId: string) => void
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const artifacts = useChannelArtifacts((s) => s.byChannel[channelId] ?? EMPTY)
   const [collapsed, setCollapsed] = useState(false)
 
@@ -92,6 +104,7 @@ export function PinnedBar({
           {active.map((a) => {
             const text = summarize(a.body, attachmentLabel)
             const jumpable = a.body.kind === 'pin' && a.body.originalMessageId
+            const expiry = relativeExpiry(a.artifact.expiresAt, i18n.language)
             return (
               <div key={a.artifact.artifactId} className="flex items-center gap-2">
                 <button
@@ -107,6 +120,14 @@ export function PinnedBar({
                 >
                   {text || t('pins.untitled')}
                 </button>
+                {expiry && (
+                  <span
+                    className="shrink-0 text-[10px] text-ink-faint"
+                    title={t('pins.expires', { when: expiry })}
+                  >
+                    ⏳ {expiry}
+                  </span>
+                )}
                 {canRemove(a) && (
                   <button
                     type="button"

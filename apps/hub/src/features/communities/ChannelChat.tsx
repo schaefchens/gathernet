@@ -63,16 +63,21 @@ export function ChannelChat({
 
   /** Build a pin snapshot from a channel message and post it (a suggestion under
    *  moderators policy; the pinned bar reflects its status once it round-trips). */
-  const pinMessage = (message: (typeof messages)[number]) => {
+  const pinMessage = (message: (typeof messages)[number], expiresAt: number | null) => {
     setPinError(null)
     void channelArtifactsStore
-      .pin(communityId, channelId, {
-        v: 1,
-        kind: 'pin',
-        ...(message.text ? { text: message.text } : {}),
-        ...(message.media ? { media: message.media } : {}),
-        ...(message.id ? { originalMessageId: message.id } : {}),
-      })
+      .pin(
+        communityId,
+        channelId,
+        {
+          v: 1,
+          kind: 'pin',
+          ...(message.text ? { text: message.text } : {}),
+          ...(message.media ? { media: message.media } : {}),
+          ...(message.id ? { originalMessageId: message.id } : {}),
+        },
+        expiresAt,
+      )
       .then(() => channelArtifactsStore.load(communityId, channelId, pinPolicy))
       .catch((err: unknown) => {
         console.error('pin failed', err)
