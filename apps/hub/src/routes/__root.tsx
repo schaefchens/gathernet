@@ -5,6 +5,7 @@ import { WelcomeFlow } from '../features/onboarding/WelcomeFlow.tsx'
 import { PresenceSelector } from '../features/presence/PresenceSelector.tsx'
 import { UpdatePrompt } from '../features/pwa/UpdatePrompt.tsx'
 import { UnlockScreen } from '../features/unlock/UnlockScreen.tsx'
+import { useReminderClock } from '../lib/reminder-clock.ts'
 import { type WsStatus, wsClient } from '../lib/ws-client.ts'
 import { useSession } from '../stores/session.ts'
 
@@ -46,6 +47,8 @@ function AppShell() {
   const [wsStatus, setWsStatus] = useState<WsStatus>(wsClient.status)
 
   useEffect(() => wsClient.onStatus(setWsStatus), [])
+  // Peer-triggered event reminders run while the authenticated shell is mounted.
+  useReminderClock()
 
   return (
     <div className="min-h-screen flex flex-col">

@@ -34,9 +34,14 @@ import { secureStore } from '../lib/storage.ts'
 interface ChannelArtifactsState {
   /** channelId → verified, non-expired artifacts (active + suggested), newest first */
   byChannel: Record<string, VerifiedArtifact[]>
+  /** channelId → its communityId (the reminder clock needs it to address triggers) */
+  community: Record<string, string>
 }
 
-export const useChannelArtifacts = create<ChannelArtifactsState>(() => ({ byChannel: {} }))
+export const useChannelArtifacts = create<ChannelArtifactsState>(() => ({
+  byChannel: {},
+  community: {},
+}))
 
 const base = (communityId: string, channelId: string) =>
   `/api/v1/communities/${communityId}/channels/${channelId}/artifacts`
@@ -80,7 +85,10 @@ export const channelArtifactsStore = {
       out.push({ artifact: a, body, status, issuerAccountId, tally })
     }
     out.sort((x, y) => y.artifact.createdAt - x.artifact.createdAt)
-    useChannelArtifacts.setState((s) => ({ byChannel: { ...s.byChannel, [channelId]: out } }))
+    useChannelArtifacts.setState((s) => ({
+      byChannel: { ...s.byChannel, [channelId]: out },
+      community: { ...s.community, [channelId]: communityId },
+    }))
   },
 
   /** Seal + sign a new pinned artifact and post it (a suggestion under moderators policy). */
@@ -132,7 +140,8 @@ export const channelArtifactsStore = {
   clear(channelId: string): void {
     useChannelArtifacts.setState((s) => {
       const { [channelId]: _drop, ...rest } = s.byChannel
-      return { byChannel: rest }
+      const { [channelId]: _dropC, ...restC } = s.community
+      return { byChannel: rest, community: restC }
     })
   },
 }

@@ -61,6 +61,9 @@ export type ArtifactBody =
       location?: string
       /** optional link (meeting/registration/details) — plain anchor, no preview */
       url?: string
+      /** minutes before startsAt to remind (creator-set, sealed so all clients agree on
+       *  the reminder instant). Absent → the app default (60). Never seen by the server. */
+      remindOffsetMin?: number
     }
 
 /** A verified artifact ready to render: the record, its decrypted body, and its trust status. */

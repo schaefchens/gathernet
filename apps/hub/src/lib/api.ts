@@ -51,3 +51,14 @@ export async function apiBytes(path: string): Promise<Uint8Array> {
   if (!res.ok) throw new ApiError(res.status, 'http_error')
   return new Uint8Array(await res.arrayBuffer())
 }
+
+/** Best-effort POST that survives the page being torn down (`keepalive`). Used by the
+ *  reminder clock's early-fire on pagehide — fire-and-forget, response ignored. */
+export function apiKeepalive(path: string, body: unknown): void {
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  const token = tokenProvider()
+  if (token) headers.authorization = `Bearer ${token}`
+  void fetch(path, { method: 'POST', headers, body: JSON.stringify(body), keepalive: true }).catch(
+    () => {},
+  )
+}
