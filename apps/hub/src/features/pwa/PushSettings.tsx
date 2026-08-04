@@ -24,6 +24,7 @@ export function PushSettings() {
   const [customTitle, setCustomTitle] = useState('')
   const [hasCustomIcon, setHasCustomIcon] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const supported = isPushSupported()
 
   useEffect(() => {
@@ -50,6 +51,7 @@ export function PushSettings() {
 
   const toggle = async () => {
     setBusy(true)
+    setError(null)
     try {
       if (subscribed) {
         await disablePush()
@@ -61,6 +63,7 @@ export function PushSettings() {
       }
     } catch (err) {
       console.error('push toggle failed', err)
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -113,6 +116,7 @@ export function PushSettings() {
       {permission === 'denied' && (
         <p className="text-xs text-danger">{t('settings.push.blocked')}</p>
       )}
+      {error && <p className="text-xs text-danger break-words">{error}</p>}
 
       {subscribed && (
         <>

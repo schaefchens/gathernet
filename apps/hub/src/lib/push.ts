@@ -31,25 +31,45 @@ export interface PushState {
 export async function getPushState(): Promise<PushState> {
   const supported = isPushSupported()
   if (!supported) return { supported: false, permission: 'denied', subscribed: false }
-  const reg = await navigator.serviceWorker.ready
-  const sub = await reg.pushManager.getSubscription()
+  // Don't block mount if the SW never becomes ready.
+  const reg = await swRegistration().catch(() => null)
+  const sub = reg ? await reg.pushManager.getSubscription() : null
   return { supported: true, permission: Notification.permission, subscribed: !!sub }
 }
 
+/** Resolve the active service-worker registration, but never hang forever — if the SW
+ *  isn't ready (e.g. the page hasn't picked it up), throw a clear, surfaced error. */
+async function swRegistration(): Promise<ServiceWorkerRegistration> {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error('service worker not ready — reload the app and retry')),
+      8000,
+    ),
+  )
+  return Promise.race([navigator.serviceWorker.ready, timeout])
+}
+
 /** Request permission, subscribe with the server's VAPID key, and register the
- *  subscription server-side. Returns false if permission was refused. */
+ *  subscription server-side. Returns false if permission was refused; throws (with a
+ *  human message) on any other failure so the UI can show it. */
 export async function enablePush(): Promise<boolean> {
   if (!isPushSupported()) return false
   const permission = await Notification.requestPermission()
   if (permission !== 'granted') return false
+  const reg = await swRegistration()
   const { publicKey } = await api<VapidKeyResponse>('GET', '/api/v1/push/vapid-key')
-  const reg = await navigator.serviceWorker.ready
-  const sub = await reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(publicKey),
-  })
+  // Reuse an existing subscription if present (re-subscribing with the same key would
+  // otherwise be a no-op; a different key throws InvalidStateError).
+  const sub =
+    (await reg.pushManager.getSubscription()) ??
+    (await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    }))
   const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } }
-  if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) return false
+  if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) {
+    throw new Error('push subscription missing keys')
+  }
   await api('POST', '/api/v1/push/subscriptions', {
     subscription: { endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth },
   })
