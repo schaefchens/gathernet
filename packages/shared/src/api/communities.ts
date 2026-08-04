@@ -488,8 +488,11 @@ export const communityDeviceSchema = z.object({
   deviceId: deviceIdSchema,
   deviceCert: z.base64(),
   certSig: z.base64(),
-  receiptPk: z.base64(),
-  receiptPkSig: z.base64(),
+  // null when the device never registered a receipt key: the DeviceCert (used for
+  // signature verification) is always present, but such a device can't receive a
+  // K_meta/K_channel grant (nothing to seal to) and is skipped by the grant paths.
+  receiptPk: z.base64().nullable(),
+  receiptPkSig: z.base64().nullable(),
 })
 
 export const communityDevicesResponseSchema = z.object({

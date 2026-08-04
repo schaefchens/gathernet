@@ -723,6 +723,7 @@ export async function verifyDeviceCert(
 export async function verifyPeerReceiptKey(d: CommunityDevice): Promise<string | null> {
   const verified = await verifyDeviceCert(d)
   if (!verified) return null
+  if (!d.receiptPk || !d.receiptPkSig) return null // no receipt key → not a grant target
   try {
     const mls = await loadCrypto()
     const receiptOk = mls.ed25519Verify(

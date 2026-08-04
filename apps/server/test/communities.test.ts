@@ -421,6 +421,29 @@ describe('community lifecycle + encrypted metadata', () => {
     ).toBe(404)
   })
 
+  it('single-device lookup returns the cert for a device WITHOUT a receipt key', async () => {
+    // A device that never registered a receipt key must still be resolvable by its
+    // DeviceCert — cert-based signature verification (capabilities, pinned artifacts,
+    // sender auth) needs only the cert. It just can't be a grant recipient.
+    const owner = await createUserWithReceipt('NoRcptOwner')
+    const member = await createUser('NoRcptMember') // no receipt key
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/devices/${member.deviceId}`,
+      headers: auth(owner),
+    })
+    expect(res.statusCode).toBe(200)
+    const device = res.json().device
+    expect(device).not.toBeNull()
+    expect(device.deviceId).toBe(member.deviceId)
+    expect(typeof device.deviceCert).toBe('string')
+    expect(device.receiptPk).toBeNull()
+    expect(device.receiptPkSig).toBeNull()
+  })
+
   it('demoting a leader flags a K_meta rotation (capability revocation rides the epoch bump)', async () => {
     const owner = await createUser('DemoteOwner')
     const leader = await createUser('DemoteLeader')

@@ -1809,15 +1809,19 @@ export async function getCommunityDevice(
     )
     .limit(1)
   const r = rows[0]
-  if (!r || !r.receiptPk || !r.receiptPkSig) return { device: null }
+  if (!r) return { device: null }
+  // Return the DeviceCert even when the device has no receipt key: cert-based
+  // signature verification (capabilities, pinned artifacts, sender auth) needs only
+  // the cert. A device without a receipt key simply can't be a grant recipient
+  // (receiptPk = null), which the grant paths handle by skipping it.
   return {
     device: {
       accountId: r.accountId as AccountId,
       deviceId: r.deviceId as DeviceId,
       deviceCert: r.cert.toString('base64'),
       certSig: r.certSig.toString('base64'),
-      receiptPk: r.receiptPk.toString('base64'),
-      receiptPkSig: r.receiptPkSig.toString('base64'),
+      receiptPk: r.receiptPk ? r.receiptPk.toString('base64') : null,
+      receiptPkSig: r.receiptPkSig ? r.receiptPkSig.toString('base64') : null,
     },
   }
 }
