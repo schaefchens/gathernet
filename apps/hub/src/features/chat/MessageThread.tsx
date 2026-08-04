@@ -186,9 +186,16 @@ export function MessageThread({
         {ready && messages.length === 0 && (
           <p className="text-center text-sm text-ink-faint py-8">{t('chat.noMessages')}</p>
         )}
-        {messages.map((message) => {
+        {messages.map((message, i) => {
           const quoted = message.replyTo ? byId.get(message.replyTo) : null
           const reactions = Object.entries(message.reactions ?? {})
+          // Sender label for incoming channel bubbles (DMs carry no senderName),
+          // shown once per run of consecutive messages from the same sender.
+          const prev = messages[i - 1]
+          const showSender =
+            !message.outgoing &&
+            !!message.senderName &&
+            prev?.senderAccountId !== message.senderAccountId
           const spent = !!message.viewOnceOpened
           // A revealed view-once: display the content captured at open time (its
           // persisted copy is already a tombstone).
@@ -205,6 +212,11 @@ export function MessageThread({
               data-mid={message.id}
               className={`group max-w-[80%] ${message.outgoing ? 'ml-auto' : ''}`}
             >
+              {showSender && (
+                <p className="mb-0.5 ml-1 text-[11px] font-medium text-indigo-soft">
+                  {message.senderName}
+                </p>
+              )}
               <div
                 className={`rounded-lg px-3 py-2 text-sm ${
                   message.outgoing

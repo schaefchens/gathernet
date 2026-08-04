@@ -31,6 +31,7 @@ export function bodyToStored(
     sentAt: body.ts,
     outgoing,
     ...(body.replyTo ? { replyTo: body.replyTo } : {}),
+    ...(body.sender ? { senderName: body.sender } : {}),
     ...(body.kind === 'media' || body.kind === 'voice' ? { media: body.media } : {}),
     ...(body.once ? { once: true } : {}),
   }

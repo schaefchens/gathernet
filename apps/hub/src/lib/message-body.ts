@@ -34,6 +34,9 @@ interface Base {
   replyTo?: string
   /** view-once: the recipient's copy self-destructs the first time it's opened */
   once?: boolean
+  /** sender's self-asserted display name — carried E2EE so multi-party channels can
+   *  label bubbles without a roster lookup. Set on channel sends only (DMs omit it). */
+  sender?: string
 }
 
 export type MessageBody =

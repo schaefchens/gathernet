@@ -303,6 +303,8 @@ export interface StoredMessage {
    *  Absent on legacy (pre-v2) messages, which therefore can't be reacted to/edited. */
   id?: string
   senderAccountId: string
+  /** sender's self-asserted display name (channels only) — for labelling incoming bubbles */
+  senderName?: string
   /** default 'text' when absent (legacy) */
   kind?: 'text' | 'media' | 'voice'
   /** text body, or a media caption; '' for media/voice without a caption */

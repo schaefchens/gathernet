@@ -58,6 +58,7 @@ import {
   deleteBody,
   editBody,
   encodeBody,
+  isDisplayKind,
   type MessageBody,
   mediaBody,
   parseBody,
@@ -81,6 +82,7 @@ import {
   type StoredMessage,
 } from '../lib/storage.ts'
 import { wsClient } from '../lib/ws-client.ts'
+import { useSession } from './session.ts'
 
 /**
  * Per-channel readiness. A channel is `ready` once this device holds MLS
@@ -1155,6 +1157,13 @@ class CommunityChatStore {
 
   /** Encode + send a message body over the channel's transport (MLS or group_key). */
   private async sendBody(channelId: string, body: MessageBody): Promise<void> {
+    // Stamp our self-asserted display name on displayed messages so multi-party
+    // channels can label incoming bubbles without a roster lookup (channels only —
+    // DMs never reach this path).
+    if (isDisplayKind(body.kind)) {
+      const name = useSession.getState().displayName
+      if (name) body.sender = name
+    }
     const gk = this.groupKey.get(channelId)
     if (gk) return this.sendGroupKey(channelId, gk, body)
     const engine = this.engine
