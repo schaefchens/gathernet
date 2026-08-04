@@ -2,6 +2,7 @@ import type { ChannelAccess, ChannelPinPolicy, ChannelPostPolicy } from '@gather
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError } from '../../lib/api.ts'
+import { copyMedia } from '../../lib/media.ts'
 import { channelArtifactsStore } from '../../stores/channel-artifacts.ts'
 import { communityChatStore, useCommunityChat } from '../../stores/community-chat.ts'
 import { useSession } from '../../stores/session.ts'
@@ -62,27 +63,30 @@ export function ChannelChat({
   const [pinError, setPinError] = useState<string | null>(null)
 
   /** Build a pin snapshot from a channel message and post it (a suggestion under
-   *  moderators policy; the pinned bar reflects its status once it round-trips). */
+   *  moderators policy; the pinned bar reflects its status once it round-trips). A
+   *  message's attachment is copied to a pin-owned blob so the pin survives the
+   *  original message's deletion/TTL. */
   const pinMessage = (message: (typeof messages)[number], expiresAt: number | null) => {
     setPinError(null)
-    void channelArtifactsStore
-      .pin(
+    void (async () => {
+      const media = message.media ? await copyMedia(message.media).catch(() => message.media) : null
+      await channelArtifactsStore.pin(
         communityId,
         channelId,
         {
           v: 1,
           kind: 'pin',
           ...(message.text ? { text: message.text } : {}),
-          ...(message.media ? { media: message.media } : {}),
+          ...(media ? { media } : {}),
           ...(message.id ? { originalMessageId: message.id } : {}),
         },
         expiresAt,
       )
-      .then(() => channelArtifactsStore.load(communityId, channelId, pinPolicy))
-      .catch((err: unknown) => {
-        console.error('pin failed', err)
-        setPinError(err instanceof ApiError ? err.message : String(err))
-      })
+      await channelArtifactsStore.load(communityId, channelId, pinPolicy)
+    })().catch((err: unknown) => {
+      console.error('pin failed', err)
+      setPinError(err instanceof ApiError ? err.message : String(err))
+    })
   }
 
   /** Best-effort scroll to a pinned message's source (if it's still in view). */

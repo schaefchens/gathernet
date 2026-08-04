@@ -3,7 +3,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { Db } from '../../db/index.ts'
 import type { BlobStore } from '../../storage/blob-store.ts'
 import { ServiceError } from '../accounts/service.ts'
-import { deleteMessageMedia, getMessageMedia, uploadMessageMedia } from './service.ts'
+import {
+  copyMessageMedia,
+  deleteMessageMedia,
+  getMessageMedia,
+  uploadMessageMedia,
+} from './service.ts'
 
 export interface MediaRoutesOptions {
   db: Db
@@ -47,4 +52,15 @@ export function registerMediaRoutes(
     await deleteMessageMedia(db, blobStore, session.accountId, request.params.mediaId)
     return { ok: true }
   })
+
+  // Duplicate a blob into a caller-owned copy (pinning a message's media).
+  app.post<{ Params: { mediaId: string } }>(
+    '/api/v1/media/:mediaId/copy',
+    auth,
+    async (request, reply) => {
+      const session = requireSession(request)
+      reply.status(201)
+      return copyMessageMedia(db, blobStore, session.accountId, request.params.mediaId)
+    },
+  )
 }

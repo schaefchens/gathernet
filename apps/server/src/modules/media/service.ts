@@ -34,6 +34,31 @@ export async function uploadMessageMedia(
 }
 
 /**
+ * Duplicate an attachment's ciphertext into a fresh, caller-owned blob. Used when
+ * pinning a message's media: the pin gets its OWN copy so it survives the original
+ * message's deletion/TTL. The per-file key is unchanged (it lives in the E2EE body),
+ * so the new blob decrypts with the same key; only the bearer mediaId is new. Access
+ * is proven by possessing the source mediaId (itself a high-entropy bearer token).
+ */
+export async function copyMessageMedia(
+  db: Db,
+  blob: BlobStore,
+  accountId: string,
+  sourceMediaId: string,
+): Promise<{ mediaId: string }> {
+  const bytes = await blob.get(blobKey(sourceMediaId))
+  if (!bytes) throw new ServiceError(404, 'media_not_found')
+  const mediaId = `mm_${randomBytes(16).toString('hex')}`
+  await blob.put(blobKey(mediaId), bytes, 'application/octet-stream')
+  await db.insert(messageMedia).values({
+    mediaId,
+    sizeBytes: bytes.length,
+    uploaderAccountId: accountId,
+  })
+  return { mediaId }
+}
+
+/**
  * Fetch an attachment's ciphertext from object storage. Auth-gated (any account) —
  * the mediaId is a bearer token that only appears inside E2EE bodies, and the bytes
  * are useless without the per-file key. The browser reaches this ONLY through our

@@ -40,6 +40,16 @@ export async function encryptAndUpload(
   }
 }
 
+/**
+ * Duplicate a media blob into a fresh, caller-owned copy and return a MediaRef with
+ * the new mediaId (same per-file key). Used when pinning a message's attachment so
+ * the pin owns its blob and survives the original message's deletion/TTL.
+ */
+export async function copyMedia(ref: MediaRef): Promise<MediaRef> {
+  const { mediaId } = await api<{ mediaId: string }>('POST', `/api/v1/media/${ref.mediaId}/copy`)
+  return { ...ref, mediaId }
+}
+
 /** Download an attachment's ciphertext + decrypt it with the key from the body → Blob. */
 export async function downloadAndDecrypt(ref: MediaRef): Promise<Blob> {
   const ciphertext = await apiBytes(`/api/v1/media/${ref.mediaId}`)
