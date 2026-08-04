@@ -89,7 +89,21 @@ export async function getDisplayPrefs(): Promise<PushDisplayPrefs> {
   return (await pushPrefsStore.get()) ?? { contentLevel: 'coarse', locale: getLocale() }
 }
 
-export async function setDisplayPrefs(patch: Partial<PushDisplayPrefs>): Promise<void> {
+export async function setDisplayPrefs(patch: {
+  contentLevel?: 'coarse' | 'generic'
+  title?: string | undefined
+  icon?: string | undefined
+  locale?: string
+}): Promise<void> {
   const cur = await getDisplayPrefs()
-  await pushPrefsStore.put({ ...cur, ...patch, locale: patch.locale ?? getLocale() })
+  const next: PushDisplayPrefs = {
+    contentLevel: patch.contentLevel ?? cur.contentLevel,
+    locale: patch.locale ?? cur.locale ?? getLocale(),
+  }
+  // title/icon are clearable: only carry them forward when truthy (empty/undefined = clear).
+  const title = 'title' in patch ? patch.title : cur.title
+  const icon = 'icon' in patch ? patch.icon : cur.icon
+  if (title) next.title = title
+  if (icon) next.icon = icon
+  await pushPrefsStore.put(next)
 }

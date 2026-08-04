@@ -20,6 +20,7 @@ import {
   buildPushPayload,
   coalescedPush,
   notifyMessageActivity,
+  notifyOfflineManagers,
   sendToDevicePush,
 } from '../src/modules/push/service.ts'
 import { InMemoryBlobStore } from '../src/storage/blob-store.ts'
@@ -247,5 +248,25 @@ describe('web push subscriptions + sending', () => {
     sendNotification.mockClear()
     await notifyMessageActivity(testDb.db, roomId, [u2.deviceId])
     expect(sendNotification).not.toHaveBeenCalled()
+  })
+
+  it('notifyOfflineManagers pushes moderation to offline managers only', async () => {
+    const u = await createUser()
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/push/subscriptions',
+      headers: auth(u.token),
+      payload: sub('https://push.example/ep-mod'),
+    })
+    // Online manager → no push.
+    sendNotification.mockClear()
+    await notifyOfflineManagers(testDb.db, [u.accountId], 'cm_00000000000000cc', () => true)
+    expect(sendNotification).not.toHaveBeenCalled()
+
+    // Offline manager → a 'moderation' push to their device.
+    sendNotification.mockClear()
+    await notifyOfflineManagers(testDb.db, [u.accountId], 'cm_00000000000000cc', () => false)
+    expect(sendNotification).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(sendNotification.mock.calls[0]?.[1] as string).category).toBe('moderation')
   })
 })

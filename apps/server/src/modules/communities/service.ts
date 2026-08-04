@@ -74,6 +74,7 @@ import type { BlobStore } from '../../storage/blob-store.ts'
 import type { ConnectionRegistry } from '../../ws/registry.ts'
 import { ServiceError } from '../accounts/service.ts'
 import { satisfiesChannelAccess } from '../delivery/service.ts'
+import { notifyOfflineManagers } from '../push/service.ts'
 
 type DbOrTx = Db | Parameters<Parameters<Db['transaction']>[0]>[0]
 type MemberRow = typeof communityMembers.$inferSelect
@@ -994,6 +995,8 @@ export async function joinChannel(
     },
   }
   for (const acct of managers) registry.sendToAccount(acct, message)
+  // Offline-fallback push to managers who need to accept/decline.
+  void notifyOfflineManagers(db, managers, communityId, (a) => registry.isAccountOnline(a))
   return joinInfo(channelId, 'pending', channel, group)
 }
 
@@ -2085,7 +2088,7 @@ export async function postArtifact(
   input: PostArtifactRequest,
 ): Promise<void> {
   await requireActiveMembership(db, communityId, accountId)
-  await loadChannel(db, communityId, channelId)
+  const channel = await loadChannel(db, communityId, channelId)
   const community = await db.query.communities.findFirst({
     where: eq(communities.communityId, communityId),
   })
@@ -2115,6 +2118,15 @@ export async function postArtifact(
     type: 'community.channel_artifact_updated',
     payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
   })
+  // Under moderators policy, a non-manager's artifact is a suggestion awaiting approval
+  // (the authoritative check is client-side; this uses server-asserted roles to decide
+  // whether to nudge managers) → push offline managers. Cheap approximation, low stakes.
+  if (channel.pinPolicy === 'moderators') {
+    const managers = await channelManagerAccountIds(db, communityId, channelId)
+    if (!managers.has(accountId)) {
+      void notifyOfflineManagers(db, managers, communityId, (a) => registry.isAccountOnline(a))
+    }
+  }
 }
 
 /** Active (non-expired) pinned artifacts for a channel — visible to any active member. */

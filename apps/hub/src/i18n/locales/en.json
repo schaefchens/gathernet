@@ -191,7 +191,12 @@
       "categories": "Notify me about",
       "cat_dm": "Direct messages",
       "cat_channel": "Channel messages",
-      "cat_moderation": "Things needing my review (moderation)"
+      "cat_moderation": "Things needing my review (moderation)",
+      "disguise": "Disguise on the lock screen",
+      "disguiseNote": "Change the notification's title and icon. Note: some systems still show “Gathernet” as the source app — that part comes from the install and can't be changed here.",
+      "titlePlaceholder": "Custom title (e.g. “Notes”)",
+      "pickIcon": "Choose icon…",
+      "clearIcon": "Reset icon"
     }
   },
   "qr": {

@@ -21,6 +21,8 @@ export function PushSettings() {
   const [permission, setPermission] = useState<NotificationPermission>('default')
   const [contentLevel, setContentLevel] = useState<'coarse' | 'generic'>('coarse')
   const [cats, setCats] = useState({ dm: true, channel: true, moderation: true })
+  const [customTitle, setCustomTitle] = useState('')
+  const [hasCustomIcon, setHasCustomIcon] = useState(false)
   const [busy, setBusy] = useState(false)
   const supported = isPushSupported()
 
@@ -30,7 +32,11 @@ export function PushSettings() {
       setSubscribed(s.subscribed)
       setPermission(s.permission)
     })
-    void getDisplayPrefs().then((p) => setContentLevel(p.contentLevel))
+    void getDisplayPrefs().then((p) => {
+      setContentLevel(p.contentLevel)
+      setCustomTitle(p.title ?? '')
+      setHasCustomIcon(!!p.icon)
+    })
   }, [supported])
 
   if (!supported) {
@@ -69,6 +75,26 @@ export function PushSettings() {
     const next = { ...cats, [key]: on }
     setCats(next)
     void updateServerPushPrefs({ categories: next })
+  }
+
+  const changeTitle = (value: string) => {
+    setCustomTitle(value)
+    void setDisplayPrefs({ title: value })
+  }
+
+  const pickIcon = (file: File | undefined) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      void setDisplayPrefs({ icon: String(reader.result) })
+      setHasCustomIcon(true)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const clearIcon = () => {
+    void setDisplayPrefs({ icon: undefined })
+    setHasCustomIcon(false)
   }
 
   return (
@@ -114,6 +140,40 @@ export function PushSettings() {
                 {t(`settings.push.cat_${k}`)}
               </label>
             ))}
+          </div>
+
+          <div className="space-y-1 border-t border-edge pt-3">
+            <span className="text-xs text-ink-soft">{t('settings.push.disguise')}</span>
+            <p className="text-[11px] text-ink-faint">{t('settings.push.disguiseNote')}</p>
+            <input
+              value={customTitle}
+              onChange={(e) => changeTitle(e.target.value)}
+              placeholder={t('settings.push.titlePlaceholder')}
+              className="text-sm"
+            />
+            <div className="flex items-center gap-2">
+              <label className="btn-quiet text-xs px-3 cursor-pointer">
+                {t('settings.push.pickIcon')}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    pickIcon(e.target.files?.[0])
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+              {hasCustomIcon && (
+                <button
+                  type="button"
+                  className="text-xs text-ink-faint hover:text-danger"
+                  onClick={clearIcon}
+                >
+                  {t('settings.push.clearIcon')}
+                </button>
+              )}
+            </div>
           </div>
         </>
       )}

@@ -7,7 +7,7 @@ import type {
 import { and, eq } from 'drizzle-orm'
 import webpush from 'web-push'
 import type { Db } from '../../db/index.ts'
-import { communityChannels, groups, pushSubscriptions } from '../../db/schema.ts'
+import { communityChannels, devices, groups, pushSubscriptions } from '../../db/schema.ts'
 
 /** Constant target size (chars) for the JSON payload — padded so the push service
  *  can't infer the category from length. */
@@ -190,4 +190,27 @@ export async function notifyMessageActivity(
     return // rooms etc. — no push
   }
   await Promise.all(offlineDeviceIds.map((d) => coalescedPush(db, d, payload).catch(() => {})))
+}
+
+/**
+ * Fire a 'moderation' push to each offline manager's devices (a suggestion or join
+ * request awaiting them). `isAccountOnline` skips those with a live socket; the
+ * communityId lets a muted community suppress it. Best-effort — never throws.
+ */
+export async function notifyOfflineManagers(
+  db: Db,
+  managerAccountIds: Iterable<string>,
+  communityId: string,
+  isAccountOnline: (accountId: string) => boolean,
+): Promise<void> {
+  if (!configured) return
+  const payload = buildPushPayload('moderation', communityId)
+  for (const accountId of managerAccountIds) {
+    if (isAccountOnline(accountId)) continue
+    const devs = await db
+      .select({ deviceId: devices.deviceId })
+      .from(devices)
+      .where(and(eq(devices.accountId, accountId), eq(devices.status, 'active')))
+    await Promise.all(devs.map((d) => coalescedPush(db, d.deviceId, payload).catch(() => {})))
+  }
 }
