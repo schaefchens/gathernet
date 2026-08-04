@@ -412,7 +412,9 @@ function ChannelWorkspace({
           avatarMediaId={channel.avatarMediaId}
           access={channel.access}
           postPolicy={channel.postPolicy}
+          pinPolicy={channel.pinPolicy}
           canPost={canPost}
+          isManager={isManager}
           muted={channel.muted}
           description={meta?.description}
           messageTtlDays={channel.messageTtlDays}

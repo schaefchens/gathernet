@@ -1,11 +1,13 @@
-import type { ChannelAccess, ChannelPostPolicy } from '@gathernet/shared'
-import { useEffect } from 'react'
+import type { ChannelAccess, ChannelPinPolicy, ChannelPostPolicy } from '@gathernet/shared'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { channelArtifactsStore } from '../../stores/channel-artifacts.ts'
 import { communityChatStore, useCommunityChat } from '../../stores/community-chat.ts'
 import { useSession } from '../../stores/session.ts'
 import { MessageThread } from '../chat/MessageThread.tsx'
 import { ClampedMarkdown } from './ClampedMarkdown.tsx'
 import { CommunityAvatar } from './CommunityAvatar.tsx'
+import { PinnedBar } from './PinnedBar.tsx'
 
 const NO_MESSAGES: never[] = []
 
@@ -17,8 +19,12 @@ interface ChannelChatProps {
   avatarMediaId: string | null
   access: ChannelAccess
   postPolicy: ChannelPostPolicy
+  pinPolicy: ChannelPinPolicy
   /** whether the current user may post (mods/leaders in announcement channels) */
   canPost: boolean
+  /** whether the current user manages this channel (moderator/leader) — drives the
+   *  suggestion-approval affordance; authority is still verified client-side */
+  isManager: boolean
   /** the current user is muted here (distinct read-only reason) */
   muted: boolean
   description?: string | undefined
@@ -40,7 +46,9 @@ export function ChannelChat({
   avatarMediaId,
   access,
   postPolicy,
+  pinPolicy,
   canPost,
+  isManager,
   muted,
   description,
   messageTtlDays,
@@ -49,6 +57,25 @@ export function ChannelChat({
   const status = useCommunityChat((s) => s.channels[channelId] ?? 'idle')
   const messages = useCommunityChat((s) => s.messages[channelId] ?? NO_MESSAGES)
   const myAccountId = useSession((s) => s.accountId)
+  const threadRef = useRef<HTMLDivElement>(null)
+
+  /** Build a pin snapshot from a channel message and post it (a suggestion under
+   *  moderators policy; the pinned bar reflects its status once it round-trips). */
+  const pinMessage = (message: (typeof messages)[number]) => {
+    void channelArtifactsStore.pin(communityId, channelId, {
+      v: 1,
+      kind: 'pin',
+      ...(message.text ? { text: message.text } : {}),
+      ...(message.media ? { media: message.media } : {}),
+      ...(message.id ? { originalMessageId: message.id } : {}),
+    })
+  }
+
+  /** Best-effort scroll to a pinned message's source (if it's still in view). */
+  const jumpTo = (messageId: string) => {
+    const el = threadRef.current?.querySelector(`[data-mid="${CSS.escape(messageId)}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
 
   useEffect(() => {
     void (async () => {
@@ -121,43 +148,54 @@ export function ChannelChat({
               {t('communities.channelRotationPending')}
             </div>
           )}
-          <MessageThread
-            messages={messages}
-            ready={status === 'ready'}
-            onSend={(text, replyTo, once) =>
-              communityChatStore.send(channelId, text, replyTo, once)
-            }
-            onSendMedia={(file, caption, replyTo, once) =>
-              communityChatStore.sendMedia(channelId, file, caption, replyTo, once)
-            }
-            onSendVoice={(blob, durationMs, replyTo, once) =>
-              communityChatStore.sendVoice(channelId, blob, durationMs, replyTo, once)
-            }
-            onReact={(targetId, emoji, remove) =>
-              communityChatStore.react(channelId, targetId, emoji, remove)
-            }
-            onEdit={(targetId, text) =>
-              void communityChatStore.editMessage(channelId, targetId, text)
-            }
-            onDelete={(targetId, seq) =>
-              void communityChatStore.deleteMessage(channelId, targetId, seq)
-            }
-            onConsume={(targetId) => void communityChatStore.consumeViewOnce(channelId, targetId)}
-            myAccountId={myAccountId ?? undefined}
-            notReadyLabel={
-              status === 'rotation_pending'
-                ? t('communities.channelRotationPending')
-                : notReadyLabel
-            }
-            readOnly={!canPost || status === 'untrusted'}
-            readOnlyLabel={
-              status === 'untrusted'
-                ? t('communities.channelUntrustedHint')
-                : muted
-                  ? t('communities.mutedHint')
-                  : t('communities.readOnlyHint')
-            }
+          <PinnedBar
+            communityId={communityId}
+            channelId={channelId}
+            pinPolicy={pinPolicy}
+            isManager={isManager}
+            myAccountId={myAccountId ?? null}
+            onJump={jumpTo}
           />
+          <div ref={threadRef} className="flex flex-1 flex-col min-h-0">
+            <MessageThread
+              messages={messages}
+              ready={status === 'ready'}
+              onSend={(text, replyTo, once) =>
+                communityChatStore.send(channelId, text, replyTo, once)
+              }
+              onSendMedia={(file, caption, replyTo, once) =>
+                communityChatStore.sendMedia(channelId, file, caption, replyTo, once)
+              }
+              onSendVoice={(blob, durationMs, replyTo, once) =>
+                communityChatStore.sendVoice(channelId, blob, durationMs, replyTo, once)
+              }
+              onReact={(targetId, emoji, remove) =>
+                communityChatStore.react(channelId, targetId, emoji, remove)
+              }
+              onEdit={(targetId, text) =>
+                void communityChatStore.editMessage(channelId, targetId, text)
+              }
+              onDelete={(targetId, seq) =>
+                void communityChatStore.deleteMessage(channelId, targetId, seq)
+              }
+              onConsume={(targetId) => void communityChatStore.consumeViewOnce(channelId, targetId)}
+              onPin={pinMessage}
+              myAccountId={myAccountId ?? undefined}
+              notReadyLabel={
+                status === 'rotation_pending'
+                  ? t('communities.channelRotationPending')
+                  : notReadyLabel
+              }
+              readOnly={!canPost || status === 'untrusted'}
+              readOnlyLabel={
+                status === 'untrusted'
+                  ? t('communities.channelUntrustedHint')
+                  : muted
+                    ? t('communities.mutedHint')
+                    : t('communities.readOnlyHint')
+              }
+            />
+          </div>
         </>
       )}
     </div>

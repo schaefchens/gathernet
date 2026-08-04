@@ -21,6 +21,8 @@ interface MessageThreadProps {
   onDelete?: (targetId: string, seq: number) => void
   /** recipient opened a view-once message → destroy it locally + tell author/own devices */
   onConsume?: (targetId: string) => void
+  /** pin/suggest this message as a channel artifact (channels only) */
+  onPin?: (message: StoredMessage) => void
   /** the current account id — to show which reactions are mine + toggle correctly */
   myAccountId?: string | undefined
   /** shown in the body while `ready` is false */
@@ -64,6 +66,7 @@ export function MessageThread({
   onEdit,
   onDelete,
   onConsume,
+  onPin,
   myAccountId,
   notReadyLabel,
   readOnly,
@@ -186,6 +189,7 @@ export function MessageThread({
           return (
             <div
               key={message.seq}
+              data-mid={message.id}
               className={`group max-w-[80%] ${message.outgoing ? 'ml-auto' : ''}`}
             >
               <div
@@ -307,6 +311,15 @@ export function MessageThread({
                   >
                     {t('chat.reply')}
                   </button>
+                  {onPin && !message.once && (
+                    <button
+                      type="button"
+                      className="text-xs text-ink-faint hover:text-ink"
+                      onClick={() => onPin(message)}
+                    >
+                      {t('chat.pin')}
+                    </button>
+                  )}
                   {canEdit && onEdit && (
                     <button
                       type="button"

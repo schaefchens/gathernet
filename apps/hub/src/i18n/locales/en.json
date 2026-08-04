@@ -130,7 +130,17 @@
     "viewOnceTap": "View once — tap to open",
     "viewOnceViewing": "This disappears after you close the chat",
     "viewOnceOpened": "Opened — this message is gone",
-    "viewOnceSeen": "View once — opened by recipient"
+    "viewOnceSeen": "View once — opened by recipient",
+    "pin": "Pin"
+  },
+  "pins": {
+    "title": "Pinned ({{count}})",
+    "suggested": "Suggested ({{count}})",
+    "approve": "Approve",
+    "dismiss": "Dismiss",
+    "unpin": "Unpin",
+    "jump": "Jump to message",
+    "untitled": "Pinned item"
   },
   "settings": {
     "title": "Settings",
