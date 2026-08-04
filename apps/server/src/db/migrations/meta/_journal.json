@@ -141,6 +141,13 @@
       "when": 1785851819017,
       "tag": "0019_mighty_leech",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785858903266,
+      "tag": "0020_lame_sleepwalker",
+      "breakpoints": true
     }
   ]
 }

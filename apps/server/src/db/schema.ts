@@ -57,6 +57,40 @@ export const devices = pgTable(
   (t) => [index('devices_account_idx').on(t.accountId)],
 )
 
+/**
+ * Web Push subscriptions — one per (device, push endpoint). The server sends only a
+ * category code in a Web-Push-encrypted, constant-size payload (never content). The
+ * server-side prefs (`categories`, `mutedCommunityIds`) decide WHETHER to push, because
+ * `userVisibleOnly` forbids the service worker from silently dropping a push. Display
+ * prefs (generic vs coarse, custom title/icon) live client-side, not here.
+ */
+export const pushSubscriptions = pgTable(
+  'push_subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    deviceId: text('device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    accountId: text('account_id')
+      .notNull()
+      .references(() => accounts.accountId),
+    /** the push service endpoint URL (unique per subscription) */
+    endpoint: text('endpoint').notNull().unique(),
+    /** subscription public key (base64url) — Web Push payload encryption */
+    p256dh: text('p256dh').notNull(),
+    /** subscription auth secret (base64url) */
+    auth: text('auth').notNull(),
+    /** per-category push switches (server decides whether to push) */
+    dmEnabled: boolean('dm_enabled').notNull().default(true),
+    channelEnabled: boolean('channel_enabled').notNull().default(true),
+    moderationEnabled: boolean('moderation_enabled').notNull().default(true),
+    /** communityIds the user muted push for */
+    mutedCommunityIds: text('muted_community_ids').array(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('push_subscriptions_device_idx').on(t.deviceId)],
+)
+
 export const sessions = pgTable(
   'sessions',
   {

@@ -16,6 +16,15 @@ const envSchema = z.object({
   S3_ACCESS_KEY: z.string().default('gathernet'),
   S3_SECRET_KEY: z.string().default('gathernet_dev_secret'),
   S3_BUCKET: z.string().default('gathernet-media'),
+  // Web Push (VAPID). Dev defaults are a throwaway keypair; production MUST override.
+  // The server only ever composes a category code — never message content.
+  VAPID_PUBLIC_KEY: z
+    .string()
+    .default(
+      'BAM0GzCvAlsOeeAOCs7Irl17MEVHSvtU2YnY23RW__Uiw7CquoIqW-oBSKPnQEf1R1GGMrogxEitELhnPsUHPU4',
+    ),
+  VAPID_PRIVATE_KEY: z.string().default('FNwORbaQdHtqQHYJY9DJ4HF5oRHt6g_esvM9IlxI1BQ'),
+  VAPID_SUBJECT: z.string().default('mailto:dev@gathernet.local'),
 })
 
 export type Config = z.infer<typeof envSchema>

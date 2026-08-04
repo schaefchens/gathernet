@@ -25,6 +25,8 @@ import { registerFriendRoutes } from './modules/friends/routes.ts'
 import { registerMediaRoutes } from './modules/media/routes.ts'
 import { PresenceService } from './modules/presence/service.ts'
 import { registerPublicationRoutes } from './modules/publications/routes.ts'
+import { registerPushRoutes } from './modules/push/routes.ts'
+import { configureWebPush } from './modules/push/service.ts'
 import { makeRoomEphemeralHandler } from './modules/rooms/ephemeral.ts'
 import { registerRoomRoutes } from './modules/rooms/routes.ts'
 import { resolveAppDevice } from './modules/rooms/service.ts'
@@ -175,6 +177,8 @@ export async function buildApp(options: BuildAppOptions): Promise<GathernetApp> 
   registerAppRoutes(app, { db, registry, authenticate, appAuthenticate })
   registerRoomRoutes(app, { db, registry, appAuthenticate })
   registerCommunityRoutes(app, { db, registry, blobStore, authenticate })
+  configureWebPush(config)
+  registerPushRoutes(app, { db, vapidPublicKey: config.VAPID_PUBLIC_KEY, authenticate })
 
   const chatSendHandler: WsMessageHandler = async (session, message) => {
     if (message.type !== 'chat.send') return
