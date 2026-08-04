@@ -41,5 +41,19 @@ services:
     depends_on:
       - server
 
+  # Tor v3 hidden service fronting the prod `web` container (same image as dev, just a
+  # different forward target). Persist `tordata` — it holds the onion key = the address.
+  # Back it up; losing it means a new (unshareable) address.
+  tor:
+    build: ./docker/tor
+    environment:
+      HS_TARGET: web:8080
+    depends_on:
+      - web
+    volumes:
+      - tordata:/var/lib/tor
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  tordata:

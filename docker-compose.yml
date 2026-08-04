@@ -39,6 +39,24 @@ services:
     volumes:
       - rustfsdata:/data
 
+  # Tor v3 hidden service — exposes the app over a self-authenticating .onion address
+  # (no exit node, no DNS, no IP leak). Forwards onion:80 to the host-run dev server
+  # (`pnpm dev` on :5173). The onion KEY persists in the `tordata` volume, so the
+  # address stays the SAME across restarts and can be shared for testing over Tor.
+  # After first `docker compose up tor`, copy the printed .onion into ONION_HOST (see
+  # docs/onion.md) and restart the dev server so Vite accepts that host.
+  tor:
+    build: ./docker/tor
+    environment:
+      HS_TARGET: host.docker.internal:5173
+    extra_hosts:
+      # Lets the container reach the host's dev server on Linux too (automatic on macOS).
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      - tordata:/var/lib/tor
+    restart: unless-stopped
+
 volumes:
   pgdata:
   rustfsdata:
+  tordata:

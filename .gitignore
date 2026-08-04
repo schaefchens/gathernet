@@ -22,3 +22,7 @@ test-results/
 # editor/os
 .DS_Store
 *.local
+
+# tor hidden-service key + local onion address (never commit — the key IS the address)
+.tor/
+apps/hub/.onion-host
