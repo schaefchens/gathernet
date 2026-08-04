@@ -57,7 +57,10 @@ export function PinnedBar({
   }, [communityId, channelId, pinPolicy])
 
   const active = artifacts.filter((a) => a.status === 'active')
-  const suggested = isManager ? artifacts.filter((a) => a.status === 'suggested') : EMPTY
+  // Managers see all suggestions (to approve); a member sees their own (as pending).
+  const suggested = artifacts.filter(
+    (a) => a.status === 'suggested' && (isManager || a.artifact.createdBy === myAccountId),
+  )
   if (active.length === 0 && suggested.length === 0) return null
 
   const canRemove = (a: VerifiedArtifact) => isManager || a.artifact.createdBy === myAccountId
@@ -128,21 +131,28 @@ export function PinnedBar({
                 <div key={a.artifact.artifactId} className="flex items-center gap-2">
                   <span className="flex-1 truncate text-ink-soft">
                     {summarize(a.body, attachmentLabel) || t('pins.untitled')}
+                    {!isManager && (
+                      <span className="ml-1 text-[11px] text-ink-faint">· {t('pins.pending')}</span>
+                    )}
                   </span>
-                  <button
-                    type="button"
-                    className="text-xs text-olive hover:underline"
-                    onClick={() => approve(a.artifact.artifactId)}
-                  >
-                    {t('pins.approve')}
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs text-ink-faint hover:text-danger"
-                    onClick={() => unpin(a.artifact.artifactId)}
-                  >
-                    {t('pins.dismiss')}
-                  </button>
+                  {isManager && (
+                    <button
+                      type="button"
+                      className="text-xs text-olive hover:underline"
+                      onClick={() => approve(a.artifact.artifactId)}
+                    >
+                      {t('pins.approve')}
+                    </button>
+                  )}
+                  {canRemove(a) && (
+                    <button
+                      type="button"
+                      className="text-xs text-ink-faint hover:text-danger"
+                      onClick={() => unpin(a.artifact.artifactId)}
+                    >
+                      {t('pins.dismiss')}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

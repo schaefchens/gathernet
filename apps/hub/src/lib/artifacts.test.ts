@@ -10,7 +10,12 @@ import {
   openArtifactBody,
   verifyArtifact,
 } from './artifacts.ts'
-import { buildCapability, type CapabilityFetcher, type DeviceResolver } from './community-keys.ts'
+import {
+  buildCapability,
+  type CapabilityFetcher,
+  COMMUNITY_SCOPE,
+  type DeviceResolver,
+} from './community-keys.ts'
 import { loadCrypto } from './mls.ts'
 import type { DeviceRecord } from './storage.ts'
 
@@ -118,10 +123,17 @@ describe('pinned artifacts — crypto + verification', () => {
     const owner = await makeDevice('devOwner', OWNER)
     const member = await makeDevice('devMember', MEMBER)
     const resolve = resolverOf(owner, member)
-    // The owner mints a real channel-member cap for the member (root-signed).
-    const memberCap = await buildCapability('cm_x', CHANNEL, MEMBER, 'member', 0, owner.record)
+    // The owner mints a real community-member cap for the member (root-signed).
+    const memberCap = await buildCapability(
+      'cm_x',
+      COMMUNITY_SCOPE,
+      MEMBER,
+      'member',
+      0,
+      owner.record,
+    )
     const getCap: CapabilityFetcher = async (scope, account) =>
-      scope === CHANNEL && account === MEMBER ? (memberCap as MembershipCapability) : null
+      scope === COMMUNITY_SCOPE && account === MEMBER ? (memberCap as MembershipCapability) : null
 
     const built = await buildArtifact(
       CHANNEL,
@@ -148,17 +160,21 @@ describe('pinned artifacts — crypto + verification', () => {
     )
   })
 
-  it('a member with no valid cap is invalid (not a suggestion)', async () => {
+  it('fails open to member-level when the cap chain cannot be walked (feature-phase)', async () => {
+    // A signature-valid, resolvable member with no issued cap: not dropped — the
+    // server already gates posting to active members. Suggestion under moderators,
+    // active under everyone. (Strict cap authority is deferred crypto-phase hardening.)
     const owner = await makeDevice('devOwner', OWNER)
     const member = await makeDevice('devMember', MEMBER)
     const resolve = resolverOf(owner, member)
-    const getCap: CapabilityFetcher = async () => null // no cap on record
+    const getCap: CapabilityFetcher = async () => null // no caps issued yet
     const rec = record(
       await buildArtifact(CHANNEL, { v: 1, kind: 'pin', text: 'x' }, KMETA, 0, member.record),
       MEMBER,
     )
     expect((await verifyArtifact(rec, 'moderators', OWNER, resolve, getCap, 0)).status).toBe(
-      'invalid',
+      'suggested',
     )
+    expect((await verifyArtifact(rec, 'everyone', OWNER, resolve, getCap, 0)).status).toBe('active')
   })
 })

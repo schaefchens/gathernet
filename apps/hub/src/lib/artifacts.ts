@@ -19,7 +19,6 @@ import {
   SIG_DOMAIN,
 } from '@gathernet/shared'
 import {
-  accountHoldsCap,
   authorizedChannelMinter,
   type CapabilityFetcher,
   type DeviceResolver,
@@ -260,25 +259,26 @@ export async function verifyArtifact(
   }
   const out = (status: ArtifactStatus) => ({ status, issuerAccountId: issuer.accountId })
 
-  // No pinned owner → we can't walk the chain; accept a valid signature (TOFU degrade).
-  if (!ownerAccountId) return out('active')
+  // The signature is verified above (a server can't forge or re-attribute a pin).
+  // Beyond that we do NOT hard-gate on a resolvable membership capability: caps are
+  // issued lazily by a manager's client, and MLS channels don't gate messaging on
+  // them at all, so requiring one here would silently drop legitimate members' pins.
+  // The server already restricts posting to authenticated active community members,
+  // so we treat any signature-valid, cert-resolvable device as at least a member.
+  // (Tightening this to the full capability chain is deferred crypto-phase hardening.)
+  if (!ownerAccountId) return out('active') // no pinned owner → TOFU degrade
 
   const args = [ownerAccountId, resolve, getCap, expectedEpoch] as const
   const issuerIsManager = await authorizedChannelMinter(a.channelId, issuer.accountId, ...args)
 
-  if (pinPolicy === 'everyone') {
-    if (issuerIsManager) return out('active')
-    return out(
-      (await accountHoldsCap(a.channelId, issuer.accountId, ...args)) ? 'active' : 'invalid',
-    )
-  }
+  // pinPolicy = everyone → any member's pin is a real pin.
+  if (pinPolicy === 'everyone') return out('active')
 
-  // pinPolicy === 'moderators'
+  // pinPolicy = moderators → managers pin directly; a member's pin is a suggestion
+  // until a manager's approval signature is present.
   if (issuerIsManager) return out('active')
   if (await verifyApproval(a, ownerAccountId, resolve, getCap, expectedEpoch)) return out('active')
-  return out(
-    (await accountHoldsCap(a.channelId, issuer.accountId, ...args)) ? 'suggested' : 'invalid',
-  )
+  return out('suggested')
 }
 
 /** Whether an artifact's TTL has elapsed (clients hide expired artifacts). */

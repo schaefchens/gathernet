@@ -136,6 +136,7 @@
   "pins": {
     "title": "Pinned ({{count}})",
     "suggested": "Suggested ({{count}})",
+    "pending": "awaiting approval",
     "approve": "Approve",
     "dismiss": "Dismiss",
     "unpin": "Unpin",

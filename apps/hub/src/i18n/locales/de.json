@@ -136,6 +136,7 @@
   "pins": {
     "title": "Angepinnt ({{count}})",
     "suggested": "Vorgeschlagen ({{count}})",
+    "pending": "wartet auf Bestätigung",
     "approve": "Bestätigen",
     "dismiss": "Verwerfen",
     "unpin": "Lösen",
