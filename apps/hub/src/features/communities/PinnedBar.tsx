@@ -74,7 +74,14 @@ export function PinnedBar({
   const [composeMode, setComposeMode] = useState<'none' | 'link' | 'event'>('none')
   const [linkUrl, setLinkUrl] = useState('')
   const [linkTitle, setLinkTitle] = useState('')
-  const [ev, setEv] = useState({ title: '', starts: '', ends: '', location: '', url: '' })
+  const [ev, setEv] = useState({
+    title: '',
+    starts: '',
+    ends: '',
+    location: '',
+    url: '',
+    remindOffsetMin: 60,
+  })
   const [busy, setBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -183,8 +190,9 @@ export function PinnedBar({
         ...(endsAt && Number.isFinite(endsAt) ? { endsAt } : {}),
         ...(ev.location.trim() ? { location: ev.location.trim() } : {}),
         ...(ev.url.trim() ? { url: ev.url.trim() } : {}),
+        remindOffsetMin: ev.remindOffsetMin,
       })
-      setEv({ title: '', starts: '', ends: '', location: '', url: '' })
+      setEv({ title: '', starts: '', ends: '', location: '', url: '', remindOffsetMin: 60 })
       setComposeMode('none')
     } catch (err) {
       fail('pin event failed', err)
@@ -332,6 +340,30 @@ export function PinnedBar({
                 className="text-sm"
                 inputMode="url"
               />
+              <label className="block text-[11px] text-ink-faint">
+                {t('pins.eventRemind')}
+                <select
+                  value={ev.remindOffsetMin}
+                  onChange={(e) => setEv({ ...ev, remindOffsetMin: Number(e.target.value) })}
+                  className="text-sm w-full bg-overlay border border-edge rounded-md px-2 py-1"
+                >
+                  {(
+                    [
+                      [0, t('pins.remind_atstart')],
+                      [15, t('pins.remind_15m')],
+                      [30, t('pins.remind_30m')],
+                      [60, t('pins.remind_1h')],
+                      [120, t('pins.remind_2h')],
+                      [1440, t('pins.remind_1d')],
+                    ] as const
+                  ).map(([mins, label]) => (
+                    <option key={mins} value={mins}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="text-[11px] text-ink-faint">{t('pins.remindNote')}</p>
               <button
                 type="button"
                 className="btn-gold text-xs px-3"
