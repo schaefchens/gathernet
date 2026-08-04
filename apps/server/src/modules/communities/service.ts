@@ -31,6 +31,7 @@ import type {
   PostChannelKeyGrantsRequest,
   PostKeyGrantsRequest,
   PostParticipationRequest,
+  ReminderTriggerRequest,
   RotateChannelRequest,
   RotateRequest,
   ServerMessage,
@@ -54,6 +55,7 @@ import {
   channelKeyEpochs,
   channelKeyGrants,
   channelMembers,
+  channelReminderFires,
   communities,
   communityChannels,
   communityInvites,
@@ -74,7 +76,7 @@ import type { BlobStore } from '../../storage/blob-store.ts'
 import type { ConnectionRegistry } from '../../ws/registry.ts'
 import { ServiceError } from '../accounts/service.ts'
 import { satisfiesChannelAccess } from '../delivery/service.ts'
-import { notifyOfflineManagers } from '../push/service.ts'
+import { notifyEventReminder, notifyOfflineManagers } from '../push/service.ts'
 
 type DbOrTx = Db | Parameters<Parameters<Db['transaction']>[0]>[0]
 type MemberRow = typeof communityMembers.$inferSelect
@@ -2227,6 +2229,77 @@ export async function deleteParticipation(
   })
 }
 
+/** How far ahead of the reminder instant a departing client may "early-fire" (trades
+ *  precision for coverage). The server accepts a trigger only within this look-ahead, so
+ *  it can never be told a far-future time. */
+const REMINDER_EARLY_WINDOW_MS = 2 * 60 * 60 * 1000
+/** How stale a reminder instant may be and still fire (a slightly late trigger). */
+const REMINDER_PAST_GRACE_MS = 15 * 60 * 1000
+
+/**
+ * Peer-triggered event reminder. The server can't read the E2EE event time, so member
+ * clients are the clock: one that's online at reminder time calls this. We never store a
+ * schedule and never learn a future time — the trigger is accepted only near "now", fans
+ * a content-free 'event' push to OFFLINE RSVP'd participants, and forgets.
+ *
+ * Trust tiering: leaders/moderators may trigger anytime; a regular member's trigger is
+ * accepted only when NO manager of the channel is currently online (409 otherwise, so the
+ * client retries after a grace period). Dedup: the first trigger for a given
+ * (artifact, reminderInstant) wins; later ones are no-ops.
+ */
+export async function triggerChannelReminder(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  artifactId: string,
+  input: ReminderTriggerRequest,
+): Promise<{ fired: boolean }> {
+  if (!(await isActiveChannelMember(db, channelId, accountId))) {
+    throw new ServiceError(403, 'not_a_channel_member')
+  }
+  // The server must never learn a far-future time: only accept a trigger for ~now.
+  const delta = input.reminderInstant - Date.now()
+  if (delta > REMINDER_EARLY_WINDOW_MS || delta < -REMINDER_PAST_GRACE_MS) {
+    throw new ServiceError(400, 'reminder_window')
+  }
+  const artifact = await db.query.channelArtifacts.findFirst({
+    where: and(
+      eq(channelArtifacts.artifactId, artifactId),
+      eq(channelArtifacts.channelId, channelId),
+    ),
+  })
+  if (artifact?.kind !== 'event') throw new ServiceError(404, 'artifact_not_found')
+
+  // Trust tier: regular members only trigger when the trusted tier is dark.
+  const managers = await channelManagerAccountIds(db, communityId, channelId)
+  if (!managers.has(accountId) && [...managers].some((a) => registry.isAccountOnline(a))) {
+    throw new ServiceError(409, 'manager_online')
+  }
+
+  // Dedup: first writer of this key fires; concurrent/retry triggers become no-ops.
+  const inserted = await db
+    .insert(channelReminderFires)
+    .values({ idempotencyKey: `${artifactId}:${input.reminderInstant}`, channelId })
+    .onConflictDoNothing()
+    .returning({ k: channelReminderFires.idempotencyKey })
+  if (inserted.length === 0) return { fired: false }
+
+  // Opt-in only: reminders reach RSVP'd participants; online ones self-handle in-app.
+  const participants = await db
+    .select({ accountId: channelArtifactParticipants.accountId })
+    .from(channelArtifactParticipants)
+    .where(eq(channelArtifactParticipants.artifactId, artifactId))
+  void notifyEventReminder(
+    db,
+    participants.map((p) => p.accountId),
+    communityId,
+    (a) => registry.isAccountOnline(a),
+  )
+  return { fired: true }
+}
+
 /**
  * A channel manager records their signed approval of a member's suggestion (which
  * honest clients require before they render it as an active pin under pinPolicy =
@@ -2825,6 +2898,17 @@ export async function pruneChannelInvites(db: Db): Promise<number> {
       or(lt(channelInvites.expiresAt, new Date()), sql`${channelInvites.revokedAt} IS NOT NULL`),
     )
     .returning({ id: channelInvites.id })
+  return deleted.length
+}
+
+/** Drop reminder-dedup rows once they can no longer collide with a live/retrying trigger
+ *  (well past the accept window). Keeps the ledger from growing unbounded. */
+export async function pruneReminderFires(db: Db): Promise<number> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  const deleted = await db
+    .delete(channelReminderFires)
+    .where(lt(channelReminderFires.firedAt, cutoff))
+    .returning({ k: channelReminderFires.idempotencyKey })
   return deleted.length
 }
 

@@ -192,6 +192,7 @@
       "cat_dm": "Direktnachrichten",
       "cat_channel": "Kanalnachrichten",
       "cat_moderation": "Dinge, die meine Prüfung brauchen (Moderation)",
+      "cat_event": "Terminerinnerungen",
       "disguise": "Auf dem Sperrbildschirm tarnen",
       "disguiseNote": "Ändere Titel und Symbol der Benachrichtigung. Hinweis: Manche Systeme zeigen weiterhin „Gathernet“ als Quell-App — das stammt aus der Installation und kann hier nicht geändert werden.",
       "titlePlaceholder": "Eigener Titel (z. B. „Notizen“)",

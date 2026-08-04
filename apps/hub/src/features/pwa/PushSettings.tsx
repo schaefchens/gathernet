@@ -20,7 +20,7 @@ export function PushSettings() {
   const [subscribed, setSubscribed] = useState(false)
   const [permission, setPermission] = useState<NotificationPermission>('default')
   const [contentLevel, setContentLevel] = useState<'coarse' | 'generic'>('coarse')
-  const [cats, setCats] = useState({ dm: true, channel: true, moderation: true })
+  const [cats, setCats] = useState({ dm: true, channel: true, moderation: true, event: true })
   const [customTitle, setCustomTitle] = useState('')
   const [hasCustomIcon, setHasCustomIcon] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -134,7 +134,7 @@ export function PushSettings() {
 
           <div className="space-y-1">
             <span className="text-xs text-ink-soft">{t('settings.push.categories')}</span>
-            {(['dm', 'channel', 'moderation'] as const).map((k) => (
+            {(['dm', 'channel', 'moderation', 'event'] as const).map((k) => (
               <label key={k} className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"

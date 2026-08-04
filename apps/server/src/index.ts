@@ -7,6 +7,7 @@ import {
   pruneChannelInvites,
   pruneChannelKeyGrants,
   pruneCommunityInvites,
+  pruneReminderFires,
 } from './modules/communities/service.ts'
 import { pruneChannelMessages, pruneMailbox } from './modules/delivery/service.ts'
 import { pruneRooms } from './modules/rooms/service.ts'
@@ -29,6 +30,7 @@ async function runJobs(): Promise<void> {
     await pruneRooms(db)
     await pruneCommunityInvites(db)
     await pruneChannelInvites(db)
+    await pruneReminderFires(db)
   } catch (err) {
     app.log.error({ err }, 'housekeeping job failed')
   }

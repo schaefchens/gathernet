@@ -306,6 +306,21 @@ export const listArtifactsResponseSchema = z.object({
 })
 export type ListArtifactsResponse = z.infer<typeof listArtifactsResponseSchema>
 
+/**
+ * A member's client fires an event reminder in real time (peer-triggering): the server
+ * can't read the E2EE event time, so member clients are the clock. `reminderInstant` is
+ * the deterministic reminder time all clients derive from the sealed event body — used
+ * for dedup and to bound abuse. The server only accepts it near "now" (past grace + the
+ * bounded early-fire window), so it can never be told a far-future time. No content.
+ */
+export const reminderTriggerRequestSchema = z.object({
+  reminderInstant: z.number().int().nonnegative(),
+})
+export type ReminderTriggerRequest = z.infer<typeof reminderTriggerRequestSchema>
+
+export const reminderTriggerResponseSchema = z.object({ fired: z.boolean() })
+export type ReminderTriggerResponse = z.infer<typeof reminderTriggerResponseSchema>
+
 export const communityDetailResponseSchema = z.object({
   community: z.object({
     communityId: communityIdSchema,

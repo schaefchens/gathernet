@@ -43,12 +43,14 @@ const STRINGS = {
     dm: 'New message',
     channel: 'New message in a community',
     moderation: 'Something needs your review',
+    event: 'Upcoming event',
   },
   de: {
     generic: 'Neue Aktivität',
     dm: 'Neue Nachricht',
     channel: 'Neue Nachricht in einer Gemeinschaft',
     moderation: 'Etwas benötigt deine Prüfung',
+    event: 'Bevorstehendes Treffen',
   },
 } satisfies Record<'en' | 'de', Record<PushPayload['category'] | 'generic', string>>
 

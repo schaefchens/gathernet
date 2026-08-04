@@ -60,7 +60,14 @@ export async function subscribePush(
       endpoint: input.subscription.endpoint,
       p256dh: input.subscription.p256dh,
       auth: input.subscription.auth,
-      ...(c ? { dmEnabled: c.dm, channelEnabled: c.channel, moderationEnabled: c.moderation } : {}),
+      ...(c
+        ? {
+            dmEnabled: c.dm,
+            channelEnabled: c.channel,
+            moderationEnabled: c.moderation,
+            eventEnabled: c.event,
+          }
+        : {}),
       ...(input.mutedCommunityIds ? { mutedCommunityIds: input.mutedCommunityIds } : {}),
     })
     .onConflictDoUpdate({
@@ -71,7 +78,12 @@ export async function subscribePush(
         p256dh: input.subscription.p256dh,
         auth: input.subscription.auth,
         ...(c
-          ? { dmEnabled: c.dm, channelEnabled: c.channel, moderationEnabled: c.moderation }
+          ? {
+              dmEnabled: c.dm,
+              channelEnabled: c.channel,
+              moderationEnabled: c.moderation,
+              eventEnabled: c.event,
+            }
           : {}),
         ...(input.mutedCommunityIds ? { mutedCommunityIds: input.mutedCommunityIds } : {}),
       },
@@ -89,6 +101,7 @@ export async function updatePushPrefs(
     patch.dmEnabled = input.categories.dm
     patch.channelEnabled = input.categories.channel
     patch.moderationEnabled = input.categories.moderation
+    patch.eventEnabled = input.categories.event
   }
   if (input.mutedCommunityIds) patch.mutedCommunityIds = input.mutedCommunityIds
   await db.update(pushSubscriptions).set(patch).where(eq(pushSubscriptions.deviceId, deviceId))
@@ -109,6 +122,7 @@ function categoryEnabled(
     dm: row.dmEnabled,
     channel: row.channelEnabled,
     moderation: row.moderationEnabled,
+    event: row.eventEnabled,
   }
   return map[category]
 }
@@ -192,6 +206,23 @@ export async function notifyMessageActivity(
   await Promise.all(offlineDeviceIds.map((d) => coalescedPush(db, d, payload).catch(() => {})))
 }
 
+/** Coalesced push of one payload to every active device of each OFFLINE account. */
+async function pushToOfflineAccounts(
+  db: Db,
+  accountIds: Iterable<string>,
+  payload: PushPayload,
+  isAccountOnline: (accountId: string) => boolean,
+): Promise<void> {
+  for (const accountId of accountIds) {
+    if (isAccountOnline(accountId)) continue
+    const devs = await db
+      .select({ deviceId: devices.deviceId })
+      .from(devices)
+      .where(and(eq(devices.accountId, accountId), eq(devices.status, 'active')))
+    await Promise.all(devs.map((d) => coalescedPush(db, d.deviceId, payload).catch(() => {})))
+  }
+}
+
 /**
  * Fire a 'moderation' push to each offline manager's devices (a suggestion or join
  * request awaiting them). `isAccountOnline` skips those with a live socket; the
@@ -204,13 +235,30 @@ export async function notifyOfflineManagers(
   isAccountOnline: (accountId: string) => boolean,
 ): Promise<void> {
   if (!configured) return
-  const payload = buildPushPayload('moderation', communityId)
-  for (const accountId of managerAccountIds) {
-    if (isAccountOnline(accountId)) continue
-    const devs = await db
-      .select({ deviceId: devices.deviceId })
-      .from(devices)
-      .where(and(eq(devices.accountId, accountId), eq(devices.status, 'active')))
-    await Promise.all(devs.map((d) => coalescedPush(db, d.deviceId, payload).catch(() => {})))
-  }
+  await pushToOfflineAccounts(
+    db,
+    managerAccountIds,
+    buildPushPayload('moderation', communityId),
+    isAccountOnline,
+  )
+}
+
+/**
+ * Fire an 'event' reminder push to each offline RSVP'd participant's devices. Called by
+ * the peer-trigger path (a member's client, online at reminder time, fires the trigger);
+ * the server never learns the event time, only that a reminder fired now. Best-effort.
+ */
+export async function notifyEventReminder(
+  db: Db,
+  participantAccountIds: Iterable<string>,
+  communityId: string,
+  isAccountOnline: (accountId: string) => boolean,
+): Promise<void> {
+  if (!configured) return
+  await pushToOfflineAccounts(
+    db,
+    participantAccountIds,
+    buildPushPayload('event', communityId),
+    isAccountOnline,
+  )
 }

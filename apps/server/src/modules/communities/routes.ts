@@ -16,6 +16,7 @@ import {
   postKeyGrantsRequestSchema,
   postParticipationRequestSchema,
   publishChannelGroupInfoRequestSchema,
+  reminderTriggerRequestSchema,
   resolveJoinRequestSchema,
   rotateChannelRequestSchema,
   rotateRequestSchema,
@@ -79,6 +80,7 @@ import {
   setMemberRole,
   setModerator,
   setMuted,
+  triggerChannelReminder,
   updateChannel,
   updateCommunity,
   uploadCommunityMedia,
@@ -520,6 +522,26 @@ export function registerCommunityRoutes(
         request.params.artifactId,
       )
       return { ok: true }
+    },
+  )
+
+  // Peer-triggered event reminder: a member's client (online at reminder time) fires this;
+  // the server relays a content-free push to offline RSVP'd members. No time is stored.
+  app.post<{ Params: { id: string; channelId: string; artifactId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/artifacts/:artifactId/reminder-trigger',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = reminderTriggerRequestSchema.parse(request.body)
+      return triggerChannelReminder(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.artifactId,
+        body,
+      )
     },
   )
 

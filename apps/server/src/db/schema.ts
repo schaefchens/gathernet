@@ -84,6 +84,8 @@ export const pushSubscriptions = pgTable(
     dmEnabled: boolean('dm_enabled').notNull().default(true),
     channelEnabled: boolean('channel_enabled').notNull().default(true),
     moderationEnabled: boolean('moderation_enabled').notNull().default(true),
+    /** event-reminder pushes (peer-triggered) */
+    eventEnabled: boolean('event_enabled').notNull().default(true),
     /** communityIds the user muted push for */
     mutedCommunityIds: text('muted_community_ids').array(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -908,6 +910,21 @@ export const channelArtifactParticipants = pgTable(
     index('channel_artifact_participants_channel_idx').on(t.channelId),
   ],
 )
+
+/**
+ * Dedup ledger for peer-triggered event reminders. A reminder is fired by whichever
+ * member client is online at reminder time; many may trigger at once, so the FIRST insert
+ * of `idempotencyKey` = `${artifactId}:${reminderInstant}` wins and the rest are no-ops.
+ * Rows are short-lived — pruned by the hourly housekeeping job. Holds no timing the server
+ * didn't already act on: a row exists only because a reminder just fired (contemporaneous).
+ */
+export const channelReminderFires = pgTable('channel_reminder_fires', {
+  idempotencyKey: text('idempotency_key').primaryKey(),
+  channelId: text('channel_id')
+    .notNull()
+    .references(() => communityChannels.channelId),
+  firedAt: timestamp('fired_at', { withTimezone: true }).notNull().defaultNow(),
+})
 
 /** Encrypted media (community + channel avatars); ciphertext = seal(K_meta, imageBytes). */
 export const communityMedia = pgTable('community_media', {

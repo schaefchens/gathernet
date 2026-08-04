@@ -9,11 +9,13 @@ import { communityIdSchema } from '../ids.ts'
  * display prefs (generic vs coarse, custom title/icon) stay client-side.
  */
 
-/** Which kinds of activity a device wants pushed. */
+/** Which kinds of activity a device wants pushed. `event` (reminder pushes) defaults on
+ *  and is optional on the wire so older clients that omit it stay valid. */
 export const pushCategoriesSchema = z.object({
   dm: z.boolean(),
   channel: z.boolean(),
   moderation: z.boolean(),
+  event: z.boolean().default(true),
 })
 export type PushCategories = z.infer<typeof pushCategoriesSchema>
 
@@ -58,7 +60,7 @@ export type VapidKeyResponse = z.infer<typeof vapidKeyResponseSchema>
 /** The (encrypted, padded) payload the SW receives — a category code only. */
 export const pushPayloadSchema = z.object({
   v: z.literal(1),
-  category: z.enum(['dm', 'channel', 'moderation']),
+  category: z.enum(['dm', 'channel', 'moderation', 'event']),
   communityId: communityIdSchema.optional(),
   /** random padding so every push is a constant size to the push service */
   pad: z.string().optional(),
