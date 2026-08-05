@@ -3,16 +3,23 @@ import {
   acceptInviteRequestSchema,
   blockRequestSchema,
   createInviteRequestSchema,
+  postConnectRequestSchema,
 } from '@gathernet/shared'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { Db } from '../../db/index.ts'
 import type { ConnectionRegistry } from '../../ws/registry.ts'
 import { ServiceError } from '../accounts/service.ts'
 import {
+  acceptConnectRequest,
   acceptInvite,
   blockAccount,
+  cancelConnectRequest,
+  createConnectRequest,
   createInvite,
+  declineConnectRequest,
   listBlocks,
+  listConnectRecipients,
+  listConnectRequests,
   listFriends,
   listInvites,
   removeFriend,
@@ -132,6 +139,80 @@ export function registerFriendRoutes(
     async (request) => {
       const session = requireSession(request)
       await unblockAccount(db, session.accountId, request.params.accountId)
+      return { ok: true }
+    },
+  )
+
+  /* ---------------- connect requests (directed, in-community) ---------------- */
+
+  // The target's device receipt keys to seal an intro to (before sending a request).
+  app.get<{ Params: { accountId: string } }>(
+    '/api/v1/friends/connect-recipients/:accountId',
+    { preHandler: authenticate },
+    async (request) => {
+      const session = requireSession(request)
+      return listConnectRecipients(db, session.accountId, request.params.accountId)
+    },
+  )
+
+  app.post('/api/v1/friends/requests', { preHandler: authenticate }, async (request, reply) => {
+    const session = requireSession(request)
+    const body = postConnectRequestSchema.parse(request.body)
+    const { toAccountId } = await createConnectRequest(db, session.accountId, body)
+    registry.sendToAccount(toAccountId, {
+      type: 'friend.request',
+      payload: { fromAccountId: session.accountId as AccountId },
+    })
+    reply.status(201)
+    return { ok: true }
+  })
+
+  app.get('/api/v1/friends/requests', { preHandler: authenticate }, async (request) => {
+    const session = requireSession(request)
+    return listConnectRequests(db, session.accountId, session.deviceId)
+  })
+
+  app.post<{ Params: { requestId: string } }>(
+    '/api/v1/friends/requests/:requestId/accept',
+    { preHandler: authenticate },
+    async (request) => {
+      const session = requireSession(request)
+      const result = await acceptConnectRequest(db, session.accountId, request.params.requestId)
+      registry.sendToAccount(result.inviter.accountId, {
+        type: 'friend.added',
+        payload: {
+          accountId: result.accepter.accountId as AccountId,
+          displayName: result.accepter.displayName,
+        },
+      })
+      registry.sendToAccount(result.accepter.accountId, {
+        type: 'friend.added',
+        payload: {
+          accountId: result.inviter.accountId as AccountId,
+          displayName: result.inviter.displayName,
+        },
+      })
+      await onFriendshipCreated?.(result.inviter.accountId, result.accepter.accountId)
+      return { friend: { ...result.inviter, since: Date.now() } }
+    },
+  )
+
+  app.post<{ Params: { requestId: string } }>(
+    '/api/v1/friends/requests/:requestId/decline',
+    { preHandler: authenticate },
+    async (request) => {
+      const session = requireSession(request)
+      await declineConnectRequest(db, session.accountId, request.params.requestId)
+      return { ok: true }
+    },
+  )
+
+  app.delete<{ Params: { requestId: string } }>(
+    '/api/v1/friends/requests/:requestId',
+    { preHandler: authenticate },
+    async (request) => {
+      const session = requireSession(request)
+      await cancelConnectRequest(db, session.accountId, request.params.requestId)
       return { ok: true }
     },
   )

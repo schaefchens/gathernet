@@ -8,6 +8,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
 
@@ -128,6 +129,55 @@ export const friendInvites = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('friend_invites_inviter_idx').on(t.inviterAccountId)],
+)
+
+/**
+ * A directed, pending connect request between two accounts who share a community — the
+ * consent step before friendship. The intro message is E2EE-sealed to the target's
+ * devices in `friendRequestRecipients` (server sees only routing). Existence = pending;
+ * accept/decline/cancel all delete the row. One pending request per (from,to) direction.
+ */
+export const friendRequests = pgTable(
+  'friend_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    fromAccountId: text('from_account_id')
+      .notNull()
+      .references(() => accounts.accountId),
+    toAccountId: text('to_account_id')
+      .notNull()
+      .references(() => accounts.accountId),
+    /** the requester's device that signed the intro (authenticity of the message) */
+    requesterDeviceId: text('requester_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    requesterSig: bytea('requester_sig').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('friend_requests_pair_idx').on(t.fromAccountId, t.toAccountId),
+    index('friend_requests_to_idx').on(t.toAccountId),
+  ],
+)
+
+/** Per-device ECIES envelope of a connect request's intro (sealed to the target's
+ *  receipt key). Multi-device targets get one envelope each — any device can open it. */
+export const friendRequestRecipients = pgTable(
+  'friend_request_recipients',
+  {
+    requestId: uuid('request_id')
+      .notNull()
+      .references(() => friendRequests.id, { onDelete: 'cascade' }),
+    recipientDeviceId: text('recipient_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    sealed: bytea('sealed').notNull(),
+    senderPkB64: text('sender_pk_b64').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.requestId, t.recipientDeviceId] }),
+    index('friend_request_recipients_device_idx').on(t.recipientDeviceId),
+  ],
 )
 
 /** accountA < accountB (lexicographic) — one row per friendship. */

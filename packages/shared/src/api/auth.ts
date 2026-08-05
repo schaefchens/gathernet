@@ -42,6 +42,10 @@ export const SIG_DOMAIN = {
    *  by a channel manager promotes a member's suggestion to an active pin. Verified
    *  client-side against the capability chain + the channel's pinPolicy. */
   channelArtifact: 'gathernet-channel-artifact-v1',
+  /** a directed friend/connect request's intro message, signed by the requester's device
+   *  so a compromised relay can't fabricate an intro purporting to come from them:
+   *  Ed25519(requesterDeviceKey, domain ‖ fromAccountId ‖ toAccountId ‖ SHA-256(plaintext)) */
+  friendConnect: 'gathernet-friend-connect-v1',
   /** Ed25519(reporterDeviceKey, domain.channelReport ‖ channelId ‖ reportId ‖
    *  SHA-256(plaintext)) — the reporter's device attesting a message report sealed
    *  (ECIES) to the channel's moderators. Binds the report plaintext to its channel +

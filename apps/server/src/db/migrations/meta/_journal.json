@@ -162,6 +162,13 @@
       "when": 1785915703404,
       "tag": "0022_rapid_ken_ellis",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785952558348,
+      "tag": "0023_condemned_husk",
+      "breakpoints": true
     }
   ]
 }

@@ -92,6 +92,12 @@ export const friendRemovedMessage = z.object({
   }),
 })
 
+/** To the target of a directed connect request → their client refetches the inbox. */
+export const friendRequestMessage = z.object({
+  type: z.literal('friend.request'),
+  payload: z.object({ fromAccountId: accountIdSchema }),
+})
+
 export const chatMessageMessage = z.object({
   type: z.literal('chat.message'),
   payload: z.object({
@@ -441,6 +447,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   presenceUpdateMessage,
   friendAddedMessage,
   friendRemovedMessage,
+  friendRequestMessage,
   chatMessageMessage,
   welcomeMessage,
   groupCreatedMessage,
