@@ -122,6 +122,7 @@
     "delete": "Löschen",
     "edited": "bearbeitet",
     "deleted": "Diese Nachricht wurde gelöscht",
+    "removedByModerator": "Diese Nachricht wurde von einer Moderation entfernt",
     "attach": "Datei anhängen",
     "download": "Herunterladen",
     "mediaFailed": "Anhang nicht verfügbar",

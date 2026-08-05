@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { DeviceId } from '@gathernet/shared'
+import { and, eq } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
@@ -21,10 +22,12 @@ import {
   communityMembers,
   devices,
   groups,
+  mlsMessages,
 } from '../src/db/schema.ts'
 import {
   listModerationRecipients,
   listReports,
+  moderationRemoveMessage,
   postReport,
   resolveReport,
 } from '../src/modules/communities/service.ts'
@@ -207,5 +210,53 @@ describe('message reports', () => {
     await resolveReport(db, mod, c.communityId, c.channelId, reportId, { action: 'dismiss' })
     const res = await listReports(db, mod, c.communityId, c.channelId)
     expect(res.reports).toHaveLength(0)
+  })
+})
+
+describe('moderation message removal', () => {
+  async function seedMessage(channelId: string, senderDevice: string, seq: number): Promise<void> {
+    await db.insert(mlsMessages).values({
+      groupId: channelId,
+      seq,
+      kind: 'application',
+      epoch: 1,
+      senderDevice,
+      payload: randomBytes(48),
+    })
+  }
+
+  it('lets a manager hard-delete any member message', async () => {
+    const c = await makeChannel()
+    const mod = await newAccount()
+    await addMember(c.communityId, c.channelId, mod, 'moderator')
+    const author = await newAccount()
+    const authorDevice = await newDevice(author)
+    await addMember(c.communityId, c.channelId, author, 'member')
+    await seedMessage(c.channelId, authorDevice, 5)
+
+    await moderationRemoveMessage(db, fakeRegistry, mod, c.communityId, c.channelId, 5)
+
+    const row = await db.query.mlsMessages.findFirst({
+      where: and(eq(mlsMessages.groupId, c.channelId), eq(mlsMessages.seq, 5)),
+    })
+    expect(row).toBeUndefined()
+  })
+
+  it('refuses a non-manager', async () => {
+    const c = await makeChannel()
+    const author = await newAccount()
+    const authorDevice = await newDevice(author)
+    await addMember(c.communityId, c.channelId, author, 'member')
+    await seedMessage(c.channelId, authorDevice, 7)
+
+    await expect(
+      moderationRemoveMessage(db, fakeRegistry, author, c.communityId, c.channelId, 7),
+    ).rejects.toMatchObject({ status: 403 })
+
+    // message survives a refused removal
+    const row = await db.query.mlsMessages.findFirst({
+      where: and(eq(mlsMessages.groupId, c.channelId), eq(mlsMessages.seq, 7)),
+    })
+    expect(row).toBeDefined()
   })
 })

@@ -365,6 +365,17 @@ export const communityChannelReportCreatedMessage = z.object({
   payload: z.object({ communityId: communityIdSchema, channelId: groupIdSchema }),
 })
 
+/** To channel members: a moderator removed a message → clients hide it by seq. The server
+ *  reveals only `seq` (which it already knows); no content or E2EE material is disclosed. */
+export const communityChannelMessageRemovedMessage = z.object({
+  type: z.literal('community.channel_message_removed'),
+  payload: z.object({
+    communityId: communityIdSchema,
+    channelId: groupIdSchema,
+    seq: z.number().int().nonnegative(),
+  }),
+})
+
 /** To channel moderators + community leaders: someone requested to join. */
 export const communityChannelJoinRequestMessage = z.object({
   type: z.literal('community.channel_join_request'),
@@ -460,6 +471,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   communityChannelDeletedMessage,
   communityChannelArtifactUpdatedMessage,
   communityChannelReportCreatedMessage,
+  communityChannelMessageRemovedMessage,
   communityChannelJoinRequestMessage,
   communityChannelJoinApprovedMessage,
   communityChannelJoinDeclinedMessage,

@@ -2406,6 +2406,35 @@ export async function resolveReport(
     .where(and(eq(channelReports.reportId, reportId), eq(channelReports.channelId, channelId)))
 }
 
+/**
+ * Remove a message for everyone (moderation): hard-delete its stored ciphertext (so a
+ * device that hasn't fetched it never will) and broadcast a tombstone by `seq` so devices
+ * that already have it hide it. Manager-only; generalizes the author-only deleteOwnMessage.
+ * The server reveals only `seq` — no content or E2EE material. Idempotent.
+ */
+export async function moderationRemoveMessage(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  seq: number,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  await requireChannelManager(db, channelId, membership)
+  await db
+    .delete(mlsMessages)
+    .where(and(eq(mlsMessages.groupId, channelId), eq(mlsMessages.seq, seq)))
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_message_removed',
+    payload: {
+      communityId: communityId as CommunityId,
+      channelId: channelId as GroupId,
+      seq,
+    },
+  })
+}
+
 /** How far ahead of the reminder instant a departing client may "early-fire" (trades
  *  precision for coverage). The server accepts a trigger only within this look-ahead, so
  *  it can never be told a far-future time. */

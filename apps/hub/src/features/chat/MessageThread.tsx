@@ -225,7 +225,9 @@ export function MessageThread({
                 }`}
               >
                 {message.deletedAt ? (
-                  <p className="italic text-ink-faint">{t('chat.deleted')}</p>
+                  <p className="italic text-ink-faint">
+                    {t(message.removedByModerator ? 'chat.removedByModerator' : 'chat.deleted')}
+                  </p>
                 ) : spent && !rev ? (
                   // Persisted tombstone with no in-session reveal snapshot → the
                   // content is gone (a reload, another device, or the author's copy

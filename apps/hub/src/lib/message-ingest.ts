@@ -173,6 +173,35 @@ export function applyDelete(
 }
 
 /**
+ * Apply a MODERATOR removal tombstone, matched by server `seq` (the server reveals only
+ * seq; the E2EE client id stays private). Content is cleared and the row kept as a
+ * tombstone; unlike a self-delete this needs no author check — authority was enforced
+ * server-side. Returns the new list + changed, or null (no such message / already gone).
+ */
+export function applyModerationRemoval(
+  list: StoredMessage[],
+  seq: number,
+  ts: number,
+): { list: StoredMessage[]; changed: StoredMessage } | null {
+  const idx = list.findIndex((m) => m.seq === seq)
+  const msg = idx >= 0 ? list[idx] : undefined
+  if (!msg || msg.deletedAt) return null
+  const changed: StoredMessage = {
+    groupId: msg.groupId,
+    seq: msg.seq,
+    ...(msg.id ? { id: msg.id } : {}),
+    senderAccountId: msg.senderAccountId,
+    kind: 'text',
+    text: '',
+    sentAt: msg.sentAt,
+    outgoing: msg.outgoing,
+    deletedAt: ts,
+    removedByModerator: true,
+  }
+  return replaceAt(list, idx, changed)
+}
+
+/**
  * Ingest one decrypted body into a message list (persist + UI), branching on kind:
  * a display message is stored + appended; a control message (reaction; edit/delete in
  * Slice 2) mutates an existing message. The store passes its own list get/set/append

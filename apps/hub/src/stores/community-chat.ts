@@ -69,6 +69,7 @@ import {
 import {
   applyDelete,
   applyEdit,
+  applyModerationRemoval,
   applyReaction,
   bodyToStored,
   consumeLocally,
@@ -314,6 +315,18 @@ class CommunityChatStore {
             console.error('channel work failed', m.payload.channelId, err),
           )
         }
+      }),
+      // A moderator removed a message → hide it by seq on devices that already have it.
+      wsClient.on('community.channel_message_removed', (m) => {
+        const { channelId, seq } = m.payload
+        const list = useCommunityChat.getState().messages[channelId]
+        if (!list) return
+        const res = applyModerationRemoval(list, seq, Date.now())
+        if (!res) return
+        useCommunityChat.setState((s) => ({
+          messages: { ...s.messages, [channelId]: res.list },
+        }))
+        void messageStore.put(res.changed)
       }),
       wsClient.on('hello.ok', () => {
         // Drop cached sender lookups so devices added while we were offline resolve.
@@ -1153,6 +1166,16 @@ class CommunityChatStore {
       await messageStore.put(res.changed)
     }
     await api('DELETE', `/api/v1/mls/groups/${channelId}/messages/${targetSeq}`).catch(() => {})
+  }
+
+  /** Moderator removal of any member's message (manager-gated server-side): hard-delete +
+   *  the server broadcasts the tombstone that hides it everywhere (incl. locally). */
+  async removeMessageAsModerator(
+    communityId: string,
+    channelId: string,
+    seq: number,
+  ): Promise<void> {
+    await api('DELETE', `/api/v1/communities/${communityId}/channels/${channelId}/messages/${seq}`)
   }
 
   /** Encode + send a message body over the channel's transport (MLS or group_key). */

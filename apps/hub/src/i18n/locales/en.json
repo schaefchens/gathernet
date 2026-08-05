@@ -122,6 +122,7 @@
     "delete": "Delete",
     "edited": "edited",
     "deleted": "This message was deleted",
+    "removedByModerator": "This message was removed by a moderator",
     "attach": "Attach a file",
     "download": "Download",
     "mediaFailed": "Attachment unavailable",

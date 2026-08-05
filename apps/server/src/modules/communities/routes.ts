@@ -66,6 +66,7 @@ import {
   listCommunityMembers,
   listModerationRecipients,
   listReports,
+  moderationRemoveMessage,
   myCapabilities,
   myChannelKeyGrant,
   myKeyGrant,
@@ -609,6 +610,26 @@ export function registerCommunityRoutes(
         request.params.channelId,
         request.params.reportId,
         body,
+      )
+      return { ok: true }
+    },
+  )
+
+  // Moderator removes a message for everyone (hard-delete + tombstone broadcast).
+  app.delete<{ Params: { id: string; channelId: string; seq: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/messages/:seq',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const seq = Number(request.params.seq)
+      if (!Number.isInteger(seq) || seq < 0) throw new ServiceError(400, 'invalid_seq')
+      await moderationRemoveMessage(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        seq,
       )
       return { ok: true }
     },

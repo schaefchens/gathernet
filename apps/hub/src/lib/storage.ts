@@ -340,6 +340,9 @@ export interface StoredMessage {
   editedAt?: number
   /** set when deleted-for-everyone; the row is kept as a tombstone */
   deletedAt?: number
+  /** the tombstone was a moderator removal (distinct placeholder copy) rather than an
+   *  author self-delete */
+  removedByModerator?: boolean
   /** view-once: content is gated behind a tap and self-destructs after first open */
   once?: boolean
   /** view-once has been opened → content cleared, an "opened" tombstone remains */
