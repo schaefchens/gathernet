@@ -42,6 +42,11 @@ export const SIG_DOMAIN = {
    *  by a channel manager promotes a member's suggestion to an active pin. Verified
    *  client-side against the capability chain + the channel's pinPolicy. */
   channelArtifact: 'gathernet-channel-artifact-v1',
+  /** Ed25519(reporterDeviceKey, domain.channelReport ‖ channelId ‖ reportId ‖
+   *  SHA-256(plaintext)) — the reporter's device attesting a message report sealed
+   *  (ECIES) to the channel's moderators. Binds the report plaintext to its channel +
+   *  id so a moderator can prove authenticity without trusting the relaying server. */
+  channelReport: 'gathernet-channel-report-v1',
 } as const
 
 export const displayNameSchema = z.string().trim().min(1).max(64)

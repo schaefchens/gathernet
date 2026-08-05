@@ -22,7 +22,9 @@ import type {
   DeviceId,
   GroupId,
   ListArtifactsResponse,
+  ListReportsResponse,
   MembershipCapability,
+  ModerationRecipientsResponse,
   MyCapabilitiesResponse,
   MyChannelKeyGrantResponse,
   MyKeyGrantResponse,
@@ -31,7 +33,9 @@ import type {
   PostChannelKeyGrantsRequest,
   PostKeyGrantsRequest,
   PostParticipationRequest,
+  PostReportRequest,
   ReminderTriggerRequest,
+  ResolveReportRequest,
   RotateChannelRequest,
   RotateRequest,
   ServerMessage,
@@ -45,7 +49,7 @@ import {
   GROUP_KEY_DISCUSSION_MAX_MEMBERS,
   INVITE_CODE_LENGTH,
 } from '@gathernet/shared'
-import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import {
   accounts,
@@ -56,6 +60,8 @@ import {
   channelKeyGrants,
   channelMembers,
   channelReminderFires,
+  channelReportRecipients,
+  channelReports,
   communities,
   communityChannels,
   communityInvites,
@@ -2227,6 +2233,177 @@ export async function deleteParticipation(
     type: 'community.channel_artifact_updated',
     payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
   })
+}
+
+/* ----------------------- message reports (E2EE, mod-only) ----------------------- */
+
+/**
+ * The channel's mod/leader devices a report may be sealed to — a small role-defined set
+ * (NOT a browsable roster, honouring the no-roster rule for mega channels). A reporter's
+ * client ECIES-seals the report to every device here; each device's cert/receiptPk is
+ * authenticated client-side (the server is never trusted for it). Any active community
+ * member may fetch it, so a plain member can file a report.
+ */
+export async function listModerationRecipients(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+): Promise<ModerationRecipientsResponse> {
+  await requireActiveMembership(db, communityId, accountId)
+  const managers = await channelManagerAccountIds(db, communityId, channelId)
+  if (managers.size === 0) return { devices: [] }
+  const rows = await db
+    .select({
+      accountId: devices.accountId,
+      deviceId: devices.deviceId,
+      cert: devices.cert,
+      certSig: devices.certSig,
+      receiptPk: devices.receiptPk,
+      receiptPkSig: devices.receiptPkSig,
+    })
+    .from(devices)
+    .where(
+      and(
+        inArray(devices.accountId, [...managers]),
+        eq(devices.status, 'active'),
+        isNotNull(devices.receiptPk),
+      ),
+    )
+  const list: ModerationRecipientsResponse['devices'] = rows.map((r) => ({
+    accountId: r.accountId as AccountId,
+    deviceId: r.deviceId as DeviceId,
+    deviceCert: r.cert.toString('base64'),
+    certSig: r.certSig.toString('base64'),
+    receiptPk: r.receiptPk?.toString('base64') ?? null,
+    receiptPkSig: r.receiptPkSig?.toString('base64') ?? null,
+  }))
+  return { devices: list }
+}
+
+/**
+ * File a message report: one lifecycle row (server-visible routing metadata only) plus a
+ * per-moderator ECIES envelope of the identical sealed plaintext. The server stores opaque
+ * blobs — it never sees the reported content, author, or reason. Idempotent on reportId.
+ * Notifies the channel's managers so their client refetches the review queue.
+ */
+export async function postReport(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  input: PostReportRequest,
+): Promise<void> {
+  await requireActiveMembership(db, communityId, accountId)
+  await requireOwnDevice(db, accountId, input.reporterDeviceId)
+  await db
+    .insert(channelReports)
+    .values({
+      reportId: input.reportId,
+      channelId,
+      communityId,
+      createdBy: accountId,
+      reporterDeviceId: input.reporterDeviceId,
+      reporterSig: bufOf(input.reporterSig),
+    })
+    .onConflictDoNothing()
+  await db
+    .insert(channelReportRecipients)
+    .values(
+      input.recipients.map((r) => ({
+        reportId: input.reportId,
+        recipientDeviceId: r.recipientDeviceId,
+        sealedReport: bufOf(r.sealedReport),
+        senderPkB64: r.senderPkB64,
+      })),
+    )
+    .onConflictDoNothing()
+  for (const a of await channelManagerAccountIds(db, communityId, channelId)) {
+    registry.sendToAccount(a, {
+      type: 'community.channel_report_created',
+      payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+    })
+  }
+}
+
+/**
+ * The pending report queue as delivered to ONE moderator — only the envelopes sealed to
+ * the caller's own active devices (a mod opens their own copy). Manager-only. Ordered
+ * oldest-first so the review queue is stable.
+ */
+export async function listReports(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+): Promise<ListReportsResponse> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  await requireChannelManager(db, channelId, membership)
+  const myDevices = await db
+    .select({ deviceId: devices.deviceId })
+    .from(devices)
+    .where(and(eq(devices.accountId, accountId), eq(devices.status, 'active')))
+  const deviceIds = myDevices.map((d) => d.deviceId)
+  if (deviceIds.length === 0) return { reports: [] }
+  const rows = await db
+    .select({
+      reportId: channelReports.reportId,
+      channelId: channelReports.channelId,
+      reporterDeviceId: channelReports.reporterDeviceId,
+      reporterSig: channelReports.reporterSig,
+      status: channelReports.status,
+      createdAt: channelReports.createdAt,
+      sealedReport: channelReportRecipients.sealedReport,
+      senderPkB64: channelReportRecipients.senderPkB64,
+    })
+    .from(channelReports)
+    .innerJoin(
+      channelReportRecipients,
+      eq(channelReportRecipients.reportId, channelReports.reportId),
+    )
+    .where(
+      and(
+        eq(channelReports.channelId, channelId),
+        inArray(channelReportRecipients.recipientDeviceId, deviceIds),
+        eq(channelReports.status, 'pending'),
+      ),
+    )
+    .orderBy(asc(channelReports.createdAt))
+  return {
+    reports: rows.map((r) => ({
+      reportId: r.reportId,
+      channelId: r.channelId as GroupId,
+      reporterDeviceId: r.reporterDeviceId as DeviceId,
+      reporterSig: r.reporterSig.toString('base64'),
+      sealedReport: r.sealedReport.toString('base64'),
+      senderPkB64: r.senderPkB64,
+      status: r.status,
+      createdAt: r.createdAt.getTime(),
+    })),
+  }
+}
+
+/** Manager resolves/dismisses a report (lifecycle flip; a dismissed/resolved report drops
+ *  out of the pending queue). Manager-only. */
+export async function resolveReport(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  reportId: string,
+  input: ResolveReportRequest,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  await requireChannelManager(db, channelId, membership)
+  await db
+    .update(channelReports)
+    .set({
+      status: input.action === 'resolve' ? 'resolved' : 'dismissed',
+      resolvedBy: accountId,
+      resolvedAt: new Date(),
+    })
+    .where(and(eq(channelReports.reportId, reportId), eq(channelReports.channelId, channelId)))
 }
 
 /** How far ahead of the reminder instant a departing client may "early-fire" (trades

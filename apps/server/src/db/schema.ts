@@ -911,6 +911,55 @@ export const channelArtifactParticipants = pgTable(
   ],
 )
 
+export const reportStatusEnum = pgEnum('report_status', ['pending', 'resolved', 'dismissed'])
+
+/** A message report — mod-only, E2EE. The server stores routing/lifecycle metadata only;
+ *  the reported content/author/seq/reason live sealed in channel_report_recipients. */
+export const channelReports = pgTable(
+  'channel_reports',
+  {
+    reportId: text('report_id').primaryKey(),
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => communityChannels.channelId),
+    communityId: text('community_id')
+      .notNull()
+      .references(() => communities.communityId),
+    /** the reporter's account (server sees who reported; the reported author never does) */
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => accounts.accountId),
+    reporterDeviceId: text('reporter_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    reporterSig: bytea('reporter_sig').notNull(),
+    status: reportStatusEnum('status').notNull().default('pending'),
+    resolvedBy: text('resolved_by').references(() => accounts.accountId),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (t) => [index('channel_reports_channel_idx').on(t.channelId)],
+)
+
+/** Per-moderator sealed envelope of a report (ECIES to that mod device's receipt key). */
+export const channelReportRecipients = pgTable(
+  'channel_report_recipients',
+  {
+    reportId: text('report_id')
+      .notNull()
+      .references(() => channelReports.reportId, { onDelete: 'cascade' }),
+    recipientDeviceId: text('recipient_device_id')
+      .notNull()
+      .references(() => devices.deviceId),
+    sealedReport: bytea('sealed_report').notNull(),
+    senderPkB64: text('sender_pk_b64').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.reportId, t.recipientDeviceId] }),
+    index('channel_report_recipients_device_idx').on(t.recipientDeviceId),
+  ],
+)
+
 /**
  * Dedup ledger for peer-triggered event reminders. A reminder is fired by whichever
  * member client is online at reminder time; many may trigger at once, so the FIRST insert

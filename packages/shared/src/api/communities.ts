@@ -541,6 +541,54 @@ export const communityDeviceResponseSchema = z.object({
 })
 export type CommunityDeviceResponse = z.infer<typeof communityDeviceResponseSchema>
 
+/* ----------------------- message reports (E2EE, mod-only) ----------------------- */
+
+/** Mod/leader devices a report is sealed to — a small role-defined set, NOT a browsable
+ *  roster (honors the no-roster rule for mega channels). Reuses communityDeviceSchema. */
+export const moderationRecipientsResponseSchema = z.object({
+  devices: z.array(communityDeviceSchema),
+})
+export type ModerationRecipientsResponse = z.infer<typeof moderationRecipientsResponseSchema>
+
+/** One per-recipient ECIES envelope of the (identical) report plaintext. */
+export const reportRecipientSchema = z.object({
+  recipientDeviceId: deviceIdSchema,
+  sealedReport: z.base64().max(16384),
+  senderPkB64: z.base64(),
+})
+export type ReportRecipient = z.infer<typeof reportRecipientSchema>
+
+export const postReportRequestSchema = z.object({
+  reportId: z.uuid(),
+  reporterDeviceId: deviceIdSchema,
+  /** Ed25519(reporterDeviceKey, domain.channelReport ‖ channelId ‖ reportId ‖ SHA256(plaintext)) */
+  reporterSig: z.base64(),
+  recipients: z.array(reportRecipientSchema).min(1).max(256),
+})
+export type PostReportRequest = z.infer<typeof postReportRequestSchema>
+
+export const reportStatusSchema = z.enum(['pending', 'resolved', 'dismissed'])
+export type ReportStatus = z.infer<typeof reportStatusSchema>
+
+/** A report as delivered to ONE moderator: their own sealed envelope + verification data. */
+export const reportEntrySchema = z.object({
+  reportId: z.uuid(),
+  channelId: groupIdSchema,
+  reporterDeviceId: deviceIdSchema,
+  reporterSig: z.base64(),
+  sealedReport: z.base64(),
+  senderPkB64: z.base64(),
+  status: reportStatusSchema,
+  createdAt: z.number().int().nonnegative(),
+})
+export type ReportEntry = z.infer<typeof reportEntrySchema>
+
+export const listReportsResponseSchema = z.object({ reports: z.array(reportEntrySchema) })
+export type ListReportsResponse = z.infer<typeof listReportsResponseSchema>
+
+export const resolveReportRequestSchema = z.object({ action: z.enum(['resolve', 'dismiss']) })
+export type ResolveReportRequest = z.infer<typeof resolveReportRequestSchema>
+
 export const keyGrantSchema = z.object({
   granteeDeviceId: deviceIdSchema,
   /** eciesSeal(receiptPk, K_meta) */

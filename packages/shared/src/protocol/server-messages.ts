@@ -359,6 +359,12 @@ export const communityChannelArtifactUpdatedMessage = z.object({
   }),
 })
 
+/** To channel mods/leaders: a new report needs review → client refetches the queue. */
+export const communityChannelReportCreatedMessage = z.object({
+  type: z.literal('community.channel_report_created'),
+  payload: z.object({ communityId: communityIdSchema, channelId: groupIdSchema }),
+})
+
 /** To channel moderators + community leaders: someone requested to join. */
 export const communityChannelJoinRequestMessage = z.object({
   type: z.literal('community.channel_join_request'),
@@ -453,6 +459,7 @@ export const serverMessageSchema = z.discriminatedUnion('type', [
   communityChannelUpdatedMessage,
   communityChannelDeletedMessage,
   communityChannelArtifactUpdatedMessage,
+  communityChannelReportCreatedMessage,
   communityChannelJoinRequestMessage,
   communityChannelJoinApprovedMessage,
   communityChannelJoinDeclinedMessage,

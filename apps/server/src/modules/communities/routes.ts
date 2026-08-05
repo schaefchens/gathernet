@@ -15,9 +15,11 @@ import {
   postCommitRequestSchema,
   postKeyGrantsRequestSchema,
   postParticipationRequestSchema,
+  postReportRequestSchema,
   publishChannelGroupInfoRequestSchema,
   reminderTriggerRequestSchema,
   resolveJoinRequestSchema,
+  resolveReportRequestSchema,
   rotateChannelRequestSchema,
   rotateRequestSchema,
   setCommunityRootRequestSchema,
@@ -62,6 +64,8 @@ import {
   listCommunityDevices,
   listCommunityInvites,
   listCommunityMembers,
+  listModerationRecipients,
+  listReports,
   myCapabilities,
   myChannelKeyGrant,
   myKeyGrant,
@@ -70,9 +74,11 @@ import {
   postChannelKeyGrants,
   postKeyGrants,
   postParticipation,
+  postReport,
   publishChannelGroupInfo,
   removeMember,
   resolveJoinRequest,
+  resolveReport,
   revokeCommunityInvite,
   rotateChannel,
   rotateCommunity,
@@ -542,6 +548,69 @@ export function registerCommunityRoutes(
         request.params.artifactId,
         body,
       )
+    },
+  )
+
+  /* ------------------------ message reports (E2EE, mod-only) ---------------- */
+
+  // The channel's mod/leader devices a report may be sealed to (a reporter's client
+  // ECIES-seals to each). Any active community member may fetch it to file a report.
+  app.get<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/moderation-recipients',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      return listModerationRecipients(
+        db,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+      )
+    },
+  )
+
+  app.post<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/reports',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = postReportRequestSchema.parse(request.body)
+      await postReport(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        body,
+      )
+      return { ok: true }
+    },
+  )
+
+  app.get<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/reports',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      return listReports(db, session.accountId, request.params.id, request.params.channelId)
+    },
+  )
+
+  app.patch<{ Params: { id: string; channelId: string; reportId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/reports/:reportId',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = resolveReportRequestSchema.parse(request.body)
+      await resolveReport(
+        db,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.reportId,
+        body,
+      )
+      return { ok: true }
     },
   )
 
