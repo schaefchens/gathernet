@@ -3,25 +3,9 @@ import { useTranslation } from 'react-i18next'
 import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
 import { buildThreadIndex } from '../../lib/thread-index.ts'
-import { MediaAttachment } from './MediaAttachment.tsx'
+import { MessageBubble } from './MessageBubble.tsx'
+import { ThreadView } from './ThreadView.tsx'
 import { VoiceRecorder } from './VoiceRecorder.tsx'
-
-/** Report reasons offered in the picker (labels via literal i18n keys for the typed t()). */
-const REPORT_REASONS: {
-  reason: ReportReason
-  key:
-    | 'chat.reportReasonSpam'
-    | 'chat.reportReasonAbuse'
-    | 'chat.reportReasonInappropriate'
-    | 'chat.reportReasonSafety'
-    | 'chat.reportReasonOther'
-}[] = [
-  { reason: 'spam', key: 'chat.reportReasonSpam' },
-  { reason: 'abuse', key: 'chat.reportReasonAbuse' },
-  { reason: 'inappropriate', key: 'chat.reportReasonInappropriate' },
-  { reason: 'safety', key: 'chat.reportReasonSafety' },
-  { reason: 'other', key: 'chat.reportReasonOther' },
-]
 
 interface MessageThreadProps {
   messages: StoredMessage[]
@@ -40,22 +24,20 @@ interface MessageThreadProps {
   onDelete?: (targetId: string, seq: number) => void
   /** recipient opened a view-once message → destroy it locally + tell author/own devices */
   onConsume?: (targetId: string) => void
-  /** pin/suggest this message as a channel artifact (channels only); expiresAt is
-   *  epoch-millis for a time-limited pin, or null for "forever" */
+  /** pin/suggest this message as a channel artifact (channels only) */
   onPin?: (message: StoredMessage, expiresAt: number | null) => void
-  /** report a message to the channel's moderators (channels only) — seals a snapshot
-   *  to the mods' keys. Throws with a code ('no_moderators') the picker surfaces. */
-  onReport?: (message: StoredMessage, reason: ReportReason, note?: string) => Promise<void>
-  /** moderator removes any member's message directly (channels only; shown when the
-   *  viewer manages the channel) — hard-delete + tombstone, no report needed. */
+  /** report a message to the channel's moderators (channels only) */
+  onReport?:
+    | ((message: StoredMessage, reason: ReportReason, note?: string) => Promise<void>)
+    | undefined
+  /** moderator removes any member's message directly (channels only) */
   onModRemove?: ((message: StoredMessage) => Promise<void>) | undefined
-  /** send a directed connect (friend) request to a message's sender (channels only) with
-   *  a personal intro. Throws with a code the composer surfaces. */
-  onConnect?: ((message: StoredMessage, message_: string) => Promise<void>) | undefined
+  /** send a directed connect (friend) request to a message's sender (channels only) */
+  onConnect?: ((message: StoredMessage, intro: string) => Promise<void>) | undefined
   /** accountIds already friends with the viewer — connect is hidden for them */
   friendAccountIds?: string[] | undefined
-  /** channels only: show a "N replies" chip on messages that started a thread. (The
-   *  thread view + reply-hiding land in a later stage; for now the chip is informational.) */
+  /** channels only: group replies into threads — the timeline shows top-level messages
+   *  with a "N replies" chip; replies live in the thread view. */
   threaded?: boolean | undefined
   /** the current account id — to show which reactions are mine + toggle correctly */
   myAccountId?: string | undefined
@@ -67,38 +49,12 @@ interface MessageThreadProps {
   readOnlyLabel?: string
 }
 
-/** Quick-reaction palette — prayer-first, a small deliberate set (not a full picker). */
-const REACTIONS = ['🙏', '❤️', '👍', '😀', '😢', '🎉']
-
-const HOUR_MS = 3_600_000
-/** Pin-duration choices; `ms: null` = pinned forever. Labels are literal i18n keys
- *  (kept `as const` so the typed `t()` accepts them). */
-const PIN_DURATIONS = [
-  { key: 'pins.durationForever', ms: null },
-  { key: 'pins.duration1h', ms: HOUR_MS },
-  { key: 'pins.duration1d', ms: 24 * HOUR_MS },
-  { key: 'pins.duration1w', ms: 7 * 24 * HOUR_MS },
-] as const
-
-/** First grapheme of an input string (so a multi-codepoint emoji stays intact). */
-function firstEmoji(s: string): string | null {
-  const trimmed = s.trim()
-  if (!trimmed) return null
-  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
-    for (const { segment } of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(
-      trimmed,
-    )) {
-      return segment
-    }
-  }
-  return [...trimmed][0] ?? null
-}
-
 /**
- * The scrollable decrypted-message list plus the send composer, shared by DM
- * chats and community channels. Renders replies + reactions and offers a per-message
- * react/reply affordance; the parent owns the header, the message data, and the
- * send/react handlers.
+ * The scrollable decrypted-message list plus the send composer, shared by DM chats and
+ * community channels. In `threaded` mode (channels) replies are grouped into threads: the
+ * timeline shows only top-level messages with a reply-count chip that opens the ThreadView;
+ * in flat mode (DMs) replies render inline with a quote. The parent owns the header, the
+ * message data, and the send/react handlers.
  */
 export function MessageThread({
   messages,
@@ -125,85 +81,31 @@ export function MessageThread({
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
-  const [pickerFor, setPickerFor] = useState<string | null>(null)
-  const [customFor, setCustomFor] = useState<string | null>(null)
-  /** message id whose pin-duration menu is open */
-  const [pinningFor, setPinningFor] = useState<string | null>(null)
-  const [editingFor, setEditingFor] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState('')
-  /** message whose report reason-picker is open, + its transient form state */
-  const [reportFor, setReportFor] = useState<StoredMessage | null>(null)
-  const [reportReason, setReportReason] = useState<ReportReason>('inappropriate')
-  const [reportNote, setReportNote] = useState('')
-  const [reportBusy, setReportBusy] = useState(false)
-  const [reportError, setReportError] = useState<string | null>(null)
-  /** message a moderator is confirming removal of (inline, no native dialog) */
-  const [modRemoveFor, setModRemoveFor] = useState<StoredMessage | null>(null)
-  const [modRemoveBusy, setModRemoveBusy] = useState(false)
-  /** sender the viewer is composing a connect request to, + its form state */
-  const [connectFor, setConnectFor] = useState<StoredMessage | null>(null)
-  const [connectDraft, setConnectDraft] = useState('')
-  const [connectBusy, setConnectBusy] = useState(false)
-  const [connectError, setConnectError] = useState<string | null>(null)
-  const [connectSent, setConnectSent] = useState<Set<string>>(new Set())
+  const [viewOnce, setViewOnce] = useState(false)
+  /** open thread's root message id (threaded channels only) */
+  const [openThreadRoot, setOpenThreadRoot] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const supportsViewOnce = !!onConsume
   const friendSet = useMemo(() => new Set(friendAccountIds ?? []), [friendAccountIds])
 
-  const submitConnect = async () => {
-    if (!connectFor || !onConnect) return
-    setConnectBusy(true)
-    setConnectError(null)
-    try {
-      await onConnect(connectFor, connectDraft.trim())
-      setConnectSent((s) => new Set(s).add(connectFor.senderAccountId))
-      setConnectFor(null)
-      setConnectDraft('')
-    } catch (err) {
-      const code = err instanceof Error ? err.message : String(err)
-      const map: Record<string, string> = {
-        already_friends: t('connect.errAlready'),
-        request_exists: t('connect.errPending'),
-        not_connectable: t('connect.errNotConnectable'),
-        no_recipients: t('connect.errNoRecipients'),
-      }
-      setConnectError(map[code] ?? code)
-    } finally {
-      setConnectBusy(false)
-    }
-  }
+  const byId = useMemo(() => {
+    const m = new Map<string, StoredMessage>()
+    for (const msg of messages) if (msg.id) m.set(msg.id, msg)
+    return m
+  }, [messages])
 
-  const openReportPicker = (message: StoredMessage) => {
-    setReportFor(message)
-    setReportReason('inappropriate')
-    setReportNote('')
-    setReportError(null)
-  }
+  // Thread index (channels only): powers the timeline filtering, chips, and thread view.
+  const threadIndex = useMemo(
+    () => (threaded ? buildThreadIndex(messages) : null),
+    [threaded, messages],
+  )
+  // In threaded mode the timeline shows only top-level messages (replies live in threads).
+  const timeline = threadIndex ? threadIndex.topLevel : messages
 
-  const submitReport = async () => {
-    if (!reportFor || !onReport) return
-    setReportBusy(true)
-    setReportError(null)
-    try {
-      await onReport(reportFor, reportReason, reportNote.trim() || undefined)
-      setReportFor(null)
-    } catch (err) {
-      const code = err instanceof Error ? err.message : String(err)
-      setReportError(code === 'no_moderators' ? t('chat.reportNoMods') : code)
-    } finally {
-      setReportBusy(false)
-    }
-  }
-  const [viewOnce, setViewOnce] = useState(false)
-  // Content captured at reveal time so a view-once message can be shown for this
-  // one session even though its persisted copy is destroyed immediately on open.
-  const [revealed, setRevealed] = useState<Record<string, StoredMessage>>({})
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const supportsViewOnce = !!onConsume
-
-  const revealViewOnce = (message: StoredMessage) => {
-    if (!message.id) return
-    setRevealed((r) => ({ ...r, [message.id as string]: message }))
-    onConsume?.(message.id)
-  }
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
 
   const pickFile = async (file: File | undefined) => {
     if (!file || !onSendMedia) return
@@ -232,32 +134,6 @@ export function MessageThread({
     }
   }
 
-  const applyReactionEmoji = (messageId: string, emoji: string) => {
-    const mine = messages
-      .find((m) => m.id === messageId)
-      ?.reactions?.[emoji]?.includes(myAccountId ?? '')
-    onReact?.(messageId, emoji, mine ?? false)
-    setPickerFor(null)
-    setCustomFor(null)
-  }
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  const byId = useMemo(() => {
-    const m = new Map<string, StoredMessage>()
-    for (const msg of messages) if (msg.id) m.set(msg.id, msg)
-    return m
-  }, [messages])
-
-  // Thread index (channels only) — powers the "N replies" chip now; the thread view later.
-  const threadIndex = useMemo(
-    () => (threaded ? buildThreadIndex(messages) : null),
-    [threaded, messages],
-  )
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [])
-
   const send = async () => {
     const text = draft.trim()
     if (!text || !ready || sending) return
@@ -280,6 +156,16 @@ export function MessageThread({
 
   const replyPreview = replyingTo ? byId.get(replyingTo) : null
 
+  // Reply affordance: in a threaded channel it opens the thread; in a flat DM it sets the
+  // inline reply target.
+  const openThreadFor = (message: StoredMessage) => {
+    const root = (message.id && threadIndex?.rootId.get(message.id)) || message.id
+    if (root) setOpenThreadRoot(root)
+  }
+  const onReply = threaded
+    ? openThreadFor
+    : (message: StoredMessage) => setReplyingTo(message.id ?? null)
+
   return (
     <>
       <div className="flex-1 overflow-y-auto py-4 space-y-2">
@@ -288,410 +174,37 @@ export function MessageThread({
             {notReadyLabel ?? t('chat.settingUp')}
           </p>
         )}
-        {ready && messages.length === 0 && (
+        {ready && timeline.length === 0 && (
           <p className="text-center text-sm text-ink-faint py-8">{t('chat.noMessages')}</p>
         )}
-        {messages.map((message, i) => {
-          const quoted = message.replyTo ? byId.get(message.replyTo) : null
-          const reactions = Object.entries(message.reactions ?? {})
-          // Sender label for incoming channel bubbles (DMs carry no senderName),
-          // shown once per run of consecutive messages from the same sender.
-          const prev = messages[i - 1]
+        {timeline.map((message, i) => {
+          const prev = timeline[i - 1]
           const showSender =
             !message.outgoing &&
             !!message.senderName &&
             prev?.senderAccountId !== message.senderAccountId
-          const spent = !!message.viewOnceOpened
-          // A revealed view-once: display the content captured at open time (its
-          // persisted copy is already a tombstone).
-          const rev = message.id ? revealed[message.id] : undefined
-          const shown = rev ?? message
-          // Incoming, view-once, not yet opened → gate behind a tap-to-open placeholder.
-          const needsReveal = !!message.once && !message.outgoing && !spent && !rev
-          const canAct = !!message.id && !!onReact && !message.deletedAt && !spent && !needsReveal
-          const canEdit =
-            !!message.id && message.outgoing && !message.deletedAt && !message.once && !spent
           const replyCount =
             threadIndex && message.id ? (threadIndex.descendantCount.get(message.id) ?? 0) : 0
           return (
-            <div
+            <MessageBubble
               key={message.seq}
-              data-mid={message.id}
-              className={`group max-w-[80%] ${message.outgoing ? 'ml-auto' : ''}`}
-            >
-              {showSender && (
-                <p className="mb-0.5 ml-1 text-[11px] font-medium text-indigo-soft">
-                  {message.senderName}
-                </p>
-              )}
-              <div
-                className={`rounded-lg px-3 py-2 text-sm ${
-                  message.outgoing
-                    ? 'bg-indigo/30 border border-indigo/40'
-                    : 'bg-raised border border-edge'
-                }`}
-              >
-                {message.deletedAt ? (
-                  <p className="italic text-ink-faint">
-                    {t(message.removedByModerator ? 'chat.removedByModerator' : 'chat.deleted')}
-                  </p>
-                ) : spent && !rev ? (
-                  // Persisted tombstone with no in-session reveal snapshot → the
-                  // content is gone (a reload, another device, or the author's copy
-                  // after the recipient opened it).
-                  <p className="italic text-ink-faint">
-                    👁 {message.outgoing ? t('chat.viewOnceSeen') : t('chat.viewOnceOpened')}
-                  </p>
-                ) : needsReveal ? (
-                  <button
-                    type="button"
-                    className="flex items-center gap-2 text-sm text-indigo-soft hover:text-ink"
-                    onClick={() => revealViewOnce(message)}
-                  >
-                    👁 {t('chat.viewOnceTap')}
-                  </button>
-                ) : editingFor === message.id ? (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault()
-                      const text = editDraft.trim()
-                      if (text && message.id) onEdit?.(message.id, text)
-                      setEditingFor(null)
-                    }}
-                  >
-                    {/* biome-ignore lint/a11y/noAutofocus: focus the edit field on open */}
-                    <input
-                      autoFocus
-                      value={editDraft}
-                      onChange={(e) => setEditDraft(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Escape' && setEditingFor(null)}
-                      className="text-sm w-full"
-                    />
-                  </form>
-                ) : (
-                  <>
-                    {quoted && (
-                      <div className="mb-1 border-l-2 border-indigo-soft/60 pl-2 text-xs text-ink-faint truncate">
-                        {quoted.once
-                          ? `👁 ${t('chat.viewOnce')}`
-                          : quoted.text || t('chat.attachment')}
-                      </div>
-                    )}
-                    {shown.media && (
-                      <div className="mb-1">
-                        <MediaAttachment media={shown.media} />
-                      </div>
-                    )}
-                    {shown.text && <p className="whitespace-pre-wrap break-words">{shown.text}</p>}
-                    {message.once && (
-                      <p className="text-[10px] text-indigo-soft/80 mt-1">
-                        👁 {message.outgoing ? t('chat.viewOnce') : t('chat.viewOnceViewing')}
-                      </p>
-                    )}
-                  </>
-                )}
-                <p className="text-[10px] text-ink-faint text-right mt-1">
-                  {message.editedAt && !message.deletedAt && `${t('chat.edited')} · `}
-                  {new Date(message.sentAt).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </p>
-              </div>
-
-              {/* Thread indicator (channels) — count of replies beneath this message. */}
-              {replyCount > 0 && (
-                <div className={`mt-0.5 ${message.outgoing ? 'text-right' : ''}`}>
-                  <span className="text-xs text-indigo-soft">
-                    💬 {t('chat.replies', { count: replyCount })}
-                  </span>
-                </div>
-              )}
-
-              {/* Reaction pills */}
-              {reactions.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {reactions.map(([emoji, actors]) => {
-                    const mine = !!myAccountId && actors.includes(myAccountId)
-                    return (
-                      <button
-                        key={emoji}
-                        type="button"
-                        disabled={!canAct}
-                        onClick={() => message.id && onReact?.(message.id, emoji, mine)}
-                        className={`text-xs rounded-full border px-1.5 py-0.5 ${
-                          mine ? 'border-indigo-soft bg-indigo/20' : 'border-edge bg-overlay/40'
-                        }`}
-                      >
-                        {emoji} {actors.length}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-
-              {/* Hover actions: react + reply */}
-              {canAct && (
-                <div
-                  className={`flex gap-2 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${
-                    message.outgoing ? 'justify-end' : ''
-                  }`}
-                >
-                  <button
-                    type="button"
-                    className="text-xs text-ink-faint hover:text-ink"
-                    onClick={() => {
-                      setPickerFor(pickerFor === message.id ? null : (message.id ?? null))
-                      setCustomFor(null)
-                    }}
-                  >
-                    {t('chat.react')}
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs text-ink-faint hover:text-ink"
-                    onClick={() => setReplyingTo(message.id ?? null)}
-                  >
-                    {t('chat.reply')}
-                  </button>
-                  {onPin && !message.once && (
-                    <button
-                      type="button"
-                      className="text-xs text-ink-faint hover:text-ink"
-                      onClick={() =>
-                        setPinningFor(pinningFor === message.id ? null : (message.id ?? null))
-                      }
-                    >
-                      {t('chat.pin')}
-                    </button>
-                  )}
-                  {canEdit && onEdit && (
-                    <button
-                      type="button"
-                      className="text-xs text-ink-faint hover:text-ink"
-                      onClick={() => {
-                        setEditingFor(message.id ?? null)
-                        setEditDraft(message.text)
-                      }}
-                    >
-                      {t('chat.edit')}
-                    </button>
-                  )}
-                  {canEdit && onDelete && (
-                    <button
-                      type="button"
-                      className="text-xs text-danger/80 hover:text-danger"
-                      onClick={() => message.id && onDelete(message.id, message.seq)}
-                    >
-                      {t('chat.delete')}
-                    </button>
-                  )}
-                  {onReport && !message.outgoing && (
-                    <button
-                      type="button"
-                      className="text-xs text-ink-faint hover:text-danger"
-                      onClick={() => openReportPicker(message)}
-                    >
-                      {t('chat.report')}
-                    </button>
-                  )}
-                  {onModRemove && !message.outgoing && (
-                    <button
-                      type="button"
-                      className="text-xs text-danger/80 hover:text-danger"
-                      onClick={() => setModRemoveFor(message)}
-                    >
-                      {t('chat.modRemove')}
-                    </button>
-                  )}
-                  {onConnect &&
-                    !message.outgoing &&
-                    !friendSet.has(message.senderAccountId) &&
-                    !connectSent.has(message.senderAccountId) && (
-                      <button
-                        type="button"
-                        className="text-xs text-indigo-soft hover:text-ink"
-                        onClick={() => {
-                          setConnectFor(message)
-                          setConnectDraft('')
-                          setConnectError(null)
-                        }}
-                      >
-                        {t('connect.connect')}
-                      </button>
-                    )}
-                </div>
-              )}
-              {modRemoveFor?.seq === message.seq && onModRemove && (
-                <div
-                  className={`mt-1 flex items-center gap-2 rounded-md border border-danger/40 bg-danger/10 px-2 py-1 ${
-                    message.outgoing ? 'justify-end' : ''
-                  }`}
-                >
-                  <span className="text-[11px] text-ink-soft">{t('chat.modRemoveConfirm')}</span>
-                  <button
-                    type="button"
-                    className="btn-danger text-xs px-2 py-0.5"
-                    disabled={modRemoveBusy}
-                    onClick={async () => {
-                      setModRemoveBusy(true)
-                      try {
-                        await onModRemove(message)
-                        setModRemoveFor(null)
-                      } catch (err) {
-                        console.error('moderator removal failed', err)
-                      } finally {
-                        setModRemoveBusy(false)
-                      }
-                    }}
-                  >
-                    {t('chat.modRemove')}
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs text-ink-faint hover:text-ink"
-                    disabled={modRemoveBusy}
-                    onClick={() => setModRemoveFor(null)}
-                  >
-                    {t('common.cancel')}
-                  </button>
-                </div>
-              )}
-              {pickerFor === message.id && (
-                <div
-                  className={`flex items-center gap-1 mt-1 ${message.outgoing ? 'justify-end' : ''}`}
-                >
-                  {REACTIONS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      className="text-base hover:scale-125 transition-transform"
-                      onClick={() => message.id && applyReactionEmoji(message.id, emoji)}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                  {customFor === message.id ? (
-                    <input
-                      // biome-ignore lint/a11y/noAutofocus: focus is required to open the native emoji picker
-                      autoFocus
-                      className="w-14 text-base px-1 py-0.5"
-                      placeholder="🙂"
-                      aria-label={t('chat.moreEmoji')}
-                      onChange={(e) => {
-                        const emoji = firstEmoji(e.target.value)
-                        if (emoji && message.id) applyReactionEmoji(message.id, emoji)
-                      }}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      className="text-base text-ink-faint hover:text-ink px-1"
-                      title={t('chat.moreEmoji')}
-                      onClick={() => setCustomFor(message.id ?? null)}
-                    >
-                      ＋
-                    </button>
-                  )}
-                </div>
-              )}
-              {onPin && pinningFor === message.id && (
-                <div
-                  className={`flex items-center gap-1 mt-1 ${message.outgoing ? 'justify-end' : ''}`}
-                >
-                  <span className="text-[11px] text-ink-faint">{t('pins.pinFor')}</span>
-                  {PIN_DURATIONS.map((d) => (
-                    <button
-                      key={d.key}
-                      type="button"
-                      className="text-xs rounded-full border border-edge bg-overlay/40 px-1.5 py-0.5 hover:border-indigo-soft"
-                      onClick={() => {
-                        onPin(message, d.ms === null ? null : Date.now() + d.ms)
-                        setPinningFor(null)
-                      }}
-                    >
-                      {t(d.key)}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {reportFor?.seq === message.seq && (
-                <div className="mt-1 space-y-2 rounded-md border border-edge bg-overlay/60 p-2">
-                  <p className="text-[11px] font-medium text-ink-soft">
-                    {t('chat.reportReasonTitle')}
-                  </p>
-                  <select
-                    className="w-full bg-overlay border border-edge rounded-md px-2 py-1 text-sm"
-                    value={reportReason}
-                    onChange={(e) => setReportReason(e.target.value as ReportReason)}
-                  >
-                    {REPORT_REASONS.map((r) => (
-                      <option key={r.reason} value={r.reason}>
-                        {t(r.key)}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={reportNote}
-                    onChange={(e) => setReportNote(e.target.value)}
-                    placeholder={t('chat.reportNote')}
-                    className="w-full text-sm"
-                  />
-                  {reportError && <p className="text-[11px] text-danger">{reportError}</p>}
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="btn-gold text-xs px-3"
-                      disabled={reportBusy}
-                      onClick={() => void submitReport()}
-                    >
-                      {t('chat.reportSubmit')}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-quiet text-xs px-3"
-                      disabled={reportBusy}
-                      onClick={() => setReportFor(null)}
-                    >
-                      {t('common.cancel')}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {connectFor?.seq === message.seq && onConnect && (
-                <div className="mt-1 space-y-2 rounded-md border border-edge bg-overlay/60 p-2">
-                  <p className="text-[11px] font-medium text-ink-soft">
-                    {t('connect.title', { name: message.senderName || t('connect.thisPerson') })}
-                  </p>
-                  <textarea
-                    value={connectDraft}
-                    onChange={(e) => setConnectDraft(e.target.value)}
-                    placeholder={t('connect.messagePlaceholder')}
-                    rows={2}
-                    className="w-full text-sm"
-                  />
-                  {connectError && <p className="text-[11px] text-danger">{connectError}</p>}
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="btn-gold text-xs px-3"
-                      disabled={connectBusy || !connectDraft.trim()}
-                      onClick={() => void submitConnect()}
-                    >
-                      {t('connect.send')}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-quiet text-xs px-3"
-                      disabled={connectBusy}
-                      onClick={() => setConnectFor(null)}
-                    >
-                      {t('common.cancel')}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+              message={message}
+              quoted={!threaded && message.replyTo ? byId.get(message.replyTo) : null}
+              showSender={showSender}
+              myAccountId={myAccountId}
+              onReact={onReact}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onConsume={onConsume}
+              onPin={onPin}
+              onReport={onReport}
+              onModRemove={onModRemove}
+              onConnect={onConnect}
+              isFriend={friendSet.has(message.senderAccountId)}
+              onReply={onReply}
+              replyCount={replyCount}
+              onOpenThread={threaded ? openThreadFor : undefined}
+            />
           )
         })}
         <div ref={bottomRef} />
@@ -769,6 +282,7 @@ export function MessageThread({
               onChange={(e) => setDraft(e.target.value)}
               placeholder={ready ? t('chat.placeholder') : t('chat.cannotSend')}
               disabled={!ready}
+              // biome-ignore lint/a11y/noAutofocus: focus the composer on open
               autoFocus
             />
             <button
@@ -780,6 +294,27 @@ export function MessageThread({
             </button>
           </form>
         </div>
+      )}
+
+      {threaded && threadIndex && openThreadRoot && (
+        <ThreadView
+          rootId={openThreadRoot}
+          messages={messages}
+          index={threadIndex}
+          ready={ready}
+          onClose={() => setOpenThreadRoot(null)}
+          onSend={onSend}
+          myAccountId={myAccountId}
+          friendAccountIds={friendAccountIds}
+          onReact={onReact}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onConsume={onConsume}
+          onPin={onPin}
+          onReport={onReport}
+          onModRemove={onModRemove}
+          onConnect={onConnect}
+        />
       )}
     </>
   )
