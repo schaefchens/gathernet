@@ -18,9 +18,14 @@ const queryClient = new QueryClient({
 wirePresence()
 wsClient.on('friend.added', () => {
   void queryClient.invalidateQueries({ queryKey: ['friends'] })
+  void queryClient.invalidateQueries({ queryKey: ['connect-requests'] })
 })
 wsClient.on('friend.removed', () => {
   void queryClient.invalidateQueries({ queryKey: ['friends'] })
+})
+// A directed connect request arrived → refresh the inbox.
+wsClient.on('friend.request', () => {
+  void queryClient.invalidateQueries({ queryKey: ['connect-requests'] })
 })
 wsClient.on('session.revoked', () => {
   void useSession.getState().forgetDevice()

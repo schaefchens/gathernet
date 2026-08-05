@@ -62,6 +62,26 @@
     "forget": "Forget this device",
     "forgetConfirm": "This removes your keys and messages from this browser. You will need your recovery phrase to get back in. Continue?"
   },
+  "connect": {
+    "connect": "Connect",
+    "title": "Connect with {{name}}",
+    "thisPerson": "this person",
+    "messagePlaceholder": "Add a short message (who you are, why you'd like to connect)",
+    "send": "Send request",
+    "requestsTitle": "Connection requests",
+    "wantsToConnect": "would like to connect",
+    "unverified": "unverified",
+    "undecryptable": "Can't decrypt this request",
+    "accept": "Accept",
+    "decline": "Decline",
+    "outgoingTo": "Request sent to {{name}}",
+    "pending": "pending",
+    "cancel": "Cancel",
+    "errAlready": "You're already connected",
+    "errPending": "A request is already pending",
+    "errNotConnectable": "You can't connect with this person",
+    "errNoRecipients": "This person has no device to receive the request"
+  },
   "friends": {
     "title": "Friends",
     "empty": "No friends yet. Invite someone you trust.",

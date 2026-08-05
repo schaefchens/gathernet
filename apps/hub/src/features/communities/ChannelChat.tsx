@@ -1,7 +1,8 @@
-import type { ChannelAccess, ChannelPinPolicy, ChannelPostPolicy } from '@gathernet/shared'
+import type { ChannelAccess, ChannelPinPolicy, ChannelPostPolicy, Friend } from '@gathernet/shared'
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ApiError } from '../../lib/api.ts'
+import { ApiError, api } from '../../lib/api.ts'
 import { copyMedia } from '../../lib/media.ts'
 import { channelArtifactsStore } from '../../stores/channel-artifacts.ts'
 import { communityChatStore, useCommunityChat } from '../../stores/community-chat.ts'
@@ -61,6 +62,12 @@ export function ChannelChat({
   const myAccountId = useSession((s) => s.accountId)
   const threadRef = useRef<HTMLDivElement>(null)
   const [pinError, setPinError] = useState<string | null>(null)
+  // Friends list — so the per-message "Connect" affordance is hidden for existing friends.
+  const friends = useQuery({
+    queryKey: ['friends'],
+    queryFn: () => api<{ friends: Friend[] }>('GET', '/api/v1/friends'),
+  })
+  const friendAccountIds = friends.data?.friends.map((f) => f.accountId)
 
   /** Build a pin snapshot from a channel message and post it (a suggestion under
    *  moderators policy; the pinned bar reflects its status once it round-trips). A
@@ -217,6 +224,10 @@ export function ChannelChat({
                       )
                   : undefined
               }
+              onConnect={(message, intro) =>
+                communityChatStore.sendConnectRequest(message.senderAccountId, intro)
+              }
+              friendAccountIds={friendAccountIds}
               myAccountId={myAccountId ?? undefined}
               notReadyLabel={
                 status === 'rotation_pending'

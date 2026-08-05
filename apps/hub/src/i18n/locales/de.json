@@ -62,6 +62,26 @@
     "forget": "Dieses Gerät vergessen",
     "forgetConfirm": "Das entfernt deine Schlüssel und Nachrichten aus diesem Browser. Du brauchst deine Wiederherstellungsphrase, um wieder hineinzukommen. Fortfahren?"
   },
+  "connect": {
+    "connect": "Verbinden",
+    "title": "Mit {{name}} verbinden",
+    "thisPerson": "dieser Person",
+    "messagePlaceholder": "Kurze Nachricht (wer du bist, warum du dich verbinden möchtest)",
+    "send": "Anfrage senden",
+    "requestsTitle": "Verbindungsanfragen",
+    "wantsToConnect": "möchte sich verbinden",
+    "unverified": "unbestätigt",
+    "undecryptable": "Diese Anfrage kann nicht entschlüsselt werden",
+    "accept": "Annehmen",
+    "decline": "Ablehnen",
+    "outgoingTo": "Anfrage an {{name}} gesendet",
+    "pending": "ausstehend",
+    "cancel": "Abbrechen",
+    "errAlready": "Ihr seid bereits verbunden",
+    "errPending": "Eine Anfrage ist bereits offen",
+    "errNotConnectable": "Mit dieser Person kannst du dich nicht verbinden",
+    "errNoRecipients": "Diese Person hat kein Gerät für die Anfrage"
+  },
   "friends": {
     "title": "Freunde",
     "empty": "Noch keine Freunde. Lade jemanden ein, dem du vertraust.",

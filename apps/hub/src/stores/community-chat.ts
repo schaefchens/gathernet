@@ -14,6 +14,7 @@ import type {
   CommunityDevicesResponse,
   CommunityListItem,
   CommunityRoot,
+  ConnectRecipientsResponse,
   MailboxMessage,
   ModerationRecipientsResponse,
 } from '@gathernet/shared'
@@ -53,6 +54,7 @@ import {
   toStdB64,
   verifyCommunityRoot,
 } from '../lib/community-keys.ts'
+import { buildConnectRequest } from '../lib/connect.ts'
 import { encryptAndUpload } from '../lib/media.ts'
 import {
   consumeBody,
@@ -1179,6 +1181,25 @@ class CommunityChatStore {
     seq: number,
   ): Promise<void> {
     await api('DELETE', `/api/v1/communities/${communityId}/channels/${channelId}/messages/${seq}`)
+  }
+
+  /** Send a directed connect request to a community co-member: fetch their device receipt
+   *  keys, seal the intro to them, sign it, and POST. Server sees only opaque blobs. */
+  async sendConnectRequest(targetAccountId: string, message: string): Promise<void> {
+    const record = this.record ?? (await secureStore.getDevice())
+    if (!record) throw new Error('locked')
+    const { devices } = await api<ConnectRecipientsResponse>(
+      'GET',
+      `/api/v1/friends/connect-recipients/${targetAccountId}`,
+    )
+    const built = await buildConnectRequest(targetAccountId, message, devices, record)
+    if (built.recipients.length === 0) throw new Error('no_recipients')
+    await api('POST', '/api/v1/friends/requests', {
+      toAccountId: targetAccountId,
+      requesterDeviceId: built.requesterDeviceId,
+      requesterSig: built.requesterSig,
+      recipients: built.recipients,
+    })
   }
 
   /** Report a message to the channel's moderators: seal a snapshot to their device keys

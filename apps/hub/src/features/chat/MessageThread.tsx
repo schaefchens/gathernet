@@ -48,6 +48,11 @@ interface MessageThreadProps {
   /** moderator removes any member's message directly (channels only; shown when the
    *  viewer manages the channel) — hard-delete + tombstone, no report needed. */
   onModRemove?: ((message: StoredMessage) => Promise<void>) | undefined
+  /** send a directed connect (friend) request to a message's sender (channels only) with
+   *  a personal intro. Throws with a code the composer surfaces. */
+  onConnect?: ((message: StoredMessage, message_: string) => Promise<void>) | undefined
+  /** accountIds already friends with the viewer — connect is hidden for them */
+  friendAccountIds?: string[] | undefined
   /** the current account id — to show which reactions are mine + toggle correctly */
   myAccountId?: string | undefined
   /** shown in the body while `ready` is false */
@@ -104,6 +109,8 @@ export function MessageThread({
   onPin,
   onReport,
   onModRemove,
+  onConnect,
+  friendAccountIds,
   myAccountId,
   notReadyLabel,
   readOnly,
@@ -128,6 +135,36 @@ export function MessageThread({
   /** message a moderator is confirming removal of (inline, no native dialog) */
   const [modRemoveFor, setModRemoveFor] = useState<StoredMessage | null>(null)
   const [modRemoveBusy, setModRemoveBusy] = useState(false)
+  /** sender the viewer is composing a connect request to, + its form state */
+  const [connectFor, setConnectFor] = useState<StoredMessage | null>(null)
+  const [connectDraft, setConnectDraft] = useState('')
+  const [connectBusy, setConnectBusy] = useState(false)
+  const [connectError, setConnectError] = useState<string | null>(null)
+  const [connectSent, setConnectSent] = useState<Set<string>>(new Set())
+  const friendSet = useMemo(() => new Set(friendAccountIds ?? []), [friendAccountIds])
+
+  const submitConnect = async () => {
+    if (!connectFor || !onConnect) return
+    setConnectBusy(true)
+    setConnectError(null)
+    try {
+      await onConnect(connectFor, connectDraft.trim())
+      setConnectSent((s) => new Set(s).add(connectFor.senderAccountId))
+      setConnectFor(null)
+      setConnectDraft('')
+    } catch (err) {
+      const code = err instanceof Error ? err.message : String(err)
+      const map: Record<string, string> = {
+        already_friends: t('connect.errAlready'),
+        request_exists: t('connect.errPending'),
+        not_connectable: t('connect.errNotConnectable'),
+        no_recipients: t('connect.errNoRecipients'),
+      }
+      setConnectError(map[code] ?? code)
+    } finally {
+      setConnectBusy(false)
+    }
+  }
 
   const openReportPicker = (message: StoredMessage) => {
     setReportFor(message)
@@ -445,6 +482,22 @@ export function MessageThread({
                       {t('chat.modRemove')}
                     </button>
                   )}
+                  {onConnect &&
+                    !message.outgoing &&
+                    !friendSet.has(message.senderAccountId) &&
+                    !connectSent.has(message.senderAccountId) && (
+                      <button
+                        type="button"
+                        className="text-xs text-indigo-soft hover:text-ink"
+                        onClick={() => {
+                          setConnectFor(message)
+                          setConnectDraft('')
+                          setConnectError(null)
+                        }}
+                      >
+                        {t('connect.connect')}
+                      </button>
+                    )}
                 </div>
               )}
               {modRemoveFor?.seq === message.seq && onModRemove && (
@@ -577,6 +630,39 @@ export function MessageThread({
                       className="btn-quiet text-xs px-3"
                       disabled={reportBusy}
                       onClick={() => setReportFor(null)}
+                    >
+                      {t('common.cancel')}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {connectFor?.seq === message.seq && onConnect && (
+                <div className="mt-1 space-y-2 rounded-md border border-edge bg-overlay/60 p-2">
+                  <p className="text-[11px] font-medium text-ink-soft">
+                    {t('connect.title', { name: message.senderName || t('connect.thisPerson') })}
+                  </p>
+                  <textarea
+                    value={connectDraft}
+                    onChange={(e) => setConnectDraft(e.target.value)}
+                    placeholder={t('connect.messagePlaceholder')}
+                    rows={2}
+                    className="w-full text-sm"
+                  />
+                  {connectError && <p className="text-[11px] text-danger">{connectError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="btn-gold text-xs px-3"
+                      disabled={connectBusy || !connectDraft.trim()}
+                      onClick={() => void submitConnect()}
+                    >
+                      {t('connect.send')}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-quiet text-xs px-3"
+                      disabled={connectBusy}
+                      onClick={() => setConnectFor(null)}
                     >
                       {t('common.cancel')}
                     </button>

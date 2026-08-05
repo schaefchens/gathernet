@@ -16,12 +16,7 @@ import {
   importEciesPrivateKey,
   SIG_DOMAIN,
 } from '@gathernet/shared'
-import {
-  type DeviceResolver,
-  fromStdB64,
-  toStdB64,
-  verifyPeerReceiptKey,
-} from './community-keys.ts'
+import { fromStdB64, toStdB64, verifyDeviceCert, verifyPeerReceiptKey } from './community-keys.ts'
 import { loadCrypto } from './mls.ts'
 import type { DeviceRecord } from './storage.ts'
 
@@ -97,23 +92,26 @@ export async function buildConnectRequest(
   return { requesterDeviceId: record.deviceId, requesterSig: toStdB64(sig), recipients: sealed }
 }
 
-/** Open + verify an incoming connect request (this device is the target). Returns the intro
- *  and whether the requester's signature verified. */
+/** Open + verify an incoming connect request (this device is the target). The requester's
+ *  device cert travels with the entry, so verification is self-contained (no community
+ *  device lookup). Returns the intro and whether the requester's signature verified. */
 export async function openConnectRequest(
   entry: IncomingConnectRequest,
   myAccountId: string,
   record: DeviceRecord,
-  resolve: DeviceResolver,
 ): Promise<{ message: string; verified: boolean } | null> {
   if (!record.receiptPk || !record.receiptPrivPkcs8) return null
   try {
     const mls = await loadCrypto()
     const priv = await importEciesPrivateKey(toStdB64(record.receiptPrivPkcs8))
     const raw = await eciesOpen(priv, entry.senderPkB64, entry.sealed, record.receiptPk)
-    const dev = await resolve(entry.requesterDeviceId)
+    const dev = await verifyDeviceCert({
+      accountId: entry.fromAccountId,
+      deviceCert: entry.requesterDeviceCert,
+      certSig: entry.requesterCertSig,
+    })
     const verified =
       !!dev &&
-      dev.accountId === entry.fromAccountId &&
       mls.ed25519Verify(
         dev.devicePk,
         await connectTuple(entry.fromAccountId, myAccountId, raw),

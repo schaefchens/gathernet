@@ -431,6 +431,8 @@ export async function listConnectRequests(
       fromAccountId: friendRequests.fromAccountId,
       fromDisplayName: accounts.displayName,
       requesterDeviceId: friendRequests.requesterDeviceId,
+      requesterDeviceCert: devices.cert,
+      requesterCertSig: devices.certSig,
       requesterSig: friendRequests.requesterSig,
       sealed: friendRequestRecipients.sealed,
       senderPkB64: friendRequestRecipients.senderPkB64,
@@ -439,6 +441,7 @@ export async function listConnectRequests(
     .from(friendRequests)
     .innerJoin(friendRequestRecipients, eq(friendRequestRecipients.requestId, friendRequests.id))
     .innerJoin(accounts, eq(accounts.accountId, friendRequests.fromAccountId))
+    .innerJoin(devices, eq(devices.deviceId, friendRequests.requesterDeviceId))
     .where(
       and(
         eq(friendRequests.toAccountId, accountId),
@@ -467,6 +470,8 @@ export async function listConnectRequests(
       fromDisplayName: r.fromDisplayName,
       requesterDeviceId:
         r.requesterDeviceId as ConnectRequestsResponse['incoming'][number]['requesterDeviceId'],
+      requesterDeviceCert: r.requesterDeviceCert.toString('base64'),
+      requesterCertSig: r.requesterCertSig.toString('base64'),
       requesterSig: r.requesterSig.toString('base64'),
       sealed: r.sealed.toString('base64'),
       senderPkB64: r.senderPkB64,

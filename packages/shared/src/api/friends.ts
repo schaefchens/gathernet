@@ -98,6 +98,10 @@ export const incomingConnectRequestSchema = z.object({
   fromAccountId: accountIdSchema,
   fromDisplayName: z.string(),
   requesterDeviceId: deviceIdSchema,
+  /** the requester device's cert + signature, so the intro's signature can be verified
+   *  self-containedly (no community-scoped device lookup needed on the friends page) */
+  requesterDeviceCert: z.base64(),
+  requesterCertSig: z.base64(),
   requesterSig: z.base64(),
   sealed: z.base64(),
   senderPkB64: z.base64(),
