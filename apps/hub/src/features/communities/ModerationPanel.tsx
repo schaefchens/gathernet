@@ -3,11 +3,17 @@ import type {
   ChannelMemberEntry,
   ChannelMembersResponse,
   CommunityMember,
+  ListReportsResponse,
+  ReportEntry,
 } from '@gathernet/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../lib/api.ts'
+import { makeDeviceResolver } from '../../lib/community-keys.ts'
+import { openReport, type ReportBody } from '../../lib/reports.ts'
+import { secureStore } from '../../lib/storage.ts'
+import { wsClient } from '../../lib/ws-client.ts'
 import { communityChatStore } from '../../stores/community-chat.ts'
 
 interface ModerationPanelProps {
@@ -56,6 +62,25 @@ export function ModerationPanel({
   }
 
   const base = `/api/v1/communities/${communityId}/channels/${channelId}`
+
+  const reportsKey = ['channel-reports', communityId, channelId]
+  const reports = useQuery({
+    queryKey: reportsKey,
+    queryFn: () => api<ListReportsResponse>('GET', `${base}/reports`),
+  })
+  const refreshReports = () =>
+    queryClient.invalidateQueries({ queryKey: ['channel-reports', communityId, channelId] })
+
+  // A new report arrives over the WS → refetch the queue.
+  useEffect(() => {
+    return wsClient.on('community.channel_report_created', (m) => {
+      if (m.payload.channelId === channelId) {
+        void queryClient.invalidateQueries({
+          queryKey: ['channel-reports', communityId, channelId],
+        })
+      }
+    })
+  }, [channelId, communityId, queryClient])
 
   const resolveRequest = useMutation({
     mutationFn: (input: { accountId: string; action: 'accept' | 'decline' }) =>
@@ -115,6 +140,31 @@ export function ModerationPanel({
       <h2 className="font-medium text-ink-soft">{t('communities.moderation')}</h2>
 
       {roster.isLoading && <p className="text-sm text-ink-soft">{t('common.loading')}</p>}
+
+      {/* reported messages */}
+      <section className="space-y-2">
+        <h3 className="text-xs uppercase tracking-wide text-ink-faint">
+          {t('communities.reports')}
+        </h3>
+        {(reports.data?.reports.length ?? 0) === 0 ? (
+          <p className="text-sm text-ink-faint">{t('communities.noReports')}</p>
+        ) : (
+          <ul className="space-y-2">
+            {reports.data?.reports.map((entry) => (
+              <ReportRow
+                key={entry.reportId}
+                entry={entry}
+                communityId={communityId}
+                channelId={channelId}
+                base={base}
+                members={members}
+                leaderIds={communityLeaderIds}
+                onResolved={() => void refreshReports()}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
 
       {/* pending join requests */}
       <section className="space-y-2">
@@ -311,6 +361,164 @@ function MemberRow({
           {t('communities.kickFromChannel')}
         </button>
       )}
+    </li>
+  )
+}
+
+type DecodedReport = { body: ReportBody; reporterAccountId: string | null; verified: boolean }
+
+const REASON_KEY = {
+  spam: 'chat.reportReasonSpam',
+  abuse: 'chat.reportReasonAbuse',
+  inappropriate: 'chat.reportReasonInappropriate',
+  safety: 'chat.reportReasonSafety',
+  other: 'chat.reportReasonOther',
+} as const
+
+/**
+ * One report in the moderation queue. The sealed envelope is decrypted + verified
+ * client-side (the server never sees the content); a moderator can then remove the
+ * reported message, kick its author, or dismiss the report.
+ */
+function ReportRow({
+  entry,
+  communityId,
+  channelId,
+  base,
+  members,
+  leaderIds,
+  onResolved,
+}: {
+  entry: ReportEntry
+  communityId: string
+  channelId: string
+  base: string
+  members: CommunityMember[]
+  leaderIds: Set<string>
+  onResolved: () => void
+}) {
+  const { t } = useTranslation()
+  const [dec, setDec] = useState<DecodedReport | null | 'pending'>('pending')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const record = await secureStore.getDevice()
+      if (!record) {
+        if (alive) setDec(null)
+        return
+      }
+      const resolve = makeDeviceResolver([], { communityId })
+      const r = await openReport(entry, record, resolve)
+      if (alive) setDec(r)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [entry, communityId])
+
+  const act = async (fn: () => Promise<void>) => {
+    setBusy(true)
+    try {
+      await fn()
+      onResolved()
+    } catch (err) {
+      console.error('report action failed', err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const resolve = async (action: 'resolve' | 'dismiss'): Promise<void> => {
+    await api('PATCH', `${base}/reports/${entry.reportId}`, { action })
+  }
+
+  if (dec === 'pending') {
+    return (
+      <li className="bg-overlay rounded-md px-3 py-2 text-xs text-ink-faint">
+        {t('common.loading')}
+      </li>
+    )
+  }
+  if (dec === null) {
+    return (
+      <li className="bg-overlay rounded-md px-3 py-2 text-xs text-ink-faint">
+        {t('communities.reportUndecryptable')}
+      </li>
+    )
+  }
+
+  const { body, verified } = dec
+  const authorName =
+    body.authorName ??
+    members.find((m) => m.accountId === body.authorAccountId)?.displayName ??
+    body.authorAccountId
+  const authorIsLeader = leaderIds.has(body.authorAccountId)
+
+  return (
+    <li className="space-y-2 bg-overlay rounded-md px-3 py-2">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="rounded-full border border-edge px-1.5 py-0.5 text-ink-soft">
+          {t(REASON_KEY[body.reason])}
+        </span>
+        {!verified && (
+          <span className="rounded-full border border-danger/50 px-1.5 py-0.5 text-danger">
+            {t('communities.reportUnverified')}
+          </span>
+        )}
+        <span className="ml-auto text-ink-faint">
+          {t('communities.reportedAuthor')}: {authorName}
+        </span>
+      </div>
+      <p className="text-sm break-words">
+        {body.content.text ? (
+          body.content.text
+        ) : body.content.mediaName ? (
+          <span className="text-ink-soft">📎 {body.content.mediaName}</span>
+        ) : (
+          <span className="italic text-ink-faint">—</span>
+        )}
+      </p>
+      {body.note && <p className="text-xs text-ink-faint italic">“{body.note}”</p>}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="btn-danger text-xs px-2 py-1"
+          disabled={busy}
+          onClick={() =>
+            void act(async () => {
+              await communityChatStore.removeMessageAsModerator(communityId, channelId, body.seq)
+              await resolve('resolve')
+            })
+          }
+        >
+          {t('communities.reportRemoveMessage')}
+        </button>
+        {!authorIsLeader && (
+          <button
+            type="button"
+            className="btn-danger text-xs px-2 py-1"
+            disabled={busy}
+            onClick={() =>
+              void act(async () => {
+                await api('POST', `${base}/kick/${body.authorAccountId}`, {})
+                await resolve('resolve')
+              })
+            }
+          >
+            {t('communities.reportKickAuthor')}
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn-quiet text-xs px-2 py-1"
+          disabled={busy}
+          onClick={() => void act(() => resolve('dismiss'))}
+        >
+          {t('communities.reportDismiss')}
+        </button>
+      </div>
     </li>
   )
 }

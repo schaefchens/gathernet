@@ -204,6 +204,9 @@ export function ChannelChat({
               }
               onConsume={(targetId) => void communityChatStore.consumeViewOnce(channelId, targetId)}
               onPin={pinMessage}
+              onReport={(message, reason, note) =>
+                communityChatStore.reportMessage(communityId, channelId, message, reason, note)
+              }
               myAccountId={myAccountId ?? undefined}
               notReadyLabel={
                 status === 'rotation_pending'

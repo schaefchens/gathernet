@@ -1,8 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
 import { MediaAttachment } from './MediaAttachment.tsx'
 import { VoiceRecorder } from './VoiceRecorder.tsx'
+
+/** Report reasons offered in the picker (labels via literal i18n keys for the typed t()). */
+const REPORT_REASONS: {
+  reason: ReportReason
+  key:
+    | 'chat.reportReasonSpam'
+    | 'chat.reportReasonAbuse'
+    | 'chat.reportReasonInappropriate'
+    | 'chat.reportReasonSafety'
+    | 'chat.reportReasonOther'
+}[] = [
+  { reason: 'spam', key: 'chat.reportReasonSpam' },
+  { reason: 'abuse', key: 'chat.reportReasonAbuse' },
+  { reason: 'inappropriate', key: 'chat.reportReasonInappropriate' },
+  { reason: 'safety', key: 'chat.reportReasonSafety' },
+  { reason: 'other', key: 'chat.reportReasonOther' },
+]
 
 interface MessageThreadProps {
   messages: StoredMessage[]
@@ -24,6 +42,9 @@ interface MessageThreadProps {
   /** pin/suggest this message as a channel artifact (channels only); expiresAt is
    *  epoch-millis for a time-limited pin, or null for "forever" */
   onPin?: (message: StoredMessage, expiresAt: number | null) => void
+  /** report a message to the channel's moderators (channels only) — seals a snapshot
+   *  to the mods' keys. Throws with a code ('no_moderators') the picker surfaces. */
+  onReport?: (message: StoredMessage, reason: ReportReason, note?: string) => Promise<void>
   /** the current account id — to show which reactions are mine + toggle correctly */
   myAccountId?: string | undefined
   /** shown in the body while `ready` is false */
@@ -78,6 +99,7 @@ export function MessageThread({
   onDelete,
   onConsume,
   onPin,
+  onReport,
   myAccountId,
   notReadyLabel,
   readOnly,
@@ -93,6 +115,34 @@ export function MessageThread({
   const [pinningFor, setPinningFor] = useState<string | null>(null)
   const [editingFor, setEditingFor] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState('')
+  /** message whose report reason-picker is open, + its transient form state */
+  const [reportFor, setReportFor] = useState<StoredMessage | null>(null)
+  const [reportReason, setReportReason] = useState<ReportReason>('inappropriate')
+  const [reportNote, setReportNote] = useState('')
+  const [reportBusy, setReportBusy] = useState(false)
+  const [reportError, setReportError] = useState<string | null>(null)
+
+  const openReportPicker = (message: StoredMessage) => {
+    setReportFor(message)
+    setReportReason('inappropriate')
+    setReportNote('')
+    setReportError(null)
+  }
+
+  const submitReport = async () => {
+    if (!reportFor || !onReport) return
+    setReportBusy(true)
+    setReportError(null)
+    try {
+      await onReport(reportFor, reportReason, reportNote.trim() || undefined)
+      setReportFor(null)
+    } catch (err) {
+      const code = err instanceof Error ? err.message : String(err)
+      setReportError(code === 'no_moderators' ? t('chat.reportNoMods') : code)
+    } finally {
+      setReportBusy(false)
+    }
+  }
   const [viewOnce, setViewOnce] = useState(false)
   // Content captured at reveal time so a view-once message can be shown for this
   // one session even though its persisted copy is destroyed immediately on open.
@@ -370,6 +420,15 @@ export function MessageThread({
                       {t('chat.delete')}
                     </button>
                   )}
+                  {onReport && !message.outgoing && (
+                    <button
+                      type="button"
+                      className="text-xs text-ink-faint hover:text-danger"
+                      onClick={() => openReportPicker(message)}
+                    >
+                      {t('chat.report')}
+                    </button>
+                  )}
                 </div>
               )}
               {pickerFor === message.id && (
@@ -428,6 +487,49 @@ export function MessageThread({
                       {t(d.key)}
                     </button>
                   ))}
+                </div>
+              )}
+              {reportFor?.seq === message.seq && (
+                <div className="mt-1 space-y-2 rounded-md border border-edge bg-overlay/60 p-2">
+                  <p className="text-[11px] font-medium text-ink-soft">
+                    {t('chat.reportReasonTitle')}
+                  </p>
+                  <select
+                    className="w-full bg-overlay border border-edge rounded-md px-2 py-1 text-sm"
+                    value={reportReason}
+                    onChange={(e) => setReportReason(e.target.value as ReportReason)}
+                  >
+                    {REPORT_REASONS.map((r) => (
+                      <option key={r.reason} value={r.reason}>
+                        {t(r.key)}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={reportNote}
+                    onChange={(e) => setReportNote(e.target.value)}
+                    placeholder={t('chat.reportNote')}
+                    className="w-full text-sm"
+                  />
+                  {reportError && <p className="text-[11px] text-danger">{reportError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className="btn-gold text-xs px-3"
+                      disabled={reportBusy}
+                      onClick={() => void submitReport()}
+                    >
+                      {t('chat.reportSubmit')}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-quiet text-xs px-3"
+                      disabled={reportBusy}
+                      onClick={() => setReportFor(null)}
+                    >
+                      {t('common.cancel')}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

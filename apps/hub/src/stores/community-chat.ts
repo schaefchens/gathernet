@@ -15,6 +15,7 @@ import type {
   CommunityListItem,
   CommunityRoot,
   MailboxMessage,
+  ModerationRecipientsResponse,
 } from '@gathernet/shared'
 import { create } from 'zustand'
 import { ApiError, api } from '../lib/api.ts'
@@ -76,11 +77,13 @@ import {
   ingestBody,
 } from '../lib/message-ingest.ts'
 import { type HubCrypto, loadCrypto, type MlsDeviceHandle } from '../lib/mls.ts'
+import { buildReport, type ReportBody, type ReportReason } from '../lib/reports.ts'
 import {
   channelStore,
   type DeviceRecord,
   messageStore,
   type StoredMessage,
+  secureStore,
 } from '../lib/storage.ts'
 import { wsClient } from '../lib/ws-client.ts'
 import { useSession } from './session.ts'
@@ -1176,6 +1179,44 @@ class CommunityChatStore {
     seq: number,
   ): Promise<void> {
     await api('DELETE', `/api/v1/communities/${communityId}/channels/${channelId}/messages/${seq}`)
+  }
+
+  /** Report a message to the channel's moderators: seal a snapshot to their device keys
+   *  (only mods decrypt) and POST it. The server stores opaque blobs — never the content. */
+  async reportMessage(
+    communityId: string,
+    channelId: string,
+    message: StoredMessage,
+    reason: ReportReason,
+    note?: string,
+  ): Promise<void> {
+    const record = this.record ?? (await secureStore.getDevice())
+    if (!record) throw new Error('locked')
+    const { devices } = await api<ModerationRecipientsResponse>(
+      'GET',
+      `/api/v1/communities/${communityId}/channels/${channelId}/moderation-recipients`,
+    )
+    const content: ReportBody['content'] = {}
+    if (message.text) content.text = message.text
+    if (message.media?.name) content.mediaName = message.media.name
+    const body: ReportBody = {
+      v: 1,
+      channelId,
+      seq: message.seq,
+      authorAccountId: message.senderAccountId,
+      reason,
+      content,
+    }
+    if (message.senderName) body.authorName = message.senderName
+    if (note) body.note = note
+    const built = await buildReport(channelId, body, devices, record)
+    if (built.recipients.length === 0) throw new Error('no_moderators')
+    await api('POST', `/api/v1/communities/${communityId}/channels/${channelId}/reports`, {
+      reportId: built.reportId,
+      reporterDeviceId: built.reporterDeviceId,
+      reporterSig: built.reporterSig,
+      recipients: built.recipients,
+    })
   }
 
   /** Encode + send a message body over the channel's transport (MLS or group_key). */
