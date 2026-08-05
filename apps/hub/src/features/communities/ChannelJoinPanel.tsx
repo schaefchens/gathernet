@@ -45,7 +45,7 @@ export function ChannelJoinPanel({
   }
 
   return (
-    <div className="card grid place-items-center h-[calc(100vh-11rem)] text-center">
+    <div className="card grid place-items-center h-[calc(100dvh-13rem)] md:h-auto md:flex-1 md:min-h-0 text-center">
       <div className="max-w-sm space-y-4">
         <p className="text-4xl" aria-hidden>
           {locked ? '🔒' : (emoji ?? '💬')}

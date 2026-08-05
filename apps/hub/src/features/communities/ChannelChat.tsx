@@ -116,7 +116,7 @@ export function ChannelChat({
     status === 'pending' ? t('communities.channelPending') : t('communities.channelJoining')
 
   return (
-    <div className="flex flex-col h-[calc(100vh-11rem)] card p-4">
+    <div className="flex flex-col h-[calc(100dvh-13rem)] md:h-auto md:flex-1 md:min-h-0 card p-4">
       <div className="pb-3 border-b border-edge">
         <div className="flex items-center gap-2">
           {avatarMediaId ? (

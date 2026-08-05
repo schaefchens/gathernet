@@ -145,7 +145,10 @@ function CommunityDetailScreen() {
   }
 
   return (
-    <div className="space-y-4">
+    // On md+ the page fills the viewport and the channel pane flexes to the remaining
+    // space (no magic-number height that overruns when a description / tab row is present).
+    // On mobile it's normal document flow; the pane uses a dvh-based fallback height.
+    <div className="space-y-4 md:h-[calc(100dvh-7rem)] md:flex md:flex-col md:gap-4 md:space-y-0">
       <div className="flex items-center gap-3">
         <Link
           to="/communities"
@@ -198,8 +201,8 @@ function CommunityDetailScreen() {
         />
       )}
 
-      <div className="grid md:grid-cols-3 gap-4">
-        <div className="md:col-span-1 space-y-4">
+      <div className="grid md:grid-cols-3 gap-4 md:flex-1 md:min-h-0">
+        <div className="md:col-span-1 space-y-4 md:overflow-y-auto md:min-h-0">
           <section className="card space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-medium text-ink-soft">{t('communities.channels')}</h2>
@@ -254,7 +257,7 @@ function CommunityDetailScreen() {
           {isLeader && <InvitePanel communityId={communityId} />}
         </div>
 
-        <div className="md:col-span-2">
+        <div className="md:col-span-2 md:min-h-0 md:flex md:flex-col">
           {selectedChannel ? (
             <ChannelWorkspace
               key={selectedChannel.channelId}
@@ -267,7 +270,7 @@ function CommunityDetailScreen() {
               onDeleteChannel={onDeleteChannel}
             />
           ) : (
-            <div className="card grid place-items-center h-[calc(100vh-11rem)] text-ink-soft">
+            <div className="card grid place-items-center h-[50vh] md:h-auto md:flex-1 text-ink-soft">
               {t('communities.selectChannel')}
             </div>
           )}
@@ -384,7 +387,7 @@ function ChannelWorkspace({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 md:h-full md:flex md:flex-col md:gap-3 md:space-y-0 md:min-h-0">
       {(isManager || canEdit) && (
         <div className="flex gap-2">
           <TabButton active={view === 'chat'} onClick={() => setView('chat')}>
@@ -433,7 +436,7 @@ function ChannelWorkspace({
       )}
 
       {view === 'settings' && canEdit && (
-        <div className="card h-[calc(100vh-12.5rem)] overflow-y-auto">
+        <div className="card overflow-y-auto h-[calc(100dvh-13rem)] md:h-auto md:flex-1 md:min-h-0">
           <ChannelSettingsForm
             key={meta ? 'loaded' : 'empty'}
             communityId={communityId}
