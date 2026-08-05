@@ -228,6 +228,7 @@ export function ChannelChat({
                 communityChatStore.sendConnectRequest(message.senderAccountId, intro)
               }
               friendAccountIds={friendAccountIds}
+              threaded
               myAccountId={myAccountId ?? undefined}
               notReadyLabel={
                 status === 'rotation_pending'

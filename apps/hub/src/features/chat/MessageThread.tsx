@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
+import { buildThreadIndex } from '../../lib/thread-index.ts'
 import { MediaAttachment } from './MediaAttachment.tsx'
 import { VoiceRecorder } from './VoiceRecorder.tsx'
 
@@ -53,6 +54,9 @@ interface MessageThreadProps {
   onConnect?: ((message: StoredMessage, message_: string) => Promise<void>) | undefined
   /** accountIds already friends with the viewer — connect is hidden for them */
   friendAccountIds?: string[] | undefined
+  /** channels only: show a "N replies" chip on messages that started a thread. (The
+   *  thread view + reply-hiding land in a later stage; for now the chip is informational.) */
+  threaded?: boolean | undefined
   /** the current account id — to show which reactions are mine + toggle correctly */
   myAccountId?: string | undefined
   /** shown in the body while `ready` is false */
@@ -111,6 +115,7 @@ export function MessageThread({
   onModRemove,
   onConnect,
   friendAccountIds,
+  threaded,
   myAccountId,
   notReadyLabel,
   readOnly,
@@ -243,6 +248,12 @@ export function MessageThread({
     return m
   }, [messages])
 
+  // Thread index (channels only) — powers the "N replies" chip now; the thread view later.
+  const threadIndex = useMemo(
+    () => (threaded ? buildThreadIndex(messages) : null),
+    [threaded, messages],
+  )
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [])
@@ -300,6 +311,8 @@ export function MessageThread({
           const canAct = !!message.id && !!onReact && !message.deletedAt && !spent && !needsReveal
           const canEdit =
             !!message.id && message.outgoing && !message.deletedAt && !message.once && !spent
+          const replyCount =
+            threadIndex && message.id ? (threadIndex.descendantCount.get(message.id) ?? 0) : 0
           return (
             <div
               key={message.seq}
@@ -385,6 +398,15 @@ export function MessageThread({
                   })}
                 </p>
               </div>
+
+              {/* Thread indicator (channels) — count of replies beneath this message. */}
+              {replyCount > 0 && (
+                <div className={`mt-0.5 ${message.outgoing ? 'text-right' : ''}`}>
+                  <span className="text-xs text-indigo-soft">
+                    💬 {t('chat.replies', { count: replyCount })}
+                  </span>
+                </div>
+              )}
 
               {/* Reaction pills */}
               {reactions.length > 0 && (

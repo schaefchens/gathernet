@@ -144,6 +144,8 @@
     "deleted": "This message was deleted",
     "removedByModerator": "This message was removed by a moderator",
     "report": "Report",
+    "replies_one": "{{count}} reply",
+    "replies_other": "{{count}} replies",
     "modRemove": "Remove",
     "modRemoveConfirm": "Remove this message for everyone?",
     "reportReasonTitle": "Report this message",
