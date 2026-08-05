@@ -45,6 +45,9 @@ interface MessageThreadProps {
   /** report a message to the channel's moderators (channels only) — seals a snapshot
    *  to the mods' keys. Throws with a code ('no_moderators') the picker surfaces. */
   onReport?: (message: StoredMessage, reason: ReportReason, note?: string) => Promise<void>
+  /** moderator removes any member's message directly (channels only; shown when the
+   *  viewer manages the channel) — hard-delete + tombstone, no report needed. */
+  onModRemove?: ((message: StoredMessage) => Promise<void>) | undefined
   /** the current account id — to show which reactions are mine + toggle correctly */
   myAccountId?: string | undefined
   /** shown in the body while `ready` is false */
@@ -100,6 +103,7 @@ export function MessageThread({
   onConsume,
   onPin,
   onReport,
+  onModRemove,
   myAccountId,
   notReadyLabel,
   readOnly,
@@ -121,6 +125,9 @@ export function MessageThread({
   const [reportNote, setReportNote] = useState('')
   const [reportBusy, setReportBusy] = useState(false)
   const [reportError, setReportError] = useState<string | null>(null)
+  /** message a moderator is confirming removal of (inline, no native dialog) */
+  const [modRemoveFor, setModRemoveFor] = useState<StoredMessage | null>(null)
+  const [modRemoveBusy, setModRemoveBusy] = useState(false)
 
   const openReportPicker = (message: StoredMessage) => {
     setReportFor(message)
@@ -429,6 +436,50 @@ export function MessageThread({
                       {t('chat.report')}
                     </button>
                   )}
+                  {onModRemove && !message.outgoing && (
+                    <button
+                      type="button"
+                      className="text-xs text-danger/80 hover:text-danger"
+                      onClick={() => setModRemoveFor(message)}
+                    >
+                      {t('chat.modRemove')}
+                    </button>
+                  )}
+                </div>
+              )}
+              {modRemoveFor?.seq === message.seq && onModRemove && (
+                <div
+                  className={`mt-1 flex items-center gap-2 rounded-md border border-danger/40 bg-danger/10 px-2 py-1 ${
+                    message.outgoing ? 'justify-end' : ''
+                  }`}
+                >
+                  <span className="text-[11px] text-ink-soft">{t('chat.modRemoveConfirm')}</span>
+                  <button
+                    type="button"
+                    className="btn-danger text-xs px-2 py-0.5"
+                    disabled={modRemoveBusy}
+                    onClick={async () => {
+                      setModRemoveBusy(true)
+                      try {
+                        await onModRemove(message)
+                        setModRemoveFor(null)
+                      } catch (err) {
+                        console.error('moderator removal failed', err)
+                      } finally {
+                        setModRemoveBusy(false)
+                      }
+                    }}
+                  >
+                    {t('chat.modRemove')}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs text-ink-faint hover:text-ink"
+                    disabled={modRemoveBusy}
+                    onClick={() => setModRemoveFor(null)}
+                  >
+                    {t('common.cancel')}
+                  </button>
                 </div>
               )}
               {pickerFor === message.id && (

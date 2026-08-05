@@ -124,6 +124,8 @@
     "deleted": "Diese Nachricht wurde gelöscht",
     "removedByModerator": "Diese Nachricht wurde von einer Moderation entfernt",
     "report": "Melden",
+    "modRemove": "Entfernen",
+    "modRemoveConfirm": "Diese Nachricht für alle entfernen?",
     "reportReasonTitle": "Diese Nachricht melden",
     "reportNote": "Kontext hinzufügen (optional)",
     "reportSubmit": "Meldung senden",

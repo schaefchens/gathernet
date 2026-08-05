@@ -207,6 +207,16 @@ export function ChannelChat({
               onReport={(message, reason, note) =>
                 communityChatStore.reportMessage(communityId, channelId, message, reason, note)
               }
+              onModRemove={
+                isManager
+                  ? (message) =>
+                      communityChatStore.removeMessageAsModerator(
+                        communityId,
+                        channelId,
+                        message.seq,
+                      )
+                  : undefined
+              }
               myAccountId={myAccountId ?? undefined}
               notReadyLabel={
                 status === 'rotation_pending'
