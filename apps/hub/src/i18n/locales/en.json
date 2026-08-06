@@ -497,6 +497,8 @@
     "window_20160": "14 days",
     "window_43200": "30 days",
     "removed_one": "{{count}} member removed",
-    "removed_other": "{{count}} members removed"
+    "removed_other": "{{count}} members removed",
+    "exempt": "You're exempt — moderators and the owner are never removed.",
+    "openManager": "Waiting for members to confirm until {{deadline}}."
   }
 }

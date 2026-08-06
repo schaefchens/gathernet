@@ -490,10 +490,16 @@ export function PinnedBar({
                 >
                   <p className="text-xs text-ink">
                     <span aria-hidden>🙋 </span>
-                    {closed ? t('rollcall.closed') : t('rollcall.open', { deadline })}
+                    {closed
+                      ? t('rollcall.closed')
+                      : isManager
+                        ? t('rollcall.openManager', { deadline })
+                        : t('rollcall.open', { deadline })}
                   </p>
                   <div className="flex items-center gap-2">
-                    {!closed && !a.artifact.respondedByMe && (
+                    {/* Managers + the owner are exempt from the sweep, so never ask THEM to
+                        confirm — it would be a prompt with no consequence. */}
+                    {!closed && !isManager && !a.artifact.respondedByMe && (
                       <button
                         type="button"
                         className="btn-gold text-xs px-2 py-0.5"
@@ -502,8 +508,11 @@ export function PinnedBar({
                         {t('rollcall.confirm')}
                       </button>
                     )}
-                    {!closed && a.artifact.respondedByMe && (
+                    {!closed && !isManager && a.artifact.respondedByMe && (
                       <span className="text-[11px] text-olive">{t('rollcall.confirmed')}</span>
+                    )}
+                    {!closed && isManager && (
+                      <span className="text-[11px] text-ink-faint">{t('rollcall.exempt')}</span>
                     )}
                     <span className="text-[11px] text-ink-faint">
                       {t('rollcall.responses', { count: a.artifact.responseCount })}
