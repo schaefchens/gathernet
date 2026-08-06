@@ -73,7 +73,8 @@ export interface VerifiedArtifact {
   /** active = a real pin; suggested = awaiting manager approval; invalid = failed verification */
   status: ArtifactStatus
   issuerAccountId: string | null
-  /** RSVP tally (events): count of verified participants + whether the current user is in */
+  /** RSVP tally (events): APPROXIMATE server count of anonymous tickets + whether THIS
+   *  DEVICE holds a ticket (RSVP state is device-local by design — see rsvpTicketStore). */
   tally: { count: number; mine: boolean }
 }
 
@@ -144,39 +145,16 @@ function participationTuple(channelId: string, artifactId: string): Uint8Array {
   )
 }
 
-/** Sign a participation record (this device attests the account is participating). */
-export async function buildParticipation(
-  channelId: string,
-  artifactId: string,
-  record: DeviceRecord,
-): Promise<{ deviceId: string; sig: string }> {
-  const mls = await loadCrypto()
-  const sig = mls.ed25519Sign(record.deviceSecret, participationTuple(channelId, artifactId))
-  return { deviceId: record.deviceId, sig: toStdB64(sig) }
+/** A fresh random RSVP ticket (bearer secret, kept device-local) + its SHA-256 hex hash.
+ *  The server only ever sees the hash, so no (account → coming) fact is stored. */
+export async function newRsvpTicket(): Promise<{ ticket: string; ticketHash: string }> {
+  const ticket = toStdB64(crypto.getRandomValues(new Uint8Array(32)))
+  return { ticket, ticketHash: await sha256Hex(ticket) }
 }
 
-/**
- * Count the DISTINCT accounts genuinely participating in an artifact: each row's
- * device signature must verify and the device must resolve to the claimed account
- * (so the server can't inflate the count). Returns the count + whether `me` is in.
- */
-export async function tallyParticipants(
-  a: ChannelArtifact,
-  me: string | null,
-  resolve: DeviceResolver,
-): Promise<{ count: number; mine: boolean }> {
-  const mls = await loadCrypto()
-  const tuple = participationTuple(a.channelId, a.artifactId)
-  const accounts = new Set<string>()
-  let mine = false
-  for (const p of a.participants) {
-    const dev = await resolve(p.deviceId)
-    if (!dev || dev.accountId !== p.accountId) continue
-    if (!mls.ed25519Verify(dev.devicePk, tuple, fromStdB64(p.sig))) continue
-    accounts.add(p.accountId)
-    if (p.accountId === me) mine = true
-  }
-  return { count: accounts.size, mine }
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(text))
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 /** What `buildArtifact` returns — shaped for the POST /artifacts body. */

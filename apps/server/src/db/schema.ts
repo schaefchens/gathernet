@@ -947,11 +947,39 @@ export const channelArtifacts = pgTable(
 )
 
 /**
- * Participation in a pinned artifact (RSVP for events) — each member owns exactly one
- * row per artifact (own-account-only write). `sig` is the participant device's
- * attestation (verified client-side) so the count can't be forged by the server. The
- * count is derived client-side; big channels render count-only (no name list) to
- * honour the no-roster rule.
+ * ANONYMOUS event RSVP. A member's client generates a random ticket, keeps it locally, and
+ * sends only `SHA-256(ticket)`; withdrawing means presenting the preimage. There is
+ * deliberately **no accountId here** — a seized database shows tickets with no owners, so
+ * "who is coming" is not a stored fact. The tradeoff, accepted: without an identity nothing
+ * enforces one-ticket-per-member, so counts are APPROXIMATE (two organisers can count the
+ * same couple twice — a social reconciliation, not a crypto problem). Ticket VALUES are never
+ * returned to clients: a ticket is a bearer capability, so exposing them would let any member
+ * withdraw someone else's RSVP.
+ */
+export const channelArtifactTickets = pgTable(
+  'channel_artifact_tickets',
+  {
+    artifactId: text('artifact_id')
+      .notNull()
+      .references(() => channelArtifacts.artifactId, { onDelete: 'cascade' }),
+    /** SHA-256 of the client-held random ticket (hex) — the preimage never reaches us */
+    ticketHash: text('ticket_hash').notNull(),
+    channelId: text('channel_id')
+      .notNull()
+      .references(() => communityChannels.channelId),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.artifactId, t.ticketHash] }),
+    index('channel_artifact_tickets_channel_idx').on(t.channelId),
+  ],
+)
+
+/**
+ * IDENTIFIED participation in an artifact — used by roll-calls ("who is still here"), where
+ * knowing who did NOT respond is the whole point. `sig` is the participant device's
+ * attestation (verified client-side) so responses can't be forged by the server. Visible to
+ * MANAGERS ONLY; members see counts, never the list (the no-roster rule).
  */
 export const channelArtifactParticipants = pgTable(
   'channel_artifact_participants',

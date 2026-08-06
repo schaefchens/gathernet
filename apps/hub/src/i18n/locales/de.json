@@ -210,7 +210,8 @@
     "remind_1d": "1 Tag vorher",
     "remindNote": "Erinnerungen sind bestmöglich — sie werden zugestellt, wenn deine Gemeinschaft aktiv ist, und verraten dem Server nie die Uhrzeit.",
     "pinEvent": "Termin anpinnen",
-    "going": "Dabei ({{count}})"
+    "going": "Dabei (~{{count}})",
+    "goingHint": "Anonym — der Server erfährt nie, wer kommt; die Zahl ist daher ungefähr und deine Zusage wird nur auf diesem Gerät gespeichert."
   },
   "settings": {
     "title": "Einstellungen",

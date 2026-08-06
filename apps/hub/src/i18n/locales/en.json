@@ -210,7 +210,8 @@
     "remind_1d": "1 day before",
     "remindNote": "Reminders are best-effort — delivered when your community is active, and never reveal the time to the server.",
     "pinEvent": "Pin event",
-    "going": "Going ({{count}})"
+    "going": "Going (~{{count}})",
+    "goingHint": "Anonymous — the server never learns who is coming, so the count is approximate and your RSVP is remembered on this device only."
   },
   "settings": {
     "title": "Settings",

@@ -183,6 +183,13 @@
       "when": 1786014188006,
       "tag": "0025_soft_vampiro",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786017352581,
+      "tag": "0026_soft_the_stranger",
+      "breakpoints": true
     }
   ]
 }

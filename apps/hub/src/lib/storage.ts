@@ -93,6 +93,20 @@ export const pushPrefsStore = {
   put: (prefs: PushDisplayPrefs) => tx('meta', 'readwrite', (s) => s.put(prefs, 'push')),
 }
 
+/**
+ * Anonymous event-RSVP tickets, keyed by artifactId. The ticket is a random bearer secret
+ * held ONLY here — the server stores just its hash and no accountId, so "who is coming" is
+ * never a stored fact. Consequence: RSVP state is DEVICE-LOCAL (another device sees the
+ * count but not your own ticket). @see channelArtifactTickets
+ */
+export const rsvpTicketStore = {
+  get: (artifactId: string) =>
+    tx<string | undefined>('meta', 'readonly', (s) => s.get(`rsvp:${artifactId}`)),
+  put: (artifactId: string, ticket: string) =>
+    tx('meta', 'readwrite', (s) => s.put(ticket, `rsvp:${artifactId}`)),
+  delete: (artifactId: string) => tx('meta', 'readwrite', (s) => s.delete(`rsvp:${artifactId}`)),
+}
+
 /* ---------- encrypted stores ---------- */
 
 export interface CryptoBox {

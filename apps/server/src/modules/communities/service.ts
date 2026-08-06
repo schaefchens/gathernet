@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type {
   AccountId,
   ApproveArtifactRequest,
@@ -20,6 +20,7 @@ import type {
   CreateChannelRequest,
   CreateCommunityInviteRequest,
   CreateCommunityRequest,
+  DeleteTicketRequest,
   DeviceId,
   GroupId,
   ListArtifactsResponse,
@@ -35,6 +36,7 @@ import type {
   PostKeyGrantsRequest,
   PostParticipationRequest,
   PostReportRequest,
+  PostTicketRequest,
   ReminderTriggerRequest,
   ResolveReportRequest,
   RotateChannelRequest,
@@ -58,6 +60,7 @@ import {
   accounts,
   channelArtifactParticipants,
   channelArtifacts,
+  channelArtifactTickets,
   channelInvites,
   channelKeyEpochs,
   channelKeyGrants,
@@ -2182,7 +2185,7 @@ export async function getCapability(
 
 type ArtifactRow = typeof channelArtifacts.$inferSelect
 
-function toArtifact(r: ArtifactRow, participants: ArtifactParticipant[] = []): ChannelArtifact {
+function toArtifact(r: ArtifactRow, ticketCount = 0): ChannelArtifact {
   return {
     artifactId: r.artifactId,
     channelId: r.channelId as GroupId,
@@ -2196,7 +2199,7 @@ function toArtifact(r: ArtifactRow, participants: ArtifactParticipant[] = []): C
     createdBy: r.createdBy as AccountId,
     createdAt: r.createdAt.getTime(),
     expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
-    participants,
+    ticketCount,
   }
 }
 
@@ -2278,40 +2281,39 @@ export async function listArtifacts(
       ),
     )
     .orderBy(asc(channelArtifacts.createdAt))
-  const partRows = await db
-    .select()
-    .from(channelArtifactParticipants)
-    .where(eq(channelArtifactParticipants.channelId, channelId))
-  const byArtifact = new Map<string, ArtifactParticipant[]>()
-  for (const p of partRows) {
-    const list = byArtifact.get(p.artifactId) ?? []
-    list.push({
-      accountId: p.accountId as AccountId,
-      deviceId: p.deviceId as DeviceId,
-      sig: p.sig.toString('base64'),
+  // Anonymous RSVP: only COUNTS ever leave the server — no identities exist to leak, and
+  // ticket values are bearer capabilities that must never be handed to other members.
+  const ticketRows = await db
+    .select({
+      artifactId: channelArtifactTickets.artifactId,
+      count: sql<number>`count(*)::int`,
     })
-    byArtifact.set(p.artifactId, list)
+    .from(channelArtifactTickets)
+    .where(eq(channelArtifactTickets.channelId, channelId))
+    .groupBy(channelArtifactTickets.artifactId)
+  const ticketsByArtifact = new Map(ticketRows.map((t) => [t.artifactId, t.count]))
+  return {
+    artifacts: rows.map((r) => toArtifact(r, ticketsByArtifact.get(r.artifactId) ?? 0)),
   }
-  return { artifacts: rows.map((r) => toArtifact(r, byArtifact.get(r.artifactId) ?? [])) }
 }
 
 /**
- * Record or withdraw the caller's OWN participation (RSVP) in an artifact. The row is
- * keyed by the caller's account (own-account-only), device-signed for client-side
- * verification. The server relays the change; clients derive the count.
+ * RSVP anonymously: store SHA-256(ticket) with NO accountId, so "who is coming" is never a
+ * stored fact. Idempotent on the hash. Bounded by the channel's active member count so a
+ * single member can't inflate a headcount without limit (counts stay APPROXIMATE by design —
+ * nothing links a ticket to a person, which is the point).
  */
-export async function postParticipation(
+export async function postTicket(
   db: Db,
   registry: ConnectionRegistry,
   accountId: string,
   communityId: string,
   channelId: string,
   artifactId: string,
-  input: PostParticipationRequest,
+  input: PostTicketRequest,
 ): Promise<void> {
   await requireActiveMembership(db, communityId, accountId)
   await loadChannel(db, communityId, channelId)
-  await requireOwnDevice(db, accountId, input.deviceId)
   const artifact = await db.query.channelArtifacts.findFirst({
     where: and(
       eq(channelArtifacts.artifactId, artifactId),
@@ -2319,13 +2321,48 @@ export async function postParticipation(
     ),
   })
   if (!artifact) throw new ServiceError(404, 'artifact_not_found')
+  // Sanity bound: never more tickets than there are people who could hold one.
+  const [tickets] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(channelArtifactTickets)
+    .where(eq(channelArtifactTickets.artifactId, artifactId))
+  const [members] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(channelMembers)
+    .where(and(eq(channelMembers.channelId, channelId), eq(channelMembers.status, 'active')))
+  if ((tickets?.count ?? 0) >= (members?.count ?? 0)) {
+    throw new ServiceError(409, 'ticket_limit')
+  }
   await db
-    .insert(channelArtifactParticipants)
-    .values({ artifactId, accountId, channelId, deviceId: input.deviceId, sig: bufOf(input.sig) })
-    .onConflictDoUpdate({
-      target: [channelArtifactParticipants.artifactId, channelArtifactParticipants.accountId],
-      set: { deviceId: input.deviceId, sig: bufOf(input.sig) },
-    })
+    .insert(channelArtifactTickets)
+    .values({ artifactId, channelId, ticketHash: input.ticketHash })
+    .onConflictDoNothing()
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_artifact_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
+}
+
+/** Withdraw an anonymous RSVP by presenting the ticket PREIMAGE (knowledge = authority). */
+export async function deleteTicket(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  artifactId: string,
+  input: DeleteTicketRequest,
+): Promise<void> {
+  await requireActiveMembership(db, communityId, accountId)
+  const ticketHash = createHash('sha256').update(input.ticket, 'utf8').digest('hex')
+  await db
+    .delete(channelArtifactTickets)
+    .where(
+      and(
+        eq(channelArtifactTickets.artifactId, artifactId),
+        eq(channelArtifactTickets.ticketHash, ticketHash),
+      ),
+    )
   await emitToChannel(db, registry, communityId, channelId, {
     type: 'community.channel_artifact_updated',
     payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
@@ -2613,17 +2650,13 @@ export async function triggerChannelReminder(
     .returning({ k: channelReminderFires.idempotencyKey })
   if (inserted.length === 0) return { fired: false }
 
-  // Opt-in only: reminders reach RSVP'd participants; online ones self-handle in-app.
-  const participants = await db
-    .select({ accountId: channelArtifactParticipants.accountId })
-    .from(channelArtifactParticipants)
-    .where(eq(channelArtifactParticipants.artifactId, artifactId))
-  void notifyEventReminder(
-    db,
-    participants.map((p) => p.accountId),
-    communityId,
-    (a) => registry.isAccountOnline(a),
-  )
+  // NOTE (deliberate consequence of anonymous RSVP tickets): there is no stored
+  // (account → "coming") fact any more, so a reminder CANNOT be targeted at only those who
+  // RSVP'd. It goes to the channel's active members instead; the payload stays content-free
+  // and each member controls the 'event' push category. Targeted reminders would require
+  // re-introducing an identified RSVP — the tradeoff for not knowing who is coming.
+  const recipients = await activeChannelAccountIds(db, channelId)
+  void notifyEventReminder(db, recipients, communityId, (a) => registry.isAccountOnline(a))
   return { fired: true }
 }
 

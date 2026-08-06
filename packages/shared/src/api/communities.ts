@@ -341,12 +341,28 @@ export const channelArtifactSchema = z.object({
   createdAt: z.number().int().nonnegative(),
   /** epoch millis; null = pinned forever */
   expiresAt: z.number().int().nonnegative().nullable(),
-  /** RSVP participants (events); each verified client-side before counting */
-  participants: z.array(artifactParticipantSchema).default([]),
+  /**
+   * APPROXIMATE count of anonymous RSVP tickets (events). No identities are stored or
+   * returned — see channelArtifactTickets. Nothing enforces one-per-member, so treat this
+   * as a headcount to reconcile socially, not an exact figure.
+   */
+  ticketCount: z.number().int().nonnegative().default(0),
 })
 export type ChannelArtifact = z.infer<typeof channelArtifactSchema>
 
-/** A member records/withdraws their own participation (RSVP). */
+/** RSVP anonymously: the client sends only SHA-256(ticket) (hex); it keeps the ticket. */
+export const postTicketRequestSchema = z.object({
+  ticketHash: z.string().regex(/^[0-9a-f]{64}$/),
+})
+export type PostTicketRequest = z.infer<typeof postTicketRequestSchema>
+
+/** Withdraw by presenting the ticket PREIMAGE; the server hashes it to find the row. */
+export const deleteTicketRequestSchema = z.object({
+  ticket: z.string().min(16).max(128),
+})
+export type DeleteTicketRequest = z.infer<typeof deleteTicketRequestSchema>
+
+/** A member records/withdraws IDENTIFIED participation (roll-call responses). */
 export const postParticipationRequestSchema = z.object({
   deviceId: deviceIdSchema,
   sig: z.base64(),

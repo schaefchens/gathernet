@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import {
   eciesOpen,
   eciesSeal,
@@ -2309,7 +2309,7 @@ describe('pinned channel artifacts (relayed, server-opaque)', () => {
     expect(list.json().artifacts).toHaveLength(0)
   })
 
-  it('participation: own-account RSVP toggles, surfaced in the listing', async () => {
+  it('anonymous RSVP: ticket count only, no identities stored or returned', async () => {
     const owner = await createUser('RsvpOwner')
     const member = await createUser('RsvpMember')
     const communityId = await createCommunity(owner)
@@ -2320,33 +2320,66 @@ describe('pinned channel artifacts (relayed, server-opaque)', () => {
     const artifactId = randomUUID()
     expect((await postArtifact(owner, communityId, channelId, { artifactId })).statusCode).toBe(200)
 
-    const partUrl = `${artifactsUrl(communityId, channelId)}/${artifactId}/participate`
-    // Member joins.
-    const join = await app.inject({
+    const ticketUrl = `${artifactsUrl(communityId, channelId)}/${artifactId}/ticket`
+    const ticket = 'ticket-secret-value-0123456789'
+    const ticketHash = createHash('sha256').update(ticket, 'utf8').digest('hex')
+
+    const rsvp = await app.inject({
       method: 'POST',
-      url: partUrl,
+      url: ticketUrl,
       headers: auth(member),
-      payload: { deviceId: member.deviceId, sig: fakeB64(64) },
+      payload: { ticketHash },
     })
-    expect(join.statusCode).toBe(200)
+    expect(rsvp.statusCode).toBe(200)
 
-    const listed = (await listArtifacts(owner, communityId, channelId)).json().artifacts as Array<{
-      artifactId: string
-      participants: Array<{ accountId: string }>
-    }>
+    const listed = (await listArtifacts(owner, communityId, channelId)).json().artifacts as Array<
+      Record<string, unknown>
+    >
     const art = listed.find((a) => a.artifactId === artifactId)
-    expect(art?.participants).toHaveLength(1)
-    expect(art?.participants[0]?.accountId).toBe(member.accountId)
+    expect(art?.ticketCount).toBe(1)
+    // No identities and no ticket VALUES ever leave the server.
+    expect(art?.participants).toBeUndefined()
+    expect(JSON.stringify(art)).not.toContain(ticketHash)
+    expect(JSON.stringify(art)).not.toContain(member.accountId)
 
-    // Member leaves → participant list empties.
-    expect(
-      (await app.inject({ method: 'DELETE', url: partUrl, headers: auth(member) })).statusCode,
-    ).toBe(200)
-    const after = (await listArtifacts(owner, communityId, channelId)).json().artifacts as Array<{
-      artifactId: string
-      participants: unknown[]
-    }>
-    expect(after.find((a) => a.artifactId === artifactId)?.participants).toHaveLength(0)
+    // Withdraw by presenting the preimage.
+    const withdraw = await app.inject({
+      method: 'DELETE',
+      url: ticketUrl,
+      headers: auth(member),
+      payload: { ticket },
+    })
+    expect(withdraw.statusCode).toBe(200)
+    const after = (await listArtifacts(owner, communityId, channelId)).json().artifacts as Array<
+      Record<string, unknown>
+    >
+    expect(after.find((a) => a.artifactId === artifactId)?.ticketCount).toBe(0)
+  })
+
+  it('a wrong ticket preimage withdraws nothing', async () => {
+    const owner = await createUser('RsvpOwner2')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    const artifactId = randomUUID()
+    await postArtifact(owner, communityId, channelId, { artifactId })
+    const ticketUrl = `${artifactsUrl(communityId, channelId)}/${artifactId}/ticket`
+    const ticketHash = createHash('sha256').update('real-ticket', 'utf8').digest('hex')
+    await app.inject({
+      method: 'POST',
+      url: ticketUrl,
+      headers: auth(owner),
+      payload: { ticketHash },
+    })
+    await app.inject({
+      method: 'DELETE',
+      url: ticketUrl,
+      headers: auth(owner),
+      payload: { ticket: 'not-the-right-ticket' },
+    })
+    const listed = (await listArtifacts(owner, communityId, channelId)).json().artifacts as Array<
+      Record<string, unknown>
+    >
+    expect(listed.find((a) => a.artifactId === artifactId)?.ticketCount).toBe(1)
   })
 })
 

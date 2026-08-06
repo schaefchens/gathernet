@@ -418,6 +418,7 @@ export function PinnedBar({
                           : 'border-edge text-ink-faint hover:text-ink'
                       }`}
                       onClick={() => toggleGoing(a)}
+                      title={t('pins.goingHint')}
                     >
                       {t('pins.going', { count: a.tally.count })}
                     </button>

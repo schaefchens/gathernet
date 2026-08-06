@@ -6,6 +6,7 @@ import {
   createCommunityInviteRequestSchema,
   createCommunityRequestSchema,
   type DeviceId,
+  deleteTicketRequestSchema,
   type GroupId,
   joinByCodeRequestSchema,
   paginationQuerySchema,
@@ -14,8 +15,8 @@ import {
   postChannelKeyGrantsRequestSchema,
   postCommitRequestSchema,
   postKeyGrantsRequestSchema,
-  postParticipationRequestSchema,
   postReportRequestSchema,
+  postTicketRequestSchema,
   publishChannelGroupInfoRequestSchema,
   reminderTriggerRequestSchema,
   resolveJoinRequestSchema,
@@ -47,7 +48,7 @@ import {
   createCommunityInvite,
   deleteArtifact,
   deleteChannel,
-  deleteParticipation,
+  deleteTicket,
   getCapability,
   getChannelJoinInfo,
   getCommunityDetail,
@@ -75,8 +76,8 @@ import {
   postCapabilities,
   postChannelKeyGrants,
   postKeyGrants,
-  postParticipation,
   postReport,
+  postTicket,
   publishChannelGroupInfo,
   removeMember,
   resolveJoinRequest,
@@ -510,12 +511,12 @@ export function registerCommunityRoutes(
   )
 
   app.post<{ Params: { id: string; channelId: string; artifactId: string } }>(
-    '/api/v1/communities/:id/channels/:channelId/artifacts/:artifactId/participate',
+    '/api/v1/communities/:id/channels/:channelId/artifacts/:artifactId/ticket',
     auth,
     async (request) => {
       const session = requireSession(request)
-      const body = postParticipationRequestSchema.parse(request.body)
-      await postParticipation(
+      const body = postTicketRequestSchema.parse(request.body)
+      await postTicket(
         db,
         registry,
         session.accountId,
@@ -529,17 +530,19 @@ export function registerCommunityRoutes(
   )
 
   app.delete<{ Params: { id: string; channelId: string; artifactId: string } }>(
-    '/api/v1/communities/:id/channels/:channelId/artifacts/:artifactId/participate',
+    '/api/v1/communities/:id/channels/:channelId/artifacts/:artifactId/ticket',
     auth,
     async (request) => {
       const session = requireSession(request)
-      await deleteParticipation(
+      const body = deleteTicketRequestSchema.parse(request.body)
+      await deleteTicket(
         db,
         registry,
         session.accountId,
         request.params.id,
         request.params.channelId,
         request.params.artifactId,
+        body,
       )
       return { ok: true }
     },

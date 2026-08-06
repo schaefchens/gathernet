@@ -67,7 +67,7 @@ function record(
     createdBy: createdBy as ChannelArtifact['createdBy'],
     createdAt: 1000,
     expiresAt: built.expiresAt,
-    participants: [],
+    ticketCount: 0,
   }
 }
 

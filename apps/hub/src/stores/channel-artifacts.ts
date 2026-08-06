@@ -14,11 +14,10 @@ import {
   type ArtifactBody,
   buildApproval,
   buildArtifact,
-  buildParticipation,
   isExpired,
+  newRsvpTicket,
   openArtifactRaw,
   parseArtifactBody,
-  tallyParticipants,
   type VerifiedArtifact,
   verifyArtifact,
 } from '../lib/artifacts.ts'
@@ -29,7 +28,7 @@ import {
   makeCapFetcher,
   makeDeviceResolver,
 } from '../lib/community-keys.ts'
-import { secureStore } from '../lib/storage.ts'
+import { rsvpTicketStore, secureStore } from '../lib/storage.ts'
 
 interface ChannelArtifactsState {
   /** channelId → verified, non-expired artifacts (active + suggested), newest first */
@@ -78,10 +77,12 @@ export const channelArtifactsStore = {
         epoch,
       )
       if (status === 'invalid') continue
-      const tally =
-        a.participants.length > 0
-          ? await tallyParticipants(a, me, resolve)
-          : { count: 0, mine: false }
+      // Count comes from the server (anonymous tickets carry no identities to verify);
+      // "mine" is whether THIS device holds the ticket — RSVP state is device-local.
+      const tally = {
+        count: a.ticketCount,
+        mine: !!(await rsvpTicketStore.get(a.artifactId)),
+      }
       out.push({ artifact: a, body, status, issuerAccountId, tally })
     }
     out.sort((x, y) => y.artifact.createdAt - x.artifact.createdAt)
@@ -119,21 +120,29 @@ export const channelArtifactsStore = {
     await api('DELETE', `${base(communityId, channelId)}/${artifactId}`)
   },
 
-  /** Toggle the current user's participation (RSVP) in an event artifact. */
+  /**
+   * Toggle this device's anonymous RSVP. Going: mint a random ticket, keep it locally, send
+   * only its hash. Withdrawing: present the ticket preimage. The server never learns who is
+   * coming — so RSVP state lives on THIS device only.
+   */
   async participate(
     communityId: string,
     channelId: string,
     artifactId: string,
     join: boolean,
   ): Promise<void> {
-    const url = `${base(communityId, channelId)}/${artifactId}/participate`
+    const url = `${base(communityId, channelId)}/${artifactId}/ticket`
     if (!join) {
-      await api('DELETE', url)
+      const ticket = await rsvpTicketStore.get(artifactId)
+      // No local ticket → nothing this device can withdraw (it RSVP'd elsewhere).
+      if (!ticket) return
+      await api('DELETE', url, { ticket })
+      await rsvpTicketStore.delete(artifactId)
       return
     }
-    const record = await secureStore.getDevice()
-    if (!record) throw new Error('locked')
-    await api('POST', url, await buildParticipation(channelId, artifactId, record))
+    const { ticket, ticketHash } = await newRsvpTicket()
+    await api('POST', url, { ticketHash })
+    await rsvpTicketStore.put(artifactId, ticket)
   },
 
   /** Drop a channel's cached artifacts (e.g. on leave). */
