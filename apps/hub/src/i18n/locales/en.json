@@ -467,6 +467,15 @@
       "isBroadcast": "Broadcast channel. The channel type can't be changed later.",
       "full": "This channel is full — it has reached the limit for its type. Create a large or broadcast channel for a bigger audience (existing channels can't be converted, by design).",
       "nearFull": "This channel is nearly full ({{used}} of {{max}} devices)."
+    },
+    "deviceLimit": {
+      "communityLabel": "Devices per member (community)",
+      "channelLabel": "Devices per member (this channel)",
+      "perMember_one": "{{count}} device per member",
+      "perMember_other": "{{count}} devices per member",
+      "communityHint": "A ceiling for the whole community; a channel can be stricter. Fewer devices means fewer copies of the keys — but a member whose only device is lost or taken must restore from their recovery phrase and drop the old device before rejoining.",
+      "channelHint": "Applies to this channel (the stricter of the two limits wins). It also sets how many people fit: about {{capacity}} in a small group channel.",
+      "blocked": "This channel allows {{count}} device(s) per person. Drop one of your other devices in Settings, then join again."
     }
   }
 }

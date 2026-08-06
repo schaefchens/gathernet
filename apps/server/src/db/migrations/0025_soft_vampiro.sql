@@ -1,0 +1,2 @@
+ALTER TABLE "communities" ADD COLUMN "max_devices_per_member" integer DEFAULT 5 NOT NULL;--> statement-breakpoint
+ALTER TABLE "community_channels" ADD COLUMN "max_devices_per_member" integer DEFAULT 3 NOT NULL;

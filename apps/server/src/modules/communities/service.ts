@@ -427,6 +427,7 @@ export async function getCommunityDetail(
       postPolicy: communityChannels.postPolicy,
       pinPolicy: communityChannels.pinPolicy,
       memberListVisibility: communityChannels.memberListVisibility,
+      maxDevicesPerMember: communityChannels.maxDevicesPerMember,
       messageTtlDays: communityChannels.messageTtlDays,
       position: communityChannels.position,
       encryptionMode: communityChannels.encryptionMode,
@@ -476,6 +477,7 @@ export async function getCommunityDetail(
         postPolicy: c.postPolicy,
         pinPolicy: c.pinPolicy,
         memberListVisibility: c.memberListVisibility,
+        maxDevicesPerMember: c.maxDevicesPerMember,
         messageTtlDays: c.messageTtlDays,
         position: c.position,
         myStatus,
@@ -499,6 +501,7 @@ export async function getCommunityDetail(
       avatarMediaId: community.avatarMediaId,
       keyEpoch: community.keyEpoch,
       rotationPending: community.rotationPending,
+      maxDevicesPerMember: community.maxDevicesPerMember,
       ownerAccountId: community.ownerAccountId as AccountId,
       root:
         community.rootDeviceId && community.rootSig
@@ -622,6 +625,9 @@ export async function updateCommunity(
   const patch: Partial<typeof communities.$inferInsert> = {}
   if (input.metaCiphertext !== undefined) patch.metaCiphertext = bufOf(input.metaCiphertext)
   if (input.avatarMediaId !== undefined) patch.avatarMediaId = input.avatarMediaId
+  if (input.maxDevicesPerMember !== undefined) {
+    patch.maxDevicesPerMember = input.maxDevicesPerMember
+  }
   await db.update(communities).set(patch).where(eq(communities.communityId, communityId))
   await emitToMembers(db, registry, communityId, {
     type: 'community.updated',
@@ -830,6 +836,7 @@ export async function createChannel(
       pinPolicy:
         input.pinPolicy ?? (input.encryptionMode === 'group_key' ? 'moderators' : 'everyone'),
       memberListVisibility: input.memberListVisibility,
+      maxDevicesPerMember: input.maxDevicesPerMember,
       messageTtlDays: input.messageTtlDays,
       encryptionMode: input.encryptionMode,
       position,
@@ -890,6 +897,9 @@ export async function updateChannel(
   if (input.pinPolicy !== undefined) patch.pinPolicy = input.pinPolicy
   if (input.memberListVisibility !== undefined) {
     patch.memberListVisibility = input.memberListVisibility
+  }
+  if (input.maxDevicesPerMember !== undefined) {
+    patch.maxDevicesPerMember = input.maxDevicesPerMember
   }
   if (input.messageTtlDays !== undefined) patch.messageTtlDays = input.messageTtlDays
   if (input.position !== undefined) patch.position = input.position

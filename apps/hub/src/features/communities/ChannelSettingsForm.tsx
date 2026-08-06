@@ -10,6 +10,11 @@ import type {
   CreateChannelResponse,
   UpdateChannelRequest,
 } from '@gathernet/shared'
+import {
+  CHANNEL_DEVICE_LIMIT_DEFAULT,
+  CHANNEL_DEVICE_LIMIT_MAX,
+  mlsMemberCapacity,
+} from '@gathernet/shared'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../lib/api.ts'
@@ -112,6 +117,9 @@ export function ChannelSettingsForm({
   const [memberListVisibility, setMemberListVisibility] = useState<ChannelMemberListVisibility>(
     channel?.memberListVisibility ?? 'managers',
   )
+  const [deviceLimit, setDeviceLimit] = useState<number>(
+    channel?.maxDevicesPerMember ?? CHANNEL_DEVICE_LIMIT_DEFAULT,
+  )
   // In create mode, let the pin policy track the encryption-mode default (mls →
   // everyone, group_key → moderators) until the user explicitly overrides it.
   const [pinPolicyTouched, setPinPolicyTouched] = useState(false)
@@ -177,6 +185,7 @@ export function ChannelSettingsForm({
             postPolicy,
             pinPolicy: effectivePinPolicy,
             memberListVisibility,
+            maxDevicesPerMember: deviceLimit,
             messageTtlDays: ttl,
             encryptionMode,
           },
@@ -200,6 +209,7 @@ export function ChannelSettingsForm({
           postPolicy,
           pinPolicy: effectivePinPolicy,
           memberListVisibility,
+          maxDevicesPerMember: deviceLimit,
           messageTtlDays: ttl,
         }
         if (avatarMediaId !== channel.avatarMediaId) {
@@ -353,6 +363,26 @@ export function ChannelSettingsForm({
           {effectivePinPolicy === 'everyone'
             ? t('communities.pinPolicy.everyoneHint')
             : t('communities.pinPolicy.moderatorsHint')}
+        </p>
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.deviceLimit.channelLabel')}</span>
+        <select
+          className={SELECT_CLASS}
+          value={deviceLimit}
+          onChange={(e) => setDeviceLimit(Number(e.target.value))}
+        >
+          {Array.from({ length: CHANNEL_DEVICE_LIMIT_MAX }, (_, i) => i + 1).map((n) => (
+            <option key={n} value={n}>
+              {t('communities.deviceLimit.perMember', { count: n })}
+            </option>
+          ))}
+        </select>
+        <p className="text-[11px] text-ink-faint">
+          {t('communities.deviceLimit.channelHint', {
+            capacity: mlsMemberCapacity(deviceLimit),
+          })}
         </p>
       </label>
 

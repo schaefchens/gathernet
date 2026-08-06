@@ -48,15 +48,43 @@ export const CHANNEL_KEY_GRANT_BATCH_MAX = 1000
 /** Roster page size for paginated community/channel member listings. */
 export const COMMUNITY_MEMBER_PAGE_SIZE = 100
 
-/** Rough devices per person, used only to express the MLS device cap in member terms. */
-export const DEVICES_PER_MEMBER_ESTIMATE = 2
+/**
+ * Devices-per-member policy. Fewer devices = fewer copies of K_meta / K_channel / MLS state,
+ * so this is a real hardening lever a manager can choose — and it makes channel capacity
+ * EXACT (members = MLS device cap ÷ limit) instead of an estimate.
+ *
+ * Two levels, and the **most restrictive wins**: a community sets a ceiling, a channel may
+ * tighten it further. Per-member device counts are NEVER shown to other members (they are
+ * enforced server-side and reported only to the affected user).
+ *
+ * Tradeoff for a manager to weigh: a strict limit shrinks the compromise surface, but it
+ * also sharpens the inference from observable devices → number of people (multi-device
+ * otherwise blurs it), and a member whose only device is seized must restore from their
+ * recovery phrase and drop the old device before rejoining.
+ */
+export const COMMUNITY_DEVICE_LIMIT_MIN = 1
+export const COMMUNITY_DEVICE_LIMIT_MAX = 10
+export const COMMUNITY_DEVICE_LIMIT_DEFAULT = 5
+export const CHANNEL_DEVICE_LIMIT_MIN = 1
+export const CHANNEL_DEVICE_LIMIT_MAX = 5
+export const CHANNEL_DEVICE_LIMIT_DEFAULT = 3
+
+/** Effective devices-per-member for a channel: most restrictive of the two levels. */
+export function effectiveDeviceLimit(communityLimit: number, channelLimit: number): number {
+  return Math.min(communityLimit, channelLimit)
+}
+
+/** How many PEOPLE fit in a small (mls) channel at a given devices-per-member limit. */
+export function mlsMemberCapacity(deviceLimit: number): number {
+  return Math.floor(MLS_CHANNEL_MAX_DEVICES / Math.max(1, deviceLimit))
+}
 
 /**
- * THE small-group boundary, in members — DERIVED from `MLS_CHANNEL_MAX_DEVICES` so the two
- * can never drift: "small MLS group" vs "big broadcast" is one concept, not several
- * unrelated numbers. (The MLS cap is a scaling/performance choice, not an MLS limit — if it
- * is raised to e.g. 1024 devices after evaluation, this boundary lifts with it automatically.)
- *
+ * THE small-group boundary, in members — DERIVED: how many people fit in one small (mls)
+ * channel at the DEFAULT devices-per-member policy. "Small MLS group" vs "big broadcast" is
+ * one concept, so there is one boundary, not several unrelated numbers. (The MLS cap is a
+ * scaling/performance choice, not an MLS limit — raising it to e.g. 1024 devices after
+ * evaluation lifts this boundary automatically.)
  *
  * - at or below it: a browsable roster (managers) and an EXACT member count;
  * - above it: no browsable roster at all — not even for managers, since a scrollable name
@@ -67,9 +95,7 @@ export const DEVICES_PER_MEMBER_ESTIMATE = 2
  * Capability issuance is unaffected: it sweeps `/member-ids` (accountId + role, NO display
  * names), which stays available to owners/leaders at any size.
  */
-export const SMALL_GROUP_MAX_MEMBERS = Math.floor(
-  MLS_CHANNEL_MAX_DEVICES / DEVICES_PER_MEMBER_ESTIMATE,
-)
+export const SMALL_GROUP_MAX_MEMBERS = mlsMemberCapacity(CHANNEL_DEVICE_LIMIT_DEFAULT)
 
 /** MLS key package pool per device. */
 export const KEY_PACKAGE_TARGET = 50

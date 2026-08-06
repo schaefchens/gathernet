@@ -1,8 +1,12 @@
 import { z } from 'zod'
 import {
   CHANNEL_ARTIFACT_BODY_MAX_B64,
+  CHANNEL_DEVICE_LIMIT_MAX,
+  CHANNEL_DEVICE_LIMIT_MIN,
   CHANNEL_KEY_GRANT_BATCH_MAX,
   CHANNEL_MESSAGE_TTL_DAYS,
+  COMMUNITY_DEVICE_LIMIT_MAX,
+  COMMUNITY_DEVICE_LIMIT_MIN,
   COMMUNITY_META_MAX_B64,
 } from '../constants.ts'
 import {
@@ -79,6 +83,18 @@ export const messageTtlDaysSchema = z
     message: 'invalid_ttl',
   })
 
+/** Devices-per-member policy (see constants: most restrictive of community ∧ channel). */
+export const communityDeviceLimitSchema = z
+  .number()
+  .int()
+  .min(COMMUNITY_DEVICE_LIMIT_MIN)
+  .max(COMMUNITY_DEVICE_LIMIT_MAX)
+export const channelDeviceLimitSchema = z
+  .number()
+  .int()
+  .min(CHANNEL_DEVICE_LIMIT_MIN)
+  .max(CHANNEL_DEVICE_LIMIT_MAX)
+
 /* -------------------------------- community ------------------------------- */
 
 export const createCommunityRequestSchema = z.object({
@@ -95,8 +111,9 @@ export const updateCommunityRequestSchema = z
   .object({
     metaCiphertext: metaCiphertextSchema.optional(),
     avatarMediaId: mediaIdSchema.nullable().optional(),
+    maxDevicesPerMember: communityDeviceLimitSchema.optional(),
   })
-  .refine((v) => v.metaCiphertext !== undefined || v.avatarMediaId !== undefined, {
+  .refine((v) => Object.values(v).some((x) => x !== undefined), {
     message: 'no fields to update',
   })
 
@@ -197,6 +214,8 @@ export const communityChannelSchema = z.object({
   pinPolicy: channelPinPolicySchema,
   /** who may see this channel's full member list (managers by default) */
   memberListVisibility: channelMemberListVisibilitySchema,
+  /** devices-per-member for this channel (effective = min with the community's) */
+  maxDevicesPerMember: z.number().int().positive(),
   messageTtlDays: z.number().int(),
   position: z.number().int(),
   /** the caller's channel-membership state */
@@ -381,6 +400,8 @@ export const communityDetailResponseSchema = z.object({
     keyEpoch: z.number().int().nonnegative(),
     /** true → a leader's client should rotate K_meta (re-encrypt metadata) */
     rotationPending: z.boolean(),
+    /** devices-per-member ceiling for this community */
+    maxDevicesPerMember: z.number().int().positive(),
     ownerAccountId: accountIdSchema,
     /** the owner-signed ownership root (capability-chain anchor); null if not yet set */
     root: communityRootSchema.nullable(),
@@ -458,6 +479,7 @@ export const createChannelRequestSchema = z.object({
   pinPolicy: channelPinPolicySchema.optional(),
   /** managers (default) — or `members` to let this channel's members see its roster. */
   memberListVisibility: channelMemberListVisibilitySchema.default('managers'),
+  maxDevicesPerMember: channelDeviceLimitSchema.default(3),
   messageTtlDays: messageTtlDaysSchema.default(30),
   /** mls (default) vs group_key. group_key channels publish no MLS GroupInfo. */
   encryptionMode: channelEncryptionModeSchema.default('mls'),
@@ -477,6 +499,7 @@ export const updateChannelRequestSchema = z
     postPolicy: channelPostPolicySchema.optional(),
     pinPolicy: channelPinPolicySchema.optional(),
     memberListVisibility: channelMemberListVisibilitySchema.optional(),
+    maxDevicesPerMember: channelDeviceLimitSchema.optional(),
     messageTtlDays: messageTtlDaysSchema.optional(),
     position: z.number().int().min(0).optional(),
   })

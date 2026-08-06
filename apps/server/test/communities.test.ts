@@ -2498,6 +2498,34 @@ describe('no-roster rule: community membership is not member-enumerable', () => 
     expect(roster.statusCode).toBe(403)
   })
 
+  it('enforces devices-per-member as the min of community and channel limits', async () => {
+    const owner = await createUser('Owner')
+    const communityId = await createCommunity(owner)
+    // community allows 5, channel tightens to 1 → effective 1
+    const patchCommunity = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/communities/${communityId}`,
+      headers: auth(owner),
+      payload: { maxDevicesPerMember: 5 },
+    })
+    expect(patchCommunity.statusCode).toBe(200)
+    const channelId = await createChannel(owner, communityId)
+    const patchChannel = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}`,
+      headers: auth(owner),
+      payload: { maxDevicesPerMember: 1 },
+    })
+    expect(patchChannel.statusCode).toBe(200)
+
+    const detailRes = (await detail(owner, communityId)).json()
+    expect(detailRes.community.maxDevicesPerMember).toBe(5)
+    const chan = (
+      detailRes.channels as Array<{ channelId: string; maxDevicesPerMember: number }>
+    ).find((c) => c.channelId === channelId)
+    expect(chan?.maxDevicesPerMember).toBe(1)
+  })
+
   it('reports a coarse size band (exact only for a small community)', async () => {
     const owner = await createUser('Owner')
     const communityId = await createCommunity(owner)

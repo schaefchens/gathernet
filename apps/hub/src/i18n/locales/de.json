@@ -467,6 +467,15 @@
       "isBroadcast": "Broadcast-Kanal. Der Kanaltyp kann später nicht geändert werden.",
       "full": "Dieser Kanal ist voll — die Grenze für seinen Typ ist erreicht. Erstelle einen großen oder Broadcast-Kanal für ein größeres Publikum (bestehende Kanäle können bewusst nicht umgewandelt werden).",
       "nearFull": "Dieser Kanal ist fast voll ({{used}} von {{max}} Geräten)."
+    },
+    "deviceLimit": {
+      "communityLabel": "Geräte pro Mitglied (Gemeinschaft)",
+      "channelLabel": "Geräte pro Mitglied (dieser Kanal)",
+      "perMember_one": "{{count}} Gerät pro Mitglied",
+      "perMember_other": "{{count}} Geräte pro Mitglied",
+      "communityHint": "Obergrenze für die ganze Gemeinschaft; ein Kanal kann strenger sein. Weniger Geräte bedeuten weniger Kopien der Schlüssel — aber wer sein einziges Gerät verliert oder abgenommen bekommt, muss über die Wiederherstellungsphrase neu einsteigen und das alte Gerät entfernen.",
+      "channelHint": "Gilt für diesen Kanal (die strengere der beiden Grenzen zählt). Sie bestimmt auch, wie viele Personen hineinpassen: etwa {{capacity}} in einem Kanal für kleine Gruppen.",
+      "blocked": "Dieser Kanal erlaubt {{count}} Gerät(e) pro Person. Entferne in den Einstellungen ein anderes Gerät und tritt dann erneut bei."
     }
   }
 }

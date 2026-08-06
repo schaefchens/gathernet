@@ -11,6 +11,8 @@ import type {
   UploadKeyPackagesRequest,
 } from '@gathernet/shared'
 import {
+  CHANNEL_DEVICE_LIMIT_DEFAULT,
+  effectiveDeviceLimit,
   KEY_PACKAGE_TTL_DAYS,
   MAILBOX_RETENTION_DAYS,
   MLS_CHANNEL_MAX_DEVICES,
@@ -21,6 +23,7 @@ import type { Db } from '../../db/index.ts'
 import {
   appDevices,
   channelMembers,
+  communities,
   communityChannels,
   communityMembers,
   devices,
@@ -288,6 +291,8 @@ export async function postCommit(
     /** room member status per account, for adds/removes validation */
     const roomStatus = new Map<string, string>()
     let channelAccess: string | null = null
+    /** effective devices-per-member for this channel = min(community, channel) */
+    let channelDeviceLimit: number | null = null
     /** community membership (role+status) per account, for channel eligibility */
     const communityRoles = new Map<string, { role: string; status: string }>()
     /** channel_members (channel-level status+role) per account */
@@ -307,6 +312,13 @@ export async function postCommit(
       })
       if (!channel) throw new ServiceError(404, 'group_not_found')
       channelAccess = channel.access
+      const community = await tx.query.communities.findFirst({
+        where: eq(communities.communityId, channel.communityId),
+      })
+      channelDeviceLimit = effectiveDeviceLimit(
+        community?.maxDevicesPerMember ?? CHANNEL_DEVICE_LIMIT_DEFAULT,
+        channel.maxDevicesPerMember,
+      )
       const memberRows = await tx
         .select()
         .from(communityMembers)
@@ -444,6 +456,29 @@ export async function postCommit(
       const cap = isRoom ? ROOM_MAX_DEVICES : MLS_CHANNEL_MAX_DEVICES
       if (leavesAfter.size > cap) {
         throw new ServiceError(409, 'device_limit')
+      }
+      // Per-member devices-per-channel policy (effective = min(community, channel)). Counts
+      // only the ADDING accounts so an existing over-limit state can't wedge the channel.
+      // Reported to the affected user, never surfaced as anyone else's device count.
+      if (isChannel && channelDeviceLimit !== null) {
+        const accountOfDevice = new Map(accountOfLeaf)
+        for (const addId of adds) {
+          if (!accountOfDevice.has(addId)) {
+            const dev = await tx.query.devices.findFirst({ where: eq(devices.deviceId, addId) })
+            if (dev) accountOfDevice.set(addId, dev.accountId)
+          }
+        }
+        const perAccount = new Map<string, number>()
+        for (const leaf of leavesAfter) {
+          const owner = accountOfDevice.get(leaf)
+          if (owner) perAccount.set(owner, (perAccount.get(owner) ?? 0) + 1)
+        }
+        for (const addId of adds) {
+          const owner = accountOfDevice.get(addId)
+          if (owner && (perAccount.get(owner) ?? 0) > channelDeviceLimit) {
+            throw new ServiceError(409, 'device_limit_per_member')
+          }
+        }
       }
     }
 

@@ -3,6 +3,7 @@ import type {
   CommunityDetailResponse,
   UpdateCommunityRequest,
 } from '@gathernet/shared'
+import { COMMUNITY_DEVICE_LIMIT_MAX } from '@gathernet/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useState } from 'react'
@@ -193,6 +194,7 @@ function CommunityDetailScreen() {
           initialMeta={communityMeta}
           avatarMediaId={detail.community.avatarMediaId}
           communityName={communityName}
+          maxDevicesPerMember={detail.community.maxDevicesPerMember}
           onDone={() => {
             setShowSettings(false)
             invalidate()
@@ -486,6 +488,7 @@ function CommunitySettingsForm({
   initialMeta,
   avatarMediaId,
   communityName,
+  maxDevicesPerMember,
   onDone,
   onCancel,
 }: {
@@ -493,6 +496,7 @@ function CommunitySettingsForm({
   initialMeta: CommunityMeta | null
   avatarMediaId: string | null
   communityName: string
+  maxDevicesPerMember: number
   onDone: () => void
   onCancel: () => void
 }) {
@@ -500,6 +504,7 @@ function CommunitySettingsForm({
   const [name, setName] = useState(initialMeta?.name ?? '')
   const [description, setDescription] = useState(initialMeta?.description ?? '')
   const [media, setMedia] = useState<string | null>(avatarMediaId)
+  const [deviceLimit, setDeviceLimit] = useState(maxDevicesPerMember)
   const [busy, setBusy] = useState(false)
 
   const submit = async () => {
@@ -518,9 +523,14 @@ function CommunitySettingsForm({
       if (media !== avatarMediaId) {
         body.avatarMediaId = media as UpdateCommunityRequest['avatarMediaId']
       }
+      if (deviceLimit !== maxDevicesPerMember) body.maxDevicesPerMember = deviceLimit
       // PATCH requires at least one field — nothing to change if K_meta is
       // absent and the avatar is untouched.
-      if (body.metaCiphertext === undefined && body.avatarMediaId === undefined) {
+      if (
+        body.metaCiphertext === undefined &&
+        body.avatarMediaId === undefined &&
+        body.maxDevicesPerMember === undefined
+      ) {
         onCancel()
         return
       }
@@ -564,6 +574,22 @@ function CommunitySettingsForm({
         />
         <p className="text-[11px] text-ink-faint">{t('communities.markdownHint')}</p>
       </div>
+      <label className="block space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.deviceLimit.communityLabel')}</span>
+        <select
+          className="w-full bg-overlay border border-edge rounded-md px-3 py-2 text-sm"
+          value={deviceLimit}
+          onChange={(e) => setDeviceLimit(Number(e.target.value))}
+        >
+          {Array.from({ length: COMMUNITY_DEVICE_LIMIT_MAX }, (_, i) => i + 1).map((n) => (
+            <option key={n} value={n}>
+              {t('communities.deviceLimit.perMember', { count: n })}
+            </option>
+          ))}
+        </select>
+        <p className="text-[11px] text-ink-faint">{t('communities.deviceLimit.communityHint')}</p>
+      </label>
+
       <div className="flex gap-2">
         <button type="submit" className="btn-gold flex-1" disabled={!name.trim() || busy}>
           {t('common.save')}

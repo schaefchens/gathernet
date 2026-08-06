@@ -634,6 +634,9 @@ export const communities = pgTable('communities', {
   /** set when a member is removed/leaves; a leader's client then rotates K_meta
    *  (re-encrypts metadata under a new epoch) and clears this. */
   rotationPending: boolean('rotation_pending').notNull().default(false),
+  /** devices-per-member ceiling for this community (K_meta grants); channels may tighten
+   *  it further — most restrictive wins. Fewer devices = fewer copies of the keys. */
+  maxDevicesPerMember: integer('max_devices_per_member').notNull().default(5),
   ownerAccountId: text('owner_account_id')
     .notNull()
     .references(() => accounts.accountId),
@@ -781,6 +784,9 @@ export const communityChannels = pgTable(
     memberListVisibility: channelMemberListVisibilityEnum('member_list_visibility')
       .notNull()
       .default('managers'),
+    /** devices-per-member for this channel; effective limit = min(community, channel).
+     *  Also sets the channel's people-capacity: MLS device cap ÷ this. */
+    maxDevicesPerMember: integer('max_devices_per_member').notNull().default(3),
     /** disappearing-message window in days (server prunes; clients also prune locally) */
     messageTtlDays: integer('message_ttl_days').notNull().default(30),
     /** mls (default, small/sensitive) vs group_key (scalable). @see channelEncryptionModeEnum */

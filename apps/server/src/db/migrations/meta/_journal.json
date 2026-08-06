@@ -176,6 +176,13 @@
       "when": 1786008492818,
       "tag": "0024_yielding_ricochet",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786014188006,
+      "tag": "0025_soft_vampiro",
+      "breakpoints": true
     }
   ]
 }
