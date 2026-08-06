@@ -478,5 +478,25 @@
       "channelHint": "Applies to this channel (the stricter of the two limits wins). It also sets how many people fit: about {{capacity}} in a small group channel.",
       "blocked": "This channel allows {{count}} device(s) per person. Drop one of your other devices in Settings, then join again."
     }
+  },
+  "rollcall": {
+    "ask": "Ask who's still here",
+    "open": "Still here? Please confirm by {{deadline}}.",
+    "closed": "Roll-call closed.",
+    "confirm": "I'm still here",
+    "confirmed": "✓ You confirmed",
+    "responses_one": "{{count}} confirmed",
+    "responses_other": "{{count}} confirmed",
+    "sweep": "Remove those who didn't answer",
+    "sweepHint": "Removes everyone who didn't confirm, in one step. Moderators and the owner are never removed.",
+    "window": "Answer window",
+    "window_1": "1 minute (testing)",
+    "window_1440": "1 day",
+    "window_4320": "3 days",
+    "window_10080": "7 days",
+    "window_20160": "14 days",
+    "window_43200": "30 days",
+    "removed_one": "{{count}} member removed",
+    "removed_other": "{{count}} members removed"
   }
 }

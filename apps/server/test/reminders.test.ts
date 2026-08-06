@@ -54,6 +54,23 @@ afterAll(async () => {
 
 beforeEach(() => sendNotification.mockClear())
 
+/** Endpoints pushed so far (the reminder fan-out is fire-and-forget). */
+function pushedEndpoints(): string[] {
+  return sendNotification.mock.calls.map((call) => (call[0] as { endpoint: string }).endpoint)
+}
+
+/** Wait until a SPECIFIC endpoint has been pushed — the fan-out is sequential, so waiting
+ *  for "any push" can return before the device under test is reached. */
+async function waitForPush(endpoint?: string, timeoutMs = 2000): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const calls = pushedEndpoints()
+    if (endpoint ? calls.includes(endpoint) : calls.length > 0) return calls
+    await new Promise((r) => setTimeout(r, 20))
+  }
+  return pushedEndpoints()
+}
+
 /** Fake registry — the trigger only reads isAccountOnline. */
 function registryWith(online: Set<string>): ConnectionRegistry {
   return { isAccountOnline: (a: string) => online.has(a) } as unknown as ConnectionRegistry
@@ -173,13 +190,8 @@ describe('event reminder trigger', () => {
       c.artifactId,
       { reminderInstant: Date.now() },
     )
-    // notifyEventReminder is fire-and-forget; let its microtasks flush.
-    await new Promise((r) => setTimeout(r, 20))
-
     expect(res.fired).toBe(true)
-    const pushed = sendNotification.mock.calls.map(
-      (call) => (call[0] as { endpoint: string }).endpoint,
-    )
+    const pushed = await waitForPush(`https://push.example/${p.deviceId}`)
     expect(pushed).toContain(`https://push.example/${p.deviceId}`)
   })
 
@@ -269,11 +281,9 @@ describe('event reminder trigger', () => {
       c.artifactId,
       { reminderInstant: Date.now() },
     )
-    await new Promise((r) => setTimeout(r, 20))
-    const pushed = sendNotification.mock.calls.map(
-      (call) => (call[0] as { endpoint: string }).endpoint,
-    )
-    expect(pushed).not.toContain(`https://push.example/${p.deviceId}`)
+    // Let the fan-out run to completion, then assert this device was skipped (it's online).
+    await waitForPush(`https://push.example/${p.deviceId}`, 400)
+    expect(pushedEndpoints()).not.toContain(`https://push.example/${p.deviceId}`)
   })
 
   it('rejects a non-member', async () => {

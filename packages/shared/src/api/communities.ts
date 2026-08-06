@@ -349,6 +349,8 @@ export const channelArtifactSchema = z.object({
   ticketCount: z.number().int().nonnegative().default(0),
   /** roll-call: how many members confirmed they're still here (visible to everyone) */
   responseCount: z.number().int().nonnegative().default(0),
+  /** roll-call: whether the CALLER has already confirmed (no one else's state) */
+  respondedByMe: z.boolean().default(false),
   /** roll-call: WHO responded — MANAGERS ONLY (empty for members; the no-roster rule). A
    *  manager needs it to compute who to remove; members only ever see the count. */
   responders: z.array(accountIdSchema).default([]),

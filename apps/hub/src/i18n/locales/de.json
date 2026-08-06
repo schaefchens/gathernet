@@ -478,5 +478,25 @@
       "channelHint": "Gilt für diesen Kanal (die strengere der beiden Grenzen zählt). Sie bestimmt auch, wie viele Personen hineinpassen: etwa {{capacity}} in einem Kanal für kleine Gruppen.",
       "blocked": "Dieser Kanal erlaubt {{count}} Gerät(e) pro Person. Entferne in den Einstellungen ein anderes Gerät und tritt dann erneut bei."
     }
+  },
+  "rollcall": {
+    "ask": "Fragen, wer noch dabei ist",
+    "open": "Noch dabei? Bitte bis {{deadline}} bestätigen.",
+    "closed": "Abfrage beendet.",
+    "confirm": "Ich bin noch dabei",
+    "confirmed": "✓ Bestätigt",
+    "responses_one": "{{count}} bestätigt",
+    "responses_other": "{{count}} bestätigt",
+    "sweep": "Nicht-Antwortende entfernen",
+    "sweepHint": "Entfernt in einem Schritt alle, die nicht bestätigt haben. Moderation und Eigentümer werden nie entfernt.",
+    "window": "Antwortfenster",
+    "window_1": "1 Minute (Test)",
+    "window_1440": "1 Tag",
+    "window_4320": "3 Tage",
+    "window_10080": "7 Tage",
+    "window_20160": "14 Tage",
+    "window_43200": "30 Tage",
+    "removed_one": "{{count}} Mitglied entfernt",
+    "removed_other": "{{count}} Mitglieder entfernt"
   }
 }

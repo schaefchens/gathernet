@@ -2192,6 +2192,7 @@ function toArtifact(
   ticketCount = 0,
   responders: string[] = [],
   managerView = false,
+  callerAccountId?: string,
 ): ChannelArtifact {
   return {
     artifactId: r.artifactId,
@@ -2208,6 +2209,7 @@ function toArtifact(
     expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
     ticketCount,
     responseCount: responders.length,
+    respondedByMe: !!callerAccountId && responders.includes(callerAccountId),
     responders: managerView ? (responders as ChannelArtifact['responders']) : [],
   }
 }
@@ -2325,6 +2327,7 @@ export async function listArtifacts(
         ticketsByArtifact.get(r.artifactId) ?? 0,
         respByArtifact.get(r.artifactId) ?? [],
         isManager,
+        accountId,
       ),
     ),
   }

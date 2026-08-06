@@ -10,12 +10,24 @@ import { MediaAttachment } from '../chat/MediaAttachment.tsx'
 
 const EMPTY: VerifiedArtifact[] = []
 
+/** Roll-call answer windows (minutes) — 1 is a TESTING option, not a sensible policy.
+ *  Literal i18n keys so the typed t() accepts them. */
+const ROLLCALL_WINDOWS = [
+  { minutes: 1, key: 'rollcall.window_1' },
+  { minutes: 1440, key: 'rollcall.window_1440' },
+  { minutes: 4320, key: 'rollcall.window_4320' },
+  { minutes: 10080, key: 'rollcall.window_10080' },
+  { minutes: 20160, key: 'rollcall.window_20160' },
+  { minutes: 43200, key: 'rollcall.window_43200' },
+] as const
+
 /** Emoji marker for each artifact kind. */
 const KIND_ICON: Record<ArtifactBody['kind'], string> = {
   pin: '📌',
   link: '🔗',
   media: '📎',
   event: '📅',
+  rollcall: '🙋',
 }
 
 /** A short locale-aware "in 2h / in 3d" for a pin's expiry, or null if none. */
@@ -41,6 +53,8 @@ function summarize(body: ArtifactBody, attachmentLabel: string): string {
       return body.caption || body.media.name || attachmentLabel
     case 'event':
       return body.title
+    case 'rollcall':
+      return body.prompt || ''
   }
 }
 
@@ -85,6 +99,8 @@ export function PinnedBar({
   const [busy, setBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [rollcallWindow, setRollcallWindow] = useState<number>(10080)
+  const [askingRollcall, setAskingRollcall] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composing = composeMode !== 'none'
 
@@ -103,7 +119,12 @@ export function PinnedBar({
   const active = artifacts.filter((a) => a.status === 'active')
   // Pins/links/media (newest-first) vs one-shot events (upcoming/ongoing only, soonest
   // first). A past event auto-archives ~2h after it ends (or starts, if no end).
-  const pins = active.filter((a) => a.body.kind !== 'event')
+  const pins = active.filter((a) => a.body.kind !== 'event' && a.body.kind !== 'rollcall')
+  // Roll-calls: newest first. An OPEN one asks members to confirm; a CLOSED one waits for a
+  // manager to sweep (so it stays visible past its deadline).
+  const rollcalls = active
+    .filter((a) => a.body.kind === 'rollcall')
+    .sort((x, y) => y.artifact.createdAt - x.artifact.createdAt)
   const events = active
     .filter((a): a is VerifiedArtifact & { body: Extract<ArtifactBody, { kind: 'event' }> } => {
       if (a.body.kind !== 'event') return false
@@ -115,7 +136,15 @@ export function PinnedBar({
   const suggested = artifacts.filter(
     (a) => a.status === 'suggested' && (isManager || a.artifact.createdBy === myAccountId),
   )
-  if (pins.length === 0 && events.length === 0 && suggested.length === 0 && !canCreate) return null
+  if (
+    pins.length === 0 &&
+    events.length === 0 &&
+    rollcalls.length === 0 &&
+    suggested.length === 0 &&
+    !canCreate
+  ) {
+    return null
+  }
 
   const canRemove = (a: VerifiedArtifact) => isManager || a.artifact.createdBy === myAccountId
   const attachmentLabel = t('chat.attachment')
@@ -131,6 +160,22 @@ export function PinnedBar({
       .participate(communityId, channelId, a.artifact.artifactId, !a.tally.mine)
       .then(reload)
       .catch((err) => console.error('rsvp failed', err))
+
+  const respondRollcall = (artifactId: string) =>
+    void channelArtifactsStore
+      .respondRollcall(communityId, channelId, artifactId)
+      .then(reload)
+      .catch((err) => fail('rollcall respond failed', err))
+  const sweepRollcall = (artifactId: string) =>
+    void channelArtifactsStore
+      .sweepRollcall(communityId, channelId, artifactId)
+      .then(reload)
+      .catch((err) => fail('rollcall sweep failed', err))
+  const startRollcall = (windowMinutes: number) =>
+    void channelArtifactsStore
+      .startRollcall(communityId, channelId, windowMinutes)
+      .then(reload)
+      .catch((err) => fail('rollcall start failed', err))
 
   const fail = (label: string, err: unknown) => {
     console.error(label, err)
@@ -267,7 +312,46 @@ export function PinnedBar({
             >
               {t('pins.composeFile')}
             </button>
+            {isManager && (
+              <button
+                type="button"
+                className="rounded-full border border-edge px-2 py-0.5"
+                onClick={() => setAskingRollcall((v) => !v)}
+              >
+                {t('rollcall.ask')}
+              </button>
+            )}
           </div>
+
+          {isManager && askingRollcall && (
+            <div className="space-y-2 rounded-md border border-gold/40 bg-gold/10 p-2">
+              <label className="block space-y-1">
+                <span className="text-[11px] text-ink-soft">{t('rollcall.window')}</span>
+                <select
+                  className="w-full bg-overlay border border-edge rounded-md px-2 py-1 text-sm"
+                  value={rollcallWindow}
+                  onChange={(e) => setRollcallWindow(Number(e.target.value))}
+                >
+                  {ROLLCALL_WINDOWS.map((w) => (
+                    <option key={w.minutes} value={w.minutes}>
+                      {t(w.key)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="text-[11px] text-ink-faint">{t('rollcall.sweepHint')}</p>
+              <button
+                type="button"
+                className="btn-gold text-xs px-3"
+                onClick={() => {
+                  startRollcall(rollcallWindow)
+                  setAskingRollcall(false)
+                }}
+              >
+                {t('rollcall.ask')}
+              </button>
+            </div>
+          )}
 
           {createError && (
             <p className="rounded-md border border-danger/50 bg-danger/10 px-2 py-1 text-[11px] text-danger">
@@ -377,51 +461,159 @@ export function PinnedBar({
         </div>
       )}
 
-      {!collapsed && (pins.length > 0 || events.length > 0 || suggested.length > 0) && (
-        <div className="space-y-1 border-t border-edge px-3 py-2">
-          {events.length > 0 && (
-            <div className="mb-1 space-y-1">
-              {events.map((a) => {
-                const startRel = relativeExpiry(a.body.startsAt, i18n.language)
-                const when = new Date(a.body.startsAt).toLocaleString(i18n.language, {
-                  dateStyle: 'medium',
-                  timeStyle: 'short',
-                })
-                return (
-                  <div key={a.artifact.artifactId} className="flex items-center gap-2">
-                    <span aria-hidden>{KIND_ICON.event}</span>
-                    <span className="flex-1 truncate">
-                      {a.body.url ? (
-                        <a
-                          href={a.body.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-indigo-soft hover:underline"
-                        >
-                          {a.body.title}
-                        </a>
-                      ) : (
-                        <span className="text-ink">{a.body.title}</span>
-                      )}
-                      <span className="ml-1 text-[11px] text-ink-faint">
-                        · {when}
-                        {startRel ? ` · ${startRel}` : ''}
-                        {a.body.location ? ` · 📍 ${a.body.location}` : ''}
-                      </span>
+      {!collapsed &&
+        (pins.length > 0 || events.length > 0 || rollcalls.length > 0 || suggested.length > 0) && (
+          <div className="space-y-1 border-t border-edge px-3 py-2">
+            {/* Roll-calls: confirm you're still here / manager sweeps the silent. */}
+            {rollcalls.map((a) => {
+              const closed = !!a.artifact.expiresAt && a.artifact.expiresAt <= now
+              const deadline = a.artifact.expiresAt
+                ? new Date(a.artifact.expiresAt).toLocaleString(i18n.language, {
+                    dateStyle: 'short',
+                    timeStyle: 'short',
+                  })
+                : ''
+              return (
+                <div
+                  key={a.artifact.artifactId}
+                  className="mb-1 space-y-1 rounded-md border border-gold/40 bg-gold/10 px-2 py-1.5"
+                >
+                  <p className="text-xs text-ink">
+                    <span aria-hidden>🙋 </span>
+                    {closed ? t('rollcall.closed') : t('rollcall.open', { deadline })}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {!closed && !a.artifact.respondedByMe && (
+                      <button
+                        type="button"
+                        className="btn-gold text-xs px-2 py-0.5"
+                        onClick={() => respondRollcall(a.artifact.artifactId)}
+                      >
+                        {t('rollcall.confirm')}
+                      </button>
+                    )}
+                    {!closed && a.artifact.respondedByMe && (
+                      <span className="text-[11px] text-olive">{t('rollcall.confirmed')}</span>
+                    )}
+                    <span className="text-[11px] text-ink-faint">
+                      {t('rollcall.responses', { count: a.artifact.responseCount })}
                     </span>
-                    <button
-                      type="button"
-                      aria-pressed={a.tally.mine}
-                      className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
-                        a.tally.mine
-                          ? 'border-indigo-soft bg-indigo/20 text-ink'
-                          : 'border-edge text-ink-faint hover:text-ink'
-                      }`}
-                      onClick={() => toggleGoing(a)}
-                      title={t('pins.goingHint')}
-                    >
-                      {t('pins.going', { count: a.tally.count })}
-                    </button>
+                    {isManager && closed && (
+                      <button
+                        type="button"
+                        className="btn-danger text-xs px-2 py-0.5 ml-auto"
+                        onClick={() => sweepRollcall(a.artifact.artifactId)}
+                      >
+                        {t('rollcall.sweep')}
+                      </button>
+                    )}
+                  </div>
+                  {isManager && closed && (
+                    <p className="text-[11px] text-ink-faint">{t('rollcall.sweepHint')}</p>
+                  )}
+                </div>
+              )
+            })}
+            {events.length > 0 && (
+              <div className="mb-1 space-y-1">
+                {events.map((a) => {
+                  const startRel = relativeExpiry(a.body.startsAt, i18n.language)
+                  const when = new Date(a.body.startsAt).toLocaleString(i18n.language, {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })
+                  return (
+                    <div key={a.artifact.artifactId} className="flex items-center gap-2">
+                      <span aria-hidden>{KIND_ICON.event}</span>
+                      <span className="flex-1 truncate">
+                        {a.body.url ? (
+                          <a
+                            href={a.body.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-indigo-soft hover:underline"
+                          >
+                            {a.body.title}
+                          </a>
+                        ) : (
+                          <span className="text-ink">{a.body.title}</span>
+                        )}
+                        <span className="ml-1 text-[11px] text-ink-faint">
+                          · {when}
+                          {startRel ? ` · ${startRel}` : ''}
+                          {a.body.location ? ` · 📍 ${a.body.location}` : ''}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        aria-pressed={a.tally.mine}
+                        className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
+                          a.tally.mine
+                            ? 'border-indigo-soft bg-indigo/20 text-ink'
+                            : 'border-edge text-ink-faint hover:text-ink'
+                        }`}
+                        onClick={() => toggleGoing(a)}
+                        title={t('pins.goingHint')}
+                      >
+                        {t('pins.going', { count: a.tally.count })}
+                      </button>
+                      {canRemove(a) && (
+                        <button
+                          type="button"
+                          className="text-xs text-ink-faint hover:text-danger"
+                          onClick={() => unpin(a.artifact.artifactId)}
+                          aria-label={t('pins.unpin')}
+                          title={t('pins.unpin')}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {pins.map((a) => {
+              const expiry = relativeExpiry(a.artifact.expiresAt, i18n.language)
+              const media =
+                a.body.kind === 'media' ? a.body.media : a.body.kind === 'pin' ? a.body.media : null
+              const expanded = expandedId === a.artifact.artifactId
+              return (
+                <div key={a.artifact.artifactId}>
+                  <div className="flex items-center gap-2">
+                    <span aria-hidden>{KIND_ICON[a.body.kind]}</span>
+                    {a.body.kind === 'link' ? (
+                      <a
+                        href={a.body.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 truncate text-indigo-soft hover:underline"
+                      >
+                        {summarize(a.body, attachmentLabel)}
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        className="flex-1 truncate text-left text-ink hover:text-indigo-soft"
+                        onClick={() => {
+                          if (media) {
+                            setExpandedId(expanded ? null : a.artifact.artifactId)
+                          } else if (a.body.kind === 'pin' && a.body.originalMessageId) {
+                            onJump(a.body.originalMessageId)
+                          }
+                        }}
+                      >
+                        {summarize(a.body, attachmentLabel) || t('pins.untitled')}
+                      </button>
+                    )}
+                    {expiry && (
+                      <span
+                        className="shrink-0 text-[10px] text-ink-faint"
+                        title={t('pins.expires', { when: expiry })}
+                      >
+                        ⏳ {expiry}
+                      </span>
+                    )}
                     {canRemove(a) && (
                       <button
                         type="button"
@@ -434,110 +626,55 @@ export function PinnedBar({
                       </button>
                     )}
                   </div>
-                )
-              })}
-            </div>
-          )}
-          {pins.map((a) => {
-            const expiry = relativeExpiry(a.artifact.expiresAt, i18n.language)
-            const media =
-              a.body.kind === 'media' ? a.body.media : a.body.kind === 'pin' ? a.body.media : null
-            const expanded = expandedId === a.artifact.artifactId
-            return (
-              <div key={a.artifact.artifactId}>
-                <div className="flex items-center gap-2">
-                  <span aria-hidden>{KIND_ICON[a.body.kind]}</span>
-                  {a.body.kind === 'link' ? (
-                    <a
-                      href={a.body.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 truncate text-indigo-soft hover:underline"
-                    >
-                      {summarize(a.body, attachmentLabel)}
-                    </a>
-                  ) : (
-                    <button
-                      type="button"
-                      className="flex-1 truncate text-left text-ink hover:text-indigo-soft"
-                      onClick={() => {
-                        if (media) {
-                          setExpandedId(expanded ? null : a.artifact.artifactId)
-                        } else if (a.body.kind === 'pin' && a.body.originalMessageId) {
-                          onJump(a.body.originalMessageId)
-                        }
-                      }}
-                    >
-                      {summarize(a.body, attachmentLabel) || t('pins.untitled')}
-                    </button>
-                  )}
-                  {expiry && (
-                    <span
-                      className="shrink-0 text-[10px] text-ink-faint"
-                      title={t('pins.expires', { when: expiry })}
-                    >
-                      ⏳ {expiry}
-                    </span>
-                  )}
-                  {canRemove(a) && (
-                    <button
-                      type="button"
-                      className="text-xs text-ink-faint hover:text-danger"
-                      onClick={() => unpin(a.artifact.artifactId)}
-                      aria-label={t('pins.unpin')}
-                      title={t('pins.unpin')}
-                    >
-                      ✕
-                    </button>
+                  {media && expanded && (
+                    <div className="mt-1 mb-2 pl-6">
+                      <MediaAttachment media={media} />
+                    </div>
                   )}
                 </div>
-                {media && expanded && (
-                  <div className="mt-1 mb-2 pl-6">
-                    <MediaAttachment media={media} />
-                  </div>
-                )}
-              </div>
-            )
-          })}
+              )
+            })}
 
-          {suggested.length > 0 && (
-            <div className="mt-2 border-t border-edge pt-2">
-              <p className="mb-1 text-[11px] uppercase tracking-wide text-ink-faint">
-                {t('pins.suggested', { count: suggested.length })}
-              </p>
-              {suggested.map((a) => (
-                <div key={a.artifact.artifactId} className="flex items-center gap-2">
-                  <span aria-hidden>{KIND_ICON[a.body.kind]}</span>
-                  <span className="flex-1 truncate text-ink-soft">
-                    {summarize(a.body, attachmentLabel) || t('pins.untitled')}
-                    {!isManager && (
-                      <span className="ml-1 text-[11px] text-ink-faint">· {t('pins.pending')}</span>
+            {suggested.length > 0 && (
+              <div className="mt-2 border-t border-edge pt-2">
+                <p className="mb-1 text-[11px] uppercase tracking-wide text-ink-faint">
+                  {t('pins.suggested', { count: suggested.length })}
+                </p>
+                {suggested.map((a) => (
+                  <div key={a.artifact.artifactId} className="flex items-center gap-2">
+                    <span aria-hidden>{KIND_ICON[a.body.kind]}</span>
+                    <span className="flex-1 truncate text-ink-soft">
+                      {summarize(a.body, attachmentLabel) || t('pins.untitled')}
+                      {!isManager && (
+                        <span className="ml-1 text-[11px] text-ink-faint">
+                          · {t('pins.pending')}
+                        </span>
+                      )}
+                    </span>
+                    {isManager && (
+                      <button
+                        type="button"
+                        className="text-xs text-olive hover:underline"
+                        onClick={() => approve(a.artifact.artifactId)}
+                      >
+                        {t('pins.approve')}
+                      </button>
                     )}
-                  </span>
-                  {isManager && (
-                    <button
-                      type="button"
-                      className="text-xs text-olive hover:underline"
-                      onClick={() => approve(a.artifact.artifactId)}
-                    >
-                      {t('pins.approve')}
-                    </button>
-                  )}
-                  {canRemove(a) && (
-                    <button
-                      type="button"
-                      className="text-xs text-ink-faint hover:text-danger"
-                      onClick={() => unpin(a.artifact.artifactId)}
-                    >
-                      {t('pins.dismiss')}
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                    {canRemove(a) && (
+                      <button
+                        type="button"
+                        className="text-xs text-ink-faint hover:text-danger"
+                        onClick={() => unpin(a.artifact.artifactId)}
+                      >
+                        {t('pins.dismiss')}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
     </div>
   )
 }

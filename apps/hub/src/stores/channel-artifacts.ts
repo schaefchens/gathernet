@@ -7,13 +7,18 @@
  * event that prompts a reload.
  */
 
-import type { ChannelPinPolicy, ListArtifactsResponse } from '@gathernet/shared'
+import type {
+  ChannelPinPolicy,
+  ListArtifactsResponse,
+  RollcallSweepResponse,
+} from '@gathernet/shared'
 import { create } from 'zustand'
 import { api } from '../lib/api.ts'
 import {
   type ArtifactBody,
   buildApproval,
   buildArtifact,
+  buildParticipation,
   isExpired,
   newRsvpTicket,
   openArtifactRaw,
@@ -29,6 +34,7 @@ import {
   makeDeviceResolver,
 } from '../lib/community-keys.ts'
 import { rsvpTicketStore, secureStore } from '../lib/storage.ts'
+import { communityChatStore } from './community-chat.ts'
 
 interface ChannelArtifactsState {
   /** channelId → verified, non-expired artifacts (active + suggested), newest first */
@@ -44,6 +50,8 @@ export const useChannelArtifacts = create<ChannelArtifactsState>(() => ({
 
 const base = (communityId: string, channelId: string) =>
   `/api/v1/communities/${communityId}/channels/${channelId}/artifacts`
+const rollcallBase = (communityId: string, channelId: string) =>
+  `/api/v1/communities/${communityId}/channels/${channelId}/rollcalls`
 
 export const channelArtifactsStore = {
   /** Fetch + decrypt + verify a channel's artifacts into the store. */
@@ -63,7 +71,9 @@ export const channelArtifactsStore = {
     const now = Date.now()
     const out: VerifiedArtifact[] = []
     for (const a of res.artifacts) {
-      if (isExpired(a, now)) continue
+      // A roll-call's expiresAt is its DEADLINE, not an expiry: keep it so a manager can
+      // still sweep after it closes.
+      if (a.kind !== 'rollcall' && isExpired(a, now)) continue
       const raw = await openArtifactRaw(kMeta, a.sealedBody)
       const body = parseArtifactBody(raw)
       if (!raw || !body) continue // no K_meta or corrupt → can't render
@@ -143,6 +153,54 @@ export const channelArtifactsStore = {
     const { ticket, ticketHash } = await newRsvpTicket()
     await api('POST', url, { ticketHash })
     await rsvpTicketStore.put(artifactId, ticket)
+  },
+
+  /** Manager opens a roll-call: seal the prompt, sign it, POST with the chosen window. */
+  async startRollcall(
+    communityId: string,
+    channelId: string,
+    windowMinutes: number,
+    prompt?: string,
+  ): Promise<void> {
+    const record = await secureStore.getDevice()
+    const kMeta = await getKMeta(communityId)
+    if (!record || !kMeta) throw new Error('locked')
+    const epoch = await getKMetaEpoch(communityId)
+    const body: ArtifactBody = { v: 1, kind: 'rollcall', ...(prompt ? { prompt } : {}) }
+    // buildArtifact mints the id + seals/signs; the server sets expiresAt from the window.
+    const built = await buildArtifact(channelId, body, kMeta, epoch, record, null)
+    await api('POST', `${rollcallBase(communityId, channelId)}`, {
+      artifactId: built.artifactId,
+      windowMinutes,
+      sealEpoch: built.sealEpoch,
+      sealedBody: built.sealedBody,
+      issuerDeviceId: built.issuerDeviceId,
+      issuerSig: built.issuerSig,
+    })
+  },
+
+  /** "I'm still here" — identified + device-signed, so it can't be forged by the relay. */
+  async respondRollcall(communityId: string, channelId: string, artifactId: string): Promise<void> {
+    const record = await secureStore.getDevice()
+    if (!record) throw new Error('locked')
+    await api(
+      'POST',
+      `${rollcallBase(communityId, channelId)}/${artifactId}/respond`,
+      await buildParticipation(channelId, artifactId, record),
+    )
+  },
+
+  /**
+   * Manager sweeps a closed roll-call: the server marks non-responders removed and returns
+   * them, then this client does the key work in ONE operation (commit or rotation).
+   */
+  async sweepRollcall(communityId: string, channelId: string, artifactId: string): Promise<number> {
+    const res = await api<RollcallSweepResponse>(
+      'POST',
+      `${rollcallBase(communityId, channelId)}/${artifactId}/sweep`,
+    )
+    await communityChatStore.applyRollcallSweep(communityId, channelId, res.removedDeviceIds)
+    return res.removedAccountIds.length
   },
 
   /** Drop a channel's cached artifacts (e.g. on leave). */

@@ -435,6 +435,29 @@ class CommunityChatStore {
     }
   }
 
+  /**
+   * Do the KEY work for a roll-call sweep, in ONE operation whatever the channel type:
+   * - mls: remove the non-responders' leaves in a single commit (the engine already has the
+   *   leaf set locally, so no roster lookup is needed).
+   * - group_key: rotate K_channel — the new epoch is granted only to the remaining devices,
+   *   so non-responders are excluded by OMISSION and never enumerated.
+   */
+  async applyRollcallSweep(
+    communityId: string,
+    channelId: string,
+    removedDeviceIds: string[],
+  ): Promise<void> {
+    if (!this.record) return
+    if (this.groupKey.has(channelId)) {
+      await this.rotateChannelForEvent(communityId, channelId)
+      return
+    }
+    if (removedDeviceIds.length === 0) return
+    await this.engine?.removeAccountDevices(channelId, removedDeviceIds).catch((err) => {
+      console.error('rollcall sweep commit failed', channelId, err)
+    })
+  }
+
   /** Manager-driven K_channel rotation after a member left (forward secrecy). */
   async rotateChannelKey(
     communityId: string,

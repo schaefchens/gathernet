@@ -69,6 +69,7 @@ function record(
     expiresAt: built.expiresAt,
     ticketCount: 0,
     responseCount: 0,
+    respondedByMe: false,
     responders: [],
   }
 }

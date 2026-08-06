@@ -49,6 +49,8 @@ export type ArtifactBody =
       note?: string
     }
   | { v: 1; kind: 'link'; url: string; title?: string; note?: string }
+  /** "who is still here" — the prompt members see; the deadline is the artifact's expiresAt */
+  | { v: 1; kind: 'rollcall'; prompt?: string }
   | { v: 1; kind: 'media'; media: MediaRef; caption?: string }
   | {
       v: 1
@@ -143,6 +145,18 @@ function participationTuple(channelId: string, artifactId: string): Uint8Array {
     encoder.encode(channelId),
     encoder.encode(artifactId),
   )
+}
+
+/** Sign a roll-call response ("I'm still here") — identified + device-attested, so the
+ *  relay can't forge or suppress-and-fake a confirmation. */
+export async function buildParticipation(
+  channelId: string,
+  artifactId: string,
+  record: DeviceRecord,
+): Promise<{ deviceId: string; sig: string }> {
+  const mls = await loadCrypto()
+  const sig = mls.ed25519Sign(record.deviceSecret, participationTuple(channelId, artifactId))
+  return { deviceId: record.deviceId, sig: toStdB64(sig) }
 }
 
 /** A fresh random RSVP ticket (bearer secret, kept device-local) + its SHA-256 hex hash.
