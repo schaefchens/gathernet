@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
@@ -101,6 +101,22 @@ export function ThreadView({
   const [sending, setSending] = useState(false)
   const replyTarget = byId.get(replyTargetId)
   const detachedRoot = index.detached.has(rootId)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Focus the reply input on open and whenever the reply target changes, so you can type
+  // straight away.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on the reply target
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [replyTargetId])
+
+  // Keep the newest reply in view as the thread grows.
+  const lastSeq = rows[rows.length - 1]?.message.seq ?? 0
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on the newest seq
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [lastSeq])
 
   const send = async () => {
     const text = draft.trim()
@@ -162,6 +178,7 @@ export function ThreadView({
               onReply={(m) => setReplyTargetId(m.id ?? rootId)}
             />
           ))}
+          <div ref={bottomRef} />
         </div>
 
         <div className="border-t border-edge px-4 py-3">
@@ -188,12 +205,11 @@ export function ThreadView({
             }}
           >
             <input
+              ref={inputRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder={ready ? t('chat.threadReplyPlaceholder') : t('chat.cannotSend')}
               disabled={!ready}
-              // biome-ignore lint/a11y/noAutofocus: focus the reply field when the thread opens
-              autoFocus
             />
             <button
               type="submit"

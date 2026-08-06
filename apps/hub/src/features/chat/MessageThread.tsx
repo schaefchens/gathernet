@@ -85,7 +85,12 @@ export function MessageThread({
   /** open thread's root message id (threaded channels only) */
   const [openThreadRoot, setOpenThreadRoot] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  /** whether the user is scrolled near the bottom — so new messages autoscroll but we
+   *  don't yank them down while they're reading history. */
+  const atBottomRef = useRef(true)
   const supportsViewOnce = !!onConsume
   const friendSet = useMemo(() => new Set(friendAccountIds ?? []), [friendAccountIds])
 
@@ -103,9 +108,19 @@ export function MessageThread({
   // In threaded mode the timeline shows only top-level messages (replies live in threads).
   const timeline = threadIndex ? threadIndex.topLevel : messages
 
+  // Autoscroll to the newest message when the timeline grows — but only if the user is
+  // already at the bottom (don't interrupt scrolling back through history). Keyed on the
+  // last message's seq so it also fires when messages load in after mount.
+  const lastSeq = timeline[timeline.length - 1]?.seq ?? 0
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on the newest seq
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [])
+    if (atBottomRef.current) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [lastSeq])
+
+  // Focus the composer when a reply is started, so you can type immediately.
+  useEffect(() => {
+    if (replyingTo) composerRef.current?.focus()
+  }, [replyingTo])
 
   const pickFile = async (file: File | undefined) => {
     if (!file || !onSendMedia) return
@@ -168,7 +183,14 @@ export function MessageThread({
 
   return (
     <>
-      <div className="flex-1 overflow-y-auto py-4 space-y-2">
+      <div
+        ref={listRef}
+        className="flex-1 overflow-y-auto py-4 space-y-2"
+        onScroll={() => {
+          const el = listRef.current
+          if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+        }}
+      >
         {!ready && (
           <p className="text-center text-sm text-amber py-8">
             {notReadyLabel ?? t('chat.settingUp')}
@@ -278,11 +300,11 @@ export function MessageThread({
               </button>
             )}
             <input
+              ref={composerRef}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder={ready ? t('chat.placeholder') : t('chat.cannotSend')}
               disabled={!ready}
-              // biome-ignore lint/a11y/noAutofocus: focus the composer on open
               autoFocus
             />
             <button
