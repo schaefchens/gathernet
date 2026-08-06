@@ -1,29 +1,6 @@
 @import "tailwindcss";
 
 /*
- * Cormorant Garamond — the display serif, self-hosted. Variable weight axis
- * (300–700) subset to latin + latin-ext, so German umlauts and the punctuation
- * the UI actually uses survive: ~43 KB each, no off-origin request, precached by
- * the service worker and therefore fine over the onion service. Licensed under
- * the SIL OFL; see /fonts/OFL.txt.
- */
-@font-face {
-  font-family: "Cormorant Garamond";
-  src: url("/fonts/cormorant-garamond-var.woff2") format("woff2");
-  font-weight: 300 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Cormorant Garamond";
-  src: url("/fonts/cormorant-garamond-italic-var.woff2") format("woff2");
-  font-weight: 300 700;
-  font-style: italic;
-  font-display: swap;
-}
-
-/*
  * Gathernet theme — "illuminated manuscript, not chat app".
  *
  * Two surfaces: a near-black violet *binding* (rail, sidebar, headers, composer,
@@ -72,9 +49,10 @@
   --color-danger: #c2564a;
 
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
-  --font-display:
-    "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia,
-    serif;
+  /* Display serif: system faces only. Nothing is bundled — a high-contrast
+     Garamond reads too thin light-on-dark, so these sturdier old-style faces
+     carry the manuscript feel without the legibility cost. */
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
 
   --radius-md: 10px;
   --radius-lg: 16px;

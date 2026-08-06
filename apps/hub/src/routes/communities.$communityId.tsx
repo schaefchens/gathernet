@@ -177,7 +177,7 @@ function CommunityDetailScreen() {
             label={communityName}
             size="md"
           />
-          <h1 className="flex-1 font-display text-2xl font-semibold truncate text-gold-bright">
+          <h1 className="flex-1 font-display text-2xl truncate text-gold-bright">
             {communityName}
           </h1>
           <span

@@ -67,12 +67,22 @@ Two mechanics worth knowing before touching this file:
 
 ### Type
 
-Cormorant Garamond, self-hosted at `apps/hub/public/fonts/` — variable weight axis
-(300–700), subset to latin + latin-ext so German umlauts survive, ~43 KB per file, plus
-the italic face. SIL OFL, licence at `/fonts/OFL.txt`. Preloaded in `index.html` and
-precached by the service worker, so it works offline and over the onion service. Its
-default axis weight is Light: prominent display strings need an explicit
-`font-semibold`. Sans is Inter with a `system-ui` fallback (Inter itself is not bundled).
+**No webfont is bundled.** The display serif resolves through a system stack — Iowan Old
+Style, Palatino, Book Antiqua, Georgia — and the sans through Inter falling back to
+`system-ui`.
+
+Cormorant Garamond was tried and rejected: it is a display face with very light strokes
+and high contrast, and light-on-dark makes thin strokes read thinner still, so it was
+tiring to read at UI sizes. Any replacement has to be judged on a dark background at
+small sizes, not on a specimen sheet. Look for **low-to-moderate stroke contrast and a
+large x-height** — Source Serif 4, Lora, or Libre Baskerville are the safe directions;
+another Garamond most likely is not.
+
+Whatever is chosen must be self-hosted under `apps/hub/public/fonts/` with its licence
+file, referenced by `@font-face` with `font-display: swap`, and preloaded in
+`index.html`. The service worker's `globPatterns` already precaches `woff2`, so a bundled
+font costs no off-origin request and works over the onion service. Subset to
+latin + latin-ext — German umlauts must survive.
 
 ### Rules the concepts establish
 

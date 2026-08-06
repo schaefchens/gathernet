@@ -119,13 +119,10 @@ function AppShell() {
       {isDesktop && (
         <aside className="flex w-[310px] shrink-0 flex-col border-r border-edge bg-raised">
           <div className="px-4 pt-4 pb-3">
-            <Link
-              to="/"
-              className="font-display text-3xl font-semibold text-gold-bright leading-none"
-            >
+            <Link to="/" className="font-display text-2xl text-gold-bright leading-none">
               {t('common.appName')}
             </Link>
-            <p className="mt-1 font-display text-sm italic text-ink-faint">{t('nav.tagline')}</p>
+            <p className="mt-1 text-xs italic text-ink-faint">{t('nav.tagline')}</p>
           </div>
           <p className="section-label px-4 pb-2">{t('chats.title')}</p>
           <div className="flex-1 overflow-y-auto px-2 pb-2">
@@ -162,7 +159,7 @@ function AppShell() {
                 <span className="seal h-8 w-8" aria-hidden>
                   <ShieldIcon size={16} />
                 </span>
-                <span className="font-display text-2xl font-semibold text-gold-bright">
+                <span className="font-display text-2xl text-gold-bright">
                   {t('common.appName')}
                 </span>
               </Link>
