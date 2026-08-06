@@ -46,8 +46,19 @@ container can reach it; be aware it's also reachable on your LAN while `pnpm dev
 
 `docker compose -f docker-compose.prod.yml up --build` brings up `tor` alongside `web`.
 Grab the address from `docker compose logs tor`. **Back up the `tordata` volume** — losing
-it means a new, unshareable address. Optionally advertise the onion from the clearnet site
-with an `Onion-Location` response header so Tor Browser offers it automatically.
+it means a new, unshareable address.
+
+**Advertise the onion (`Onion-Location`).** Set `ONION_HOST` to the printed address and the
+`web` (Caddy) container adds an `Onion-Location` header to app responses, so Tor Browser
+shows the ".onion available" button on the clearnet site:
+
+```sh
+ONION_HOST=<addr>.onion docker compose -f docker-compose.prod.yml up -d web
+```
+
+The header is only emitted when `ONION_HOST` is set (clearnet-only deploys send nothing),
+and Tor Browser only honours it over **HTTPS** — so the clearnet site must be behind a
+TLS-terminating proxy (the Caddyfile itself runs with `auto_https off` on :8080).
 
 ## What does *not* work over onion (by design)
 

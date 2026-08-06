@@ -38,6 +38,10 @@ services:
       dockerfile: apps/hub/Dockerfile
     ports:
       - '8080:8080'
+    environment:
+      # Set to the address the `tor` service prints (docker compose logs tor) to advertise
+      # the onion via the Onion-Location header. Unset → no header (clearnet only).
+      ONION_HOST: ${ONION_HOST:-}
     depends_on:
       - server
 

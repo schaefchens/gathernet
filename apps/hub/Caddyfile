@@ -26,5 +26,12 @@
 			X-Frame-Options DENY
 			Permissions-Policy "geolocation=(), microphone=()"
 		}
+		# Advertise the Tor onion service so Tor Browser offers the ".onion available"
+		# button. Only emitted when ONION_HOST is set (the address the `tor` container
+		# generates) — the expression is evaluated with the env value substituted at load,
+		# so deployments without an onion send no header. Tor Browser only honours this
+		# over HTTPS clearnet (TLS is terminated by the fronting proxy).
+		@onion expression `"{$ONION_HOST:}" != ""`
+		header @onion Onion-Location "http://{$ONION_HOST:}{uri}"
 	}
 }
