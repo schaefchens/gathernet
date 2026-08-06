@@ -501,6 +501,9 @@
     "exempt": "Du bist ausgenommen — Moderation und Eigentümer werden nie entfernt.",
     "openManager": "Warte bis {{deadline}} auf Bestätigungen der Mitglieder.",
     "section": "Mitglieder-Check",
-    "sweepInModeration": "Entfernen unter Moderation"
+    "sweepInModeration": "Entfernen unter Moderation",
+    "cancel": "Diese Abfrage abbrechen",
+    "discard": "Verwerfen, ohne zu entfernen",
+    "exists": "In diesem Kanal läuft bereits eine Mitglieder-Abfrage."
   }
 }

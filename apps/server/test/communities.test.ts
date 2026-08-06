@@ -2534,6 +2534,44 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
     expect(afterSweep.map((a) => a.artifactId)).not.toContain(artifactId)
   })
 
+  it('only one roll-call per channel at a time (a second would mask the first)', async () => {
+    const owner = await createUser('RcOneAtATime')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    await start(owner, communityId, channelId, 1440)
+    const second = await app.inject({
+      method: 'POST',
+      url: rollcallsUrl(communityId, channelId),
+      headers: auth(owner),
+      payload: {
+        artifactId: randomUUID(),
+        windowMinutes: 1440,
+        expiresAt: Date.now() + 1440 * 60_000,
+        sealEpoch: 0,
+        sealedBody: fakeB64(32),
+        issuerDeviceId: owner.deviceId,
+        issuerSig: fakeB64(64),
+      },
+    })
+    expect(second.statusCode).toBe(409)
+  })
+
+  it('a manager can cancel/discard a roll-call, freeing the channel for a new one', async () => {
+    const owner = await createUser('RcCancel')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    const artifactId = await start(owner, communityId, channelId, 1440)
+    const cancel = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/artifacts/${artifactId}`,
+      headers: auth(owner),
+    })
+    expect(cancel.statusCode).toBe(200)
+    // freed → a new one may start
+    const again = await start(owner, communityId, channelId, 1440)
+    expect(again).toBeTruthy()
+  })
+
   it('sweeping an OPEN roll-call is refused', async () => {
     const owner = await createUser('RcOwner2')
     const communityId = await createCommunity(owner)

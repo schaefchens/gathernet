@@ -501,6 +501,9 @@
     "exempt": "You're exempt — moderators and the owner are never removed.",
     "openManager": "Waiting for members to confirm until {{deadline}}.",
     "section": "Membership check",
-    "sweepInModeration": "Sweep in Moderation"
+    "sweepInModeration": "Sweep in Moderation",
+    "cancel": "Cancel this check",
+    "discard": "Discard without removing",
+    "exists": "A membership check is already running in this channel."
   }
 }

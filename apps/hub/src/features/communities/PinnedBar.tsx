@@ -119,9 +119,12 @@ export function PinnedBar({
   const pins = active.filter((a) => a.body.kind !== 'event' && a.body.kind !== 'rollcall')
   // Roll-calls: newest first. An OPEN one asks members to confirm; a CLOSED one waits for a
   // manager to sweep (so it stays visible past its deadline).
+  // Only the NEWEST roll-call is ever shown: stale ones would stack up in the bar and the
+  // oldest would mask the one that actually needs attention.
   const rollcalls = active
     .filter((a) => a.body.kind === 'rollcall')
     .sort((x, y) => y.artifact.createdAt - x.artifact.createdAt)
+    .slice(0, 1)
   const events = active
     .filter((a): a is VerifiedArtifact & { body: Extract<ArtifactBody, { kind: 'event' }> } => {
       if (a.body.kind !== 'event') return false

@@ -10,7 +10,7 @@ import type {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api } from '../../lib/api.ts'
+import { ApiError, api } from '../../lib/api.ts'
 import { makeDeviceResolver } from '../../lib/community-keys.ts'
 import { openReport, type ReportBody } from '../../lib/reports.ts'
 import { secureStore } from '../../lib/storage.ts'
@@ -77,10 +77,13 @@ export function ModerationPanel({
   const rollcalls = (artifacts ?? [])
     .filter((a) => a.status === 'active' && a.body.kind === 'rollcall')
     .sort((x, y) => y.artifact.createdAt - x.artifact.createdAt)
-  const openRollcall = rollcalls.find((a) => !!a.artifact.expiresAt && a.artifact.expiresAt > tick)
-  const closedRollcall = rollcalls.find(
-    (a) => !!a.artifact.expiresAt && a.artifact.expiresAt <= tick,
-  )
+  // Branch on the NEWEST one only: picking "any open" let an older open roll-call mask a
+  // closed one that still needed sweeping.
+  const currentRollcall = rollcalls[0]
+  const rollcallClosed =
+    !!currentRollcall?.artifact.expiresAt && currentRollcall.artifact.expiresAt <= tick
+  const openRollcall = currentRollcall && !rollcallClosed ? currentRollcall : undefined
+  const closedRollcall = currentRollcall && rollcallClosed ? currentRollcall : undefined
 
   const runRollcall = (fn: () => Promise<unknown>) => {
     setRollcallBusy(true)
@@ -89,7 +92,14 @@ export function ModerationPanel({
       .then(() => channelArtifactsStore.load(communityId, channelId, pinPolicy))
       .catch((err: unknown) => {
         console.error('rollcall action failed', err)
-        setRollcallError(err instanceof Error ? err.message : String(err))
+        const code = err instanceof ApiError ? err.code : ''
+        setRollcallError(
+          code === 'rollcall_exists'
+            ? t('rollcall.exists')
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        )
       })
       .finally(() => setRollcallBusy(false))
   }
@@ -229,6 +239,22 @@ export function ModerationPanel({
             <p className="text-xs text-ink-faint">
               {t('rollcall.responses', { count: openRollcall.artifact.responseCount })}
             </p>
+            <button
+              type="button"
+              className="btn-quiet text-xs px-2 py-1"
+              disabled={rollcallBusy}
+              onClick={() =>
+                runRollcall(() =>
+                  channelArtifactsStore.unpin(
+                    communityId,
+                    channelId,
+                    openRollcall.artifact.artifactId,
+                  ),
+                )
+              }
+            >
+              {t('rollcall.cancel')}
+            </button>
           </div>
         ) : closedRollcall ? (
           <div className="space-y-2 rounded-md bg-overlay px-3 py-2">
@@ -251,6 +277,22 @@ export function ModerationPanel({
               }
             >
               {t('rollcall.sweep')}
+            </button>
+            <button
+              type="button"
+              className="btn-quiet text-xs px-2 py-1 ml-2"
+              disabled={rollcallBusy}
+              onClick={() =>
+                runRollcall(() =>
+                  channelArtifactsStore.unpin(
+                    communityId,
+                    channelId,
+                    closedRollcall.artifact.artifactId,
+                  ),
+                )
+              }
+            >
+              {t('rollcall.discard')}
             </button>
             <p className="text-[11px] text-ink-faint">{t('rollcall.sweepHint')}</p>
           </div>

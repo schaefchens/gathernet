@@ -2656,6 +2656,14 @@ export async function startRollcall(
   await loadChannel(db, communityId, channelId)
   await requireChannelManager(db, channelId, membership)
   await requireOwnDevice(db, accountId, input.issuerDeviceId)
+  // ONE roll-call per channel at a time: a second concurrent (or unswept) one would mask the
+  // first — a manager could never reach the sweep for the older, closed one.
+  const existing = await db
+    .select({ artifactId: channelArtifacts.artifactId })
+    .from(channelArtifacts)
+    .where(and(eq(channelArtifacts.channelId, channelId), eq(channelArtifacts.kind, 'rollcall')))
+    .limit(1)
+  if (existing.length > 0) throw new ServiceError(409, 'rollcall_exists')
   // The signature binds expiresAt, so we store the deadline the CLIENT signed — we only
   // check it matches the declared window (small tolerance for clock skew / latency).
   const expected = Date.now() + input.windowMinutes * 60_000
@@ -3495,6 +3503,17 @@ export async function pruneChannelInvites(db: Db): Promise<number> {
       or(lt(channelInvites.expiresAt, new Date()), sql`${channelInvites.revokedAt} IS NOT NULL`),
     )
     .returning({ id: channelInvites.id })
+  return deleted.length
+}
+
+/** Delete roll-calls abandoned long after their deadline (never swept), so they can't
+ *  accumulate in a channel's artifact list forever. */
+export async function pruneRollcalls(db: Db): Promise<number> {
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+  const deleted = await db
+    .delete(channelArtifacts)
+    .where(and(eq(channelArtifacts.kind, 'rollcall'), lt(channelArtifacts.expiresAt, cutoff)))
+    .returning({ id: channelArtifacts.artifactId })
   return deleted.length
 }
 
