@@ -592,6 +592,11 @@ export const channelPostPolicyEnum = pgEnum('channel_post_policy', ['everyone', 
  * the capability chain — the server relays opaque records only.
  */
 export const channelPinPolicyEnum = pgEnum('channel_pin_policy', ['everyone', 'moderators'])
+/** Who may see a channel's full member list (no-roster rule: managers by default). */
+export const channelMemberListVisibilityEnum = pgEnum('channel_member_list_visibility', [
+  'managers',
+  'members',
+])
 /**
  * How a channel's messages are encrypted. 'mls' = one MLS group (per-message
  * forward secrecy, immediate removal) — the default, best for small/sensitive
@@ -771,6 +776,11 @@ export const communityChannels = pgTable(
     /** who may pin artifacts; default derived from encryptionMode at creation
      *  (mls → everyone, group_key → moderators). @see channelPinPolicyEnum */
     pinPolicy: channelPinPolicyEnum('pin_policy').notNull().default('everyone'),
+    /** who may see this channel's full member list; managers-only by default (the
+     *  no-roster rule). A manager may opt a small trusted channel into 'members'. */
+    memberListVisibility: channelMemberListVisibilityEnum('member_list_visibility')
+      .notNull()
+      .default('managers'),
     /** disappearing-message window in days (server prunes; clients also prune locally) */
     messageTtlDays: integer('message_ttl_days').notNull().default(30),
     /** mls (default, small/sensitive) vs group_key (scalable). @see channelEncryptionModeEnum */

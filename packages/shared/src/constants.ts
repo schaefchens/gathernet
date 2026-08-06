@@ -55,6 +55,17 @@ export const COMMUNITY_MEMBER_PAGE_SIZE = 100
  */
 export const EXACT_MEMBER_COUNT_MAX = 50
 
+/**
+ * Above this many active members there is NO browsable roster at all — not even for
+ * managers: a scrollable list of names for a 100k community is useless to a human and a
+ * deanonymization risk if that manager account is ever compromised or coerced. Managers of
+ * a larger community work from targeted lookups + the moderation queue instead.
+ *
+ * Capability issuance is unaffected: it sweeps `/member-ids` (accountId + role, NO display
+ * names), which stays available to owners/leaders at any size.
+ */
+export const ROSTER_BROWSE_MAX_MEMBERS = 200
+
 /** MLS key package pool per device. */
 export const KEY_PACKAGE_TARGET = 50
 export const KEY_PACKAGE_REPLENISH_BELOW = 20

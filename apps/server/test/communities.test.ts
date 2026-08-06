@@ -2405,6 +2405,66 @@ describe('no-roster rule: community membership is not member-enumerable', () => 
     expect(asOwner.members.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('serves member IDS (no display names) to a leader for capability issuance', async () => {
+    const owner = await createUser('Owner')
+    const casual = await createUser('Casual')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, casual)
+
+    const ids = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/member-ids`,
+      headers: auth(owner),
+    })
+    expect(ids.statusCode).toBe(200)
+    const list = ids.json().members as Array<Record<string, unknown>>
+    expect(list.length).toBeGreaterThanOrEqual(2)
+    // identities only — a name list is never materialised for issuance
+    for (const m of list) {
+      expect(m.accountId).toBeDefined()
+      expect(m.role).toBeDefined()
+      expect(m.displayName).toBeUndefined()
+    }
+    // and it stays leader-only
+    const asCasual = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/member-ids`,
+      headers: auth(casual),
+    })
+    expect(asCasual.statusCode).toBe(403)
+  })
+
+  it('opting a channel into memberListVisibility lets its members see the roster', async () => {
+    const owner = await createUser('Owner')
+    const member = await createUser('Member')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+    const channelId = await createChannel(owner, communityId)
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/join`,
+      headers: auth(member),
+    })
+    const roster = () =>
+      app.inject({
+        method: 'GET',
+        url: `/api/v1/communities/${communityId}/channels/${channelId}/members`,
+        headers: auth(member),
+      })
+
+    // default 'managers' → a plain member is refused
+    expect((await roster()).statusCode).toBe(403)
+
+    const patch = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}`,
+      headers: auth(owner),
+      payload: { memberListVisibility: 'members' },
+    })
+    expect(patch.statusCode).toBe(200)
+    expect((await roster()).statusCode).toBe(200)
+  })
+
   it('reports a coarse size band (exact only for a small community)', async () => {
     const owner = await createUser('Owner')
     const communityId = await createCommunity(owner)

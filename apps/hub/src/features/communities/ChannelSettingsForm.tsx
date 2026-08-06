@@ -2,6 +2,7 @@ import type {
   ChannelAccess,
   ChannelEncryptionMode,
   ChannelJoinPolicy,
+  ChannelMemberListVisibility,
   ChannelPinPolicy,
   ChannelPostPolicy,
   ChannelVisibility,
@@ -70,6 +71,9 @@ export function ChannelSettingsForm({
   const [joinPolicy, setJoinPolicy] = useState<ChannelJoinPolicy>(channel?.joinPolicy ?? 'open')
   const [postPolicy, setPostPolicy] = useState<ChannelPostPolicy>(channel?.postPolicy ?? 'everyone')
   const [pinPolicy, setPinPolicy] = useState<ChannelPinPolicy>(channel?.pinPolicy ?? 'everyone')
+  const [memberListVisibility, setMemberListVisibility] = useState<ChannelMemberListVisibility>(
+    channel?.memberListVisibility ?? 'managers',
+  )
   // In create mode, let the pin policy track the encryption-mode default (mls →
   // everyone, group_key → moderators) until the user explicitly overrides it.
   const [pinPolicyTouched, setPinPolicyTouched] = useState(false)
@@ -112,6 +116,7 @@ export function ChannelSettingsForm({
             joinPolicy,
             postPolicy,
             pinPolicy: effectivePinPolicy,
+            memberListVisibility,
             messageTtlDays: ttl,
             encryptionMode,
           },
@@ -134,6 +139,7 @@ export function ChannelSettingsForm({
           joinPolicy,
           postPolicy,
           pinPolicy: effectivePinPolicy,
+          memberListVisibility,
           messageTtlDays: ttl,
         }
         if (avatarMediaId !== channel.avatarMediaId) {
@@ -270,6 +276,23 @@ export function ChannelSettingsForm({
           {effectivePinPolicy === 'everyone'
             ? t('communities.pinPolicy.everyoneHint')
             : t('communities.pinPolicy.moderatorsHint')}
+        </p>
+      </label>
+
+      <label className="block space-y-1">
+        <span className="text-xs text-ink-soft">{t('communities.memberList.label')}</span>
+        <select
+          className={SELECT_CLASS}
+          value={memberListVisibility}
+          onChange={(e) => setMemberListVisibility(e.target.value as ChannelMemberListVisibility)}
+        >
+          <option value="managers">{t('communities.memberList.managers')}</option>
+          <option value="members">{t('communities.memberList.members')}</option>
+        </select>
+        <p className="text-[11px] text-ink-faint">
+          {memberListVisibility === 'managers'
+            ? t('communities.memberList.managersHint')
+            : t('communities.memberList.membersHint')}
         </p>
       </label>
 

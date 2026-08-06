@@ -14,6 +14,7 @@ import type {
   CommunityDevicesResponse,
   CommunityId,
   CommunityListItem,
+  CommunityMemberIdsPageResponse,
   CommunityMembersPageResponse,
   CreateChannelInviteRequest,
   CreateChannelRequest,
@@ -50,6 +51,7 @@ import {
   GROUP_KEY_BROADCAST_MAX_MEMBERS,
   GROUP_KEY_DISCUSSION_MAX_MEMBERS,
   INVITE_CODE_LENGTH,
+  ROSTER_BROWSE_MAX_MEMBERS,
 } from '@gathernet/shared'
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
@@ -188,6 +190,16 @@ async function isCommunityManager(
     )
     .limit(1)
   return mod.length > 0
+}
+
+async function activeMemberCount(db: DbOrTx, communityId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(communityMembers)
+    .where(
+      and(eq(communityMembers.communityId, communityId), eq(communityMembers.status, 'active')),
+    )
+  return row?.count ?? 0
 }
 
 async function activeMemberAccountIds(db: DbOrTx, communityId: string): Promise<string[]> {
@@ -415,6 +427,7 @@ export async function getCommunityDetail(
       joinPolicy: communityChannels.joinPolicy,
       postPolicy: communityChannels.postPolicy,
       pinPolicy: communityChannels.pinPolicy,
+      memberListVisibility: communityChannels.memberListVisibility,
       messageTtlDays: communityChannels.messageTtlDays,
       position: communityChannels.position,
       encryptionMode: communityChannels.encryptionMode,
@@ -463,6 +476,7 @@ export async function getCommunityDetail(
         joinPolicy: c.joinPolicy,
         postPolicy: c.postPolicy,
         pinPolicy: c.pinPolicy,
+        memberListVisibility: c.memberListVisibility,
         messageTtlDays: c.messageTtlDays,
         position: c.position,
         myStatus,
@@ -531,6 +545,12 @@ export async function listCommunityMembers(
   if (!(await isCommunityManager(db, communityId, membership))) {
     throw new ServiceError(403, 'not_a_manager')
   }
+  // ...and only for a SMALL community: a scrollable name list for a mega-community is
+  // useless to a human and a deanonymization risk if that manager is compromised/coerced.
+  // Capability issuance uses listCommunityMemberIds (no display names) instead.
+  if ((await activeMemberCount(db, communityId)) > ROSTER_BROWSE_MAX_MEMBERS) {
+    throw new ServiceError(403, 'roster_too_large')
+  }
   const pageSize = Math.min(limit ?? COMMUNITY_MEMBER_PAGE_SIZE, 500)
   const conds = [
     eq(communityMembers.communityId, communityId),
@@ -554,6 +574,39 @@ export async function listCommunityMembers(
       displayName: m.displayName,
       role: m.role,
     })),
+    nextCursor: rows.length === pageSize ? (rows[rows.length - 1]?.accountId ?? null) : null,
+  }
+}
+
+/**
+ * Member IDENTITIES (accountId + role, NO display names) — owner/leader only, available at
+ * ANY community size. This is what capability issuance (ADR 0004) sweeps: a leader must mint
+ * a cap per member even in a 100k community, and doing it from ids means minting never
+ * materialises a browsable roster. @see listCommunityMembers for the human-browsable list.
+ */
+export async function listCommunityMemberIds(
+  db: Db,
+  accountId: string,
+  communityId: string,
+  after?: string,
+  limit?: number,
+): Promise<CommunityMemberIdsPageResponse> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  requireLeader(membership)
+  const pageSize = Math.min(limit ?? COMMUNITY_MEMBER_PAGE_SIZE, 500)
+  const conds = [
+    eq(communityMembers.communityId, communityId),
+    eq(communityMembers.status, 'active'),
+  ]
+  if (after) conds.push(gt(communityMembers.accountId, after))
+  const rows = await db
+    .select({ accountId: communityMembers.accountId, role: communityMembers.role })
+    .from(communityMembers)
+    .where(and(...conds))
+    .orderBy(asc(communityMembers.accountId))
+    .limit(pageSize)
+  return {
+    members: rows.map((m) => ({ accountId: m.accountId as AccountId, role: m.role })),
     nextCursor: rows.length === pageSize ? (rows[rows.length - 1]?.accountId ?? null) : null,
   }
 }
@@ -777,6 +830,7 @@ export async function createChannel(
       // everyone pin; big group_key channels default to suggest→approve.
       pinPolicy:
         input.pinPolicy ?? (input.encryptionMode === 'group_key' ? 'moderators' : 'everyone'),
+      memberListVisibility: input.memberListVisibility,
       messageTtlDays: input.messageTtlDays,
       encryptionMode: input.encryptionMode,
       position,
@@ -835,6 +889,9 @@ export async function updateChannel(
   if (input.joinPolicy !== undefined) patch.joinPolicy = input.joinPolicy
   if (input.postPolicy !== undefined) patch.postPolicy = input.postPolicy
   if (input.pinPolicy !== undefined) patch.pinPolicy = input.pinPolicy
+  if (input.memberListVisibility !== undefined) {
+    patch.memberListVisibility = input.memberListVisibility
+  }
   if (input.messageTtlDays !== undefined) patch.messageTtlDays = input.messageTtlDays
   if (input.position !== undefined) patch.position = input.position
   await db.update(communityChannels).set(patch).where(eq(communityChannels.channelId, channelId))
@@ -1480,8 +1537,18 @@ export async function listChannelMembers(
   nextCursor: string | null
 }> {
   const membership = await requireActiveMembership(db, communityId, actorAccountId)
-  await loadChannel(db, communityId, channelId)
-  await requireChannelManager(db, channelId, membership)
+  const channel = await loadChannel(db, communityId, channelId)
+  // Managers always; plain members only when a manager opted this channel into
+  // memberListVisibility 'members' AND they're an active member of it. Otherwise the
+  // no-roster rule stands and their client shows "active members" from local history.
+  if (
+    !(
+      channel.memberListVisibility === 'members' &&
+      (await isActiveChannelMember(db, channelId, actorAccountId))
+    )
+  ) {
+    await requireChannelManager(db, channelId, membership)
+  }
   const pageSize = Math.min(limit ?? COMMUNITY_MEMBER_PAGE_SIZE, 500)
   const conds = [
     eq(channelMembers.channelId, channelId),

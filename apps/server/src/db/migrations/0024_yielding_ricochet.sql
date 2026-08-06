@@ -1,0 +1,2 @@
+CREATE TYPE "public"."channel_member_list_visibility" AS ENUM('managers', 'members');--> statement-breakpoint
+ALTER TABLE "community_channels" ADD COLUMN "member_list_visibility" "channel_member_list_visibility" DEFAULT 'managers' NOT NULL;

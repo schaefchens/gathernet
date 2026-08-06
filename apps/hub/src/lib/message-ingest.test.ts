@@ -33,7 +33,7 @@ describe('view-once consume (anti-grief)', () => {
     expect(res?.target.text).toBe('secret') // pre-clear copy returned for blob cleanup
   })
 
-  it("destroys my own copy when a consume comes from my other device", () => {
+  it('destroys my own copy when a consume comes from my other device', () => {
     // I (Bob) received the message; my other device opened + broadcast the consume.
     const list = [onceMsg('m1', ALICE, false)]
     const res = applyConsume(list, 'm1', BOB, BOB)

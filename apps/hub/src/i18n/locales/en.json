@@ -446,6 +446,13 @@
     "mute": "Mute",
     "unmute": "Unmute",
     "mutedBadge": "Muted",
-    "mutedHint": "You have been muted in this channel."
+    "mutedHint": "You have been muted in this channel.",
+    "memberList": {
+      "label": "Member list",
+      "managers": "Moderators & leaders only",
+      "members": "Everyone in this channel",
+      "managersHint": "Members see only the people they've seen post (recommended).",
+      "membersHint": "Every member of this channel can see its full member list. Only do this for a small, trusted channel."
+    }
   }
 }

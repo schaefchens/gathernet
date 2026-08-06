@@ -63,6 +63,7 @@ import {
   listCommunities,
   listCommunityDevices,
   listCommunityInvites,
+  listCommunityMemberIds,
   listCommunityMembers,
   listModerationRecipients,
   listReports,
@@ -247,6 +248,18 @@ export function registerCommunityRoutes(
     const { after, limit } = paginationQuerySchema.parse(request.query)
     return listCommunityMembers(db, session.accountId, request.params.id, after, limit)
   })
+
+  // Member IDs only (no display names) — owner/leader, any community size. Capability
+  // issuance sweeps this so minting caps never materialises a browsable roster.
+  app.get<{ Params: { id: string } }>(
+    '/api/v1/communities/:id/member-ids',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const { after, limit } = paginationQuerySchema.parse(request.query)
+      return listCommunityMemberIds(db, session.accountId, request.params.id, after, limit)
+    },
+  )
 
   app.patch<{ Params: { id: string } }>('/api/v1/communities/:id', auth, async (request) => {
     const session = requireSession(request)

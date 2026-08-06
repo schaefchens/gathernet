@@ -161,6 +161,31 @@ export const communityMembersPageResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 })
 
+/**
+ * A page of member IDENTITIES only — accountId + role, deliberately NO display names.
+ * Owner/leader-only and available at any community size, because capability issuance
+ * (ADR 0004) must mint a cap per member even in a 100k community. Keeping names out means
+ * minting caps never materialises a browsable roster. @see communityMembersPageResponseSchema
+ */
+export const communityMemberIdSchema = z.object({
+  accountId: accountIdSchema,
+  role: communityRoleSchema,
+})
+export const communityMemberIdsPageResponseSchema = z.object({
+  members: z.array(communityMemberIdSchema),
+  nextCursor: z.string().nullable(),
+})
+export type CommunityMemberIdsPageResponse = z.infer<typeof communityMemberIdsPageResponseSchema>
+
+/**
+ * Who may see a channel's full member list. `managers` (default) = leaders/moderators only;
+ * `members` = every active member of that channel may see it too — a deliberate opt-in a
+ * manager makes for a small, trusted channel. Either way, members always have the
+ * client-derived "active members" (whoever they've seen post) instead of a roster.
+ */
+export const channelMemberListVisibilitySchema = z.enum(['managers', 'members'])
+export type ChannelMemberListVisibility = z.infer<typeof channelMemberListVisibilitySchema>
+
 export const communityChannelSchema = z.object({
   channelId: groupIdSchema,
   metaCiphertext: z.string().nullable(),
@@ -170,6 +195,8 @@ export const communityChannelSchema = z.object({
   joinPolicy: channelJoinPolicySchema,
   postPolicy: channelPostPolicySchema,
   pinPolicy: channelPinPolicySchema,
+  /** who may see this channel's full member list (managers by default) */
+  memberListVisibility: channelMemberListVisibilitySchema,
   messageTtlDays: z.number().int(),
   position: z.number().int(),
   /** the caller's channel-membership state */
@@ -429,6 +456,8 @@ export const createChannelRequestSchema = z.object({
   postPolicy: channelPostPolicySchema.default('everyone'),
   /** omit to derive from encryptionMode (mls → everyone, group_key → moderators). */
   pinPolicy: channelPinPolicySchema.optional(),
+  /** managers (default) — or `members` to let this channel's members see its roster. */
+  memberListVisibility: channelMemberListVisibilitySchema.default('managers'),
   messageTtlDays: messageTtlDaysSchema.default(30),
   /** mls (default) vs group_key. group_key channels publish no MLS GroupInfo. */
   encryptionMode: channelEncryptionModeSchema.default('mls'),
@@ -447,6 +476,7 @@ export const updateChannelRequestSchema = z
     joinPolicy: channelJoinPolicySchema.optional(),
     postPolicy: channelPostPolicySchema.optional(),
     pinPolicy: channelPinPolicySchema.optional(),
+    memberListVisibility: channelMemberListVisibilitySchema.optional(),
     messageTtlDays: messageTtlDaysSchema.optional(),
     position: z.number().int().min(0).optional(),
   })

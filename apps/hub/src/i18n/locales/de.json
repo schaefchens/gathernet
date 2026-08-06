@@ -446,6 +446,13 @@
     "mute": "Stummschalten",
     "unmute": "Stummschaltung aufheben",
     "mutedBadge": "Stumm",
-    "mutedHint": "Du wurdest in diesem Kanal stummgeschaltet."
+    "mutedHint": "Du wurdest in diesem Kanal stummgeschaltet.",
+    "memberList": {
+      "label": "Mitgliederliste",
+      "managers": "Nur Moderation & Leitung",
+      "members": "Alle in diesem Kanal",
+      "managersHint": "Mitglieder sehen nur Personen, die sie schreiben gesehen haben (empfohlen).",
+      "membersHint": "Jedes Mitglied dieses Kanals kann die vollständige Mitgliederliste sehen. Nur für kleine, vertraute Kanäle."
+    }
   }
 }

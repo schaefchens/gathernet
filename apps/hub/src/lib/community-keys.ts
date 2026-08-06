@@ -26,7 +26,7 @@ import {
   type CommunityDeviceResponse,
   type CommunityDevicesResponse,
   type CommunityId,
-  type CommunityMembersPageResponse,
+  type CommunityMemberIdsPageResponse,
   type CommunityRoot,
   type DeviceId,
   eciesOpen,
@@ -916,9 +916,11 @@ export async function issueCapabilities(
   let after: string | undefined
   do {
     const q = new URLSearchParams({ limit: '500', ...(after ? { after } : {}) })
-    const page = await api<CommunityMembersPageResponse>(
+    // ID-only sweep (no display names) — works at any community size and never
+    // materialises a browsable roster. @see listCommunityMemberIds
+    const page = await api<CommunityMemberIdsPageResponse>(
       'GET',
-      `/api/v1/communities/${communityId}/members?${q}`,
+      `/api/v1/communities/${communityId}/member-ids?${q}`,
     )
     for (const m of page.members) {
       // A leader may attest only plain members; owner/leader roles need the owner.
