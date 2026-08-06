@@ -26,3 +26,4 @@ test-results/
 # tor hidden-service key + local onion address (never commit — the key IS the address)
 .tor/
 apps/hub/.onion-host
+docker/tor/seed/

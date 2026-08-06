@@ -12,6 +12,17 @@ DATA_DIR=/var/lib/tor/data
 HS_TARGET="${HS_TARGET:-host.docker.internal:5173}"
 
 mkdir -p "$HS_DIR" "$DATA_DIR"
+
+# Adopt a seeded key if one is mounted at /seed (e.g. a vanity address generated offline):
+# copy the HS keypair into the service dir so Tor uses THAT identity instead of generating
+# a random one. Overwrites on every start, so the seed is the source of truth. No seed →
+# Tor keeps the existing key or generates a fresh one (original behaviour).
+if [ -f /seed/hs_ed25519_secret_key ]; then
+  cp /seed/hs_ed25519_secret_key /seed/hs_ed25519_public_key "$HS_DIR"/
+  [ -f /seed/hostname ] && cp /seed/hostname "$HS_DIR"/
+  echo "adopted seeded onion key from /seed"
+fi
+
 chown -R tor:tor /var/lib/tor
 # Tor refuses to start a hidden service unless the dir is 700 and owned by its user.
 chmod 700 "$HS_DIR" "$DATA_DIR"

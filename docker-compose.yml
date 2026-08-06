@@ -54,6 +54,9 @@ services:
       - 'host.docker.internal:host-gateway'
     volumes:
       - tordata:/var/lib/tor
+      # Seed the onion identity from a locally-held (vanity) key, if present. Gitignored —
+      # the key is a secret. Empty/absent → Tor generates a random address.
+      - ./docker/tor/seed:/seed:ro
     restart: unless-stopped
 
 volumes:
