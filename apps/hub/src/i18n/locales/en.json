@@ -453,6 +453,20 @@
       "members": "Everyone in this channel",
       "managersHint": "Members see only the people they've seen post (recommended).",
       "membersHint": "Every member of this channel can see its full member list. Only do this for a small, trusted channel."
+    },
+    "channelKind": {
+      "label": "Channel type",
+      "small": "Small group — strongest privacy",
+      "large": "Large discussion",
+      "broadcast": "Broadcast — moderators post",
+      "smallHint": "Best for a small or sensitive channel: per-message forward secrecy and instant removal. Members can be shown to each other. Recommended.",
+      "largeHint": "Everyone can post, up to ~10,000 members. Slightly weaker per-message forward secrecy; no member list.",
+      "broadcastHint": "Only moderators post, up to ~100,000 members — for announcements to a large audience. No member list.",
+      "isSmall": "Small group channel (strongest privacy). The channel type can't be changed later.",
+      "isLarge": "Large discussion channel. The channel type can't be changed later.",
+      "isBroadcast": "Broadcast channel. The channel type can't be changed later.",
+      "full": "This channel is full — it has reached the limit for its type. Create a large or broadcast channel for a bigger audience (existing channels can't be converted, by design).",
+      "nearFull": "This channel is nearly full ({{used}} of {{max}} devices)."
     }
   }
 }

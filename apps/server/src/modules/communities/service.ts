@@ -47,11 +47,10 @@ import {
   bucketMemberCount,
   COMMUNITY_MEDIA_MAX_BYTES,
   COMMUNITY_MEMBER_PAGE_SIZE,
-  EXACT_MEMBER_COUNT_MAX,
   GROUP_KEY_BROADCAST_MAX_MEMBERS,
   GROUP_KEY_DISCUSSION_MAX_MEMBERS,
   INVITE_CODE_LENGTH,
-  ROSTER_BROWSE_MAX_MEMBERS,
+  SMALL_GROUP_MAX_MEMBERS,
 } from '@gathernet/shared'
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
@@ -519,7 +518,7 @@ export async function getCommunityDetail(
     })),
     // Exact only for small communities; larger ones report a coarse band so no exact head
     // count of a congregation ever leaves the server.
-    memberCount: activeCount <= EXACT_MEMBER_COUNT_MAX ? activeCount : null,
+    memberCount: activeCount <= SMALL_GROUP_MAX_MEMBERS ? activeCount : null,
     memberBucket: bucketMemberCount(activeCount),
     channels,
   }
@@ -548,7 +547,7 @@ export async function listCommunityMembers(
   // ...and only for a SMALL community: a scrollable name list for a mega-community is
   // useless to a human and a deanonymization risk if that manager is compromised/coerced.
   // Capability issuance uses listCommunityMemberIds (no display names) instead.
-  if ((await activeMemberCount(db, communityId)) > ROSTER_BROWSE_MAX_MEMBERS) {
+  if ((await activeMemberCount(db, communityId)) > SMALL_GROUP_MAX_MEMBERS) {
     throw new ServiceError(403, 'roster_too_large')
   }
   const pageSize = Math.min(limit ?? COMMUNITY_MEMBER_PAGE_SIZE, 500)
@@ -1538,15 +1537,14 @@ export async function listChannelMembers(
 }> {
   const membership = await requireActiveMembership(db, communityId, actorAccountId)
   const channel = await loadChannel(db, communityId, channelId)
-  // Managers always; plain members only when a manager opted this channel into
-  // memberListVisibility 'members' AND they're an active member of it. Otherwise the
-  // no-roster rule stands and their client shows "active members" from local history.
-  if (
-    !(
-      channel.memberListVisibility === 'members' &&
-      (await isActiveChannelMember(db, channelId, actorAccountId))
-    )
-  ) {
+  // Managers always; plain members only when a manager opted this SMALL (mls) channel into
+  // memberListVisibility 'members' AND they're an active member of it. A group_key channel
+  // is a big/broadcast channel by definition — it never exposes a roster to members,
+  // whatever the setting says. Otherwise the no-roster rule stands and their client shows
+  // "active members" derived from local history.
+  const memberVisible =
+    channel.memberListVisibility === 'members' && channel.encryptionMode === 'mls'
+  if (!(memberVisible && (await isActiveChannelMember(db, channelId, actorAccountId)))) {
     await requireChannelManager(db, channelId, membership)
   }
   const pageSize = Math.min(limit ?? COMMUNITY_MEMBER_PAGE_SIZE, 500)

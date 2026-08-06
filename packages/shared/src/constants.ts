@@ -48,23 +48,28 @@ export const CHANNEL_KEY_GRANT_BATCH_MAX = 1000
 /** Roster page size for paginated community/channel member listings. */
 export const COMMUNITY_MEMBER_PAGE_SIZE = 100
 
-/**
- * Above this many active members a community's size is reported only as a BUCKET
- * ('hundreds', 'thousands', …) — never an exact figure. An exact count of a large
- * community is an intelligence signal (and small groups genuinely want "(7)").
- */
-export const EXACT_MEMBER_COUNT_MAX = 50
+/** Rough devices per person, used only to express the MLS device cap in member terms. */
+export const DEVICES_PER_MEMBER_ESTIMATE = 2
 
 /**
- * Above this many active members there is NO browsable roster at all — not even for
- * managers: a scrollable list of names for a 100k community is useless to a human and a
- * deanonymization risk if that manager account is ever compromised or coerced. Managers of
- * a larger community work from targeted lookups + the moderation queue instead.
+ * THE small-group boundary, in members — DERIVED from `MLS_CHANNEL_MAX_DEVICES` so the two
+ * can never drift: "small MLS group" vs "big broadcast" is one concept, not several
+ * unrelated numbers. (The MLS cap is a scaling/performance choice, not an MLS limit — if it
+ * is raised to e.g. 1024 devices after evaluation, this boundary lifts with it automatically.)
+ *
+ *
+ * - at or below it: a browsable roster (managers) and an EXACT member count;
+ * - above it: no browsable roster at all — not even for managers, since a scrollable name
+ *   list for a mega-community is useless to a human and a deanonymization risk if that
+ *   manager is ever compromised or coerced — and the size is reported only as a coarse
+ *   band ('hundreds', 'thousands', …), never an exact figure.
  *
  * Capability issuance is unaffected: it sweeps `/member-ids` (accountId + role, NO display
  * names), which stays available to owners/leaders at any size.
  */
-export const ROSTER_BROWSE_MAX_MEMBERS = 200
+export const SMALL_GROUP_MAX_MEMBERS = Math.floor(
+  MLS_CHANNEL_MAX_DEVICES / DEVICES_PER_MEMBER_ESTIMATE,
+)
 
 /** MLS key package pool per device. */
 export const KEY_PACKAGE_TARGET = 50

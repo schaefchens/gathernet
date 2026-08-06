@@ -27,14 +27,23 @@ export function ChannelJoinPanel({
   const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
   const [locked, setLocked] = useState(false)
+  /** the channel hit its size ceiling — we block + explain rather than auto-migrating it
+   *  onto a weaker shared key (see ChannelKind: conversion is deliberately impossible) */
+  const [full, setFull] = useState(false)
 
   const act = async () => {
     setBusy(true)
+    setFull(false)
     let status: ChannelStatus
     try {
       status = await communityChatStore.joinChannel(communityId, channel.channelId)
     } finally {
       setBusy(false)
+    }
+    // Size ceiling (mls devices / group_key members): explain, never auto-migrate.
+    if (status === 'full') {
+      setFull(true)
+      return
     }
     if (status === 'locked') {
       setLocked(true)
@@ -52,7 +61,11 @@ export function ChannelJoinPanel({
         </p>
         <h2 className="font-display text-2xl">{title}</h2>
 
-        {locked ? (
+        {full ? (
+          <p className="rounded-md border border-amber/50 bg-amber/10 px-3 py-2 text-sm text-amber">
+            {t('communities.channelKind.full')}
+          </p>
+        ) : locked ? (
           <p className="text-sm text-ink-soft">{t('communities.channelLocked')}</p>
         ) : channel.myStatus === 'pending' ? (
           <div className="space-y-1">

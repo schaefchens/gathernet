@@ -453,6 +453,20 @@
       "members": "Alle in diesem Kanal",
       "managersHint": "Mitglieder sehen nur Personen, die sie schreiben gesehen haben (empfohlen).",
       "membersHint": "Jedes Mitglied dieses Kanals kann die vollständige Mitgliederliste sehen. Nur für kleine, vertraute Kanäle."
+    },
+    "channelKind": {
+      "label": "Kanaltyp",
+      "small": "Kleine Gruppe — höchste Privatsphäre",
+      "large": "Große Diskussion",
+      "broadcast": "Broadcast — nur Moderation schreibt",
+      "smallHint": "Am besten für kleine oder sensible Kanäle: Forward Secrecy pro Nachricht und sofortiger Ausschluss. Mitglieder können einander angezeigt werden. Empfohlen.",
+      "largeHint": "Alle können schreiben, bis ~10.000 Mitglieder. Etwas schwächere Forward Secrecy pro Nachricht; keine Mitgliederliste.",
+      "broadcastHint": "Nur die Moderation schreibt, bis ~100.000 Mitglieder — für Ankündigungen an ein großes Publikum. Keine Mitgliederliste.",
+      "isSmall": "Kanal für kleine Gruppen (höchste Privatsphäre). Der Kanaltyp kann später nicht geändert werden.",
+      "isLarge": "Große Diskussion. Der Kanaltyp kann später nicht geändert werden.",
+      "isBroadcast": "Broadcast-Kanal. Der Kanaltyp kann später nicht geändert werden.",
+      "full": "Dieser Kanal ist voll — die Grenze für seinen Typ ist erreicht. Erstelle einen großen oder Broadcast-Kanal für ein größeres Publikum (bestehende Kanäle können bewusst nicht umgewandelt werden).",
+      "nearFull": "Dieser Kanal ist fast voll ({{used}} von {{max}} Geräten)."
     }
   }
 }

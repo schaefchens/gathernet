@@ -105,6 +105,9 @@ export type ChannelStatus =
   | 'pending'
   | 'error'
   | 'untrusted'
+  /** the channel hit its size ceiling (mls device cap / group_key member cap) — joining is
+   *  blocked and explained; we never auto-migrate to a weaker mode. */
+  | 'full'
   /** group_key: an authorised rotation exists we can't adopt yet — sending is paused
    *  (fail-closed forward secrecy). Transient; clears when the new-epoch grant lands. */
   | 'rotation_pending'
@@ -970,6 +973,11 @@ class CommunityChatStore {
       if (err instanceof ApiError && err.status === 403) {
         this.setStatus(channelId, 'locked')
         return 'locked'
+      }
+      // Size ceiling: group_key member cap or the mls device cap.
+      if (err instanceof ApiError && (err.code === 'channel_full' || err.code === 'device_limit')) {
+        this.setStatus(channelId, 'full')
+        return 'full'
       }
       this.setStatus(channelId, 'error')
       return 'error'

@@ -31,6 +31,44 @@ const TTL_OPTIONS = [
 
 const SELECT_CLASS = 'w-full bg-overlay border border-edge rounded-md px-3 py-2 text-sm'
 
+/**
+ * The channel KIND a leader picks — the product concept, which presets the crypto mode and
+ * who may post. Chosen once at creation: there is no migration between kinds (a SECURITY
+ * decision, not a technical one — moving a small MLS channel onto a shared group key would
+ * silently weaken it, so we block at the cap and warn instead).
+ */
+export type ChannelKind = 'small' | 'large' | 'broadcast'
+
+const CHANNEL_KINDS = [
+  {
+    kind: 'small',
+    encryptionMode: 'mls',
+    postPolicy: 'everyone',
+    label: 'communities.channelKind.small',
+    hint: 'communities.channelKind.smallHint',
+  },
+  {
+    kind: 'large',
+    encryptionMode: 'group_key',
+    postPolicy: 'everyone',
+    label: 'communities.channelKind.large',
+    hint: 'communities.channelKind.largeHint',
+  },
+  {
+    kind: 'broadcast',
+    encryptionMode: 'group_key',
+    postPolicy: 'moderators',
+    label: 'communities.channelKind.broadcast',
+    hint: 'communities.channelKind.broadcastHint',
+  },
+] as const satisfies ReadonlyArray<{
+  kind: ChannelKind
+  encryptionMode: ChannelEncryptionMode
+  postPolicy: ChannelPostPolicy
+  label: string
+  hint: string
+}>
+
 interface ChannelSettingsFormProps {
   communityId: string
   mode: 'create' | 'edit'
@@ -81,6 +119,28 @@ export function ChannelSettingsForm({
   const [encryptionMode, setEncryptionMode] = useState<ChannelEncryptionMode>(
     channel?.encryptionMode ?? 'mls',
   )
+  // The channel KIND is the concept a leader actually picks; it presets the crypto mode +
+  // who may post. Derived for an existing channel so the edit form reads correctly.
+  const [channelKind, setChannelKind] = useState<ChannelKind>(
+    channel
+      ? channel.encryptionMode === 'mls'
+        ? 'small'
+        : channel.postPolicy === 'moderators'
+          ? 'broadcast'
+          : 'large'
+      : 'small',
+  )
+
+  /** Picking a kind sets the underlying crypto mode + post policy together. */
+  const applyKind = (kind: ChannelKind) => {
+    setChannelKind(kind)
+    const preset = CHANNEL_KINDS.find((k) => k.kind === kind)
+    if (!preset) return
+    setEncryptionMode(preset.encryptionMode)
+    setPostPolicy(preset.postPolicy)
+    // A big channel can't expose a roster to members — keep the setting honest.
+    if (preset.encryptionMode === 'group_key') setMemberListVisibility('managers')
+  }
   const effectivePinPolicy: ChannelPinPolicy =
     mode === 'create' && !pinPolicyTouched
       ? encryptionMode === 'group_key'
@@ -194,21 +254,38 @@ export function ChannelSettingsForm({
 
       {mode === 'create' && (
         <label className="block space-y-1">
-          <span className="text-xs text-ink-soft">{t('communities.encryptionMode.label')}</span>
+          <span className="text-xs text-ink-soft">{t('communities.channelKind.label')}</span>
           <select
             className={SELECT_CLASS}
-            value={encryptionMode}
-            onChange={(e) => setEncryptionMode(e.target.value as ChannelEncryptionMode)}
+            value={channelKind}
+            onChange={(e) => applyKind(e.target.value as ChannelKind)}
           >
-            <option value="mls">{t('communities.encryptionMode.mls')}</option>
-            <option value="group_key">{t('communities.encryptionMode.groupKey')}</option>
+            {CHANNEL_KINDS.map((k) => (
+              <option key={k.kind} value={k.kind}>
+                {t(k.label)}
+              </option>
+            ))}
           </select>
           <p className="text-[11px] text-ink-faint">
-            {encryptionMode === 'mls'
-              ? t('communities.encryptionMode.mlsHint')
-              : t('communities.encryptionMode.groupKeyHint')}
+            {t(
+              CHANNEL_KINDS.find((k) => k.kind === channelKind)?.hint ??
+                'communities.channelKind.smallHint',
+            )}
           </p>
         </label>
+      )}
+      {/* Existing channel: the kind is fixed (no migration between modes — a security
+          decision, not a technical one), so just state what this channel is. */}
+      {mode === 'edit' && channel && (
+        <p className="text-[11px] text-ink-faint">
+          {t(
+            channel.encryptionMode === 'mls'
+              ? 'communities.channelKind.isSmall'
+              : channel.postPolicy === 'moderators'
+                ? 'communities.channelKind.isBroadcast'
+                : 'communities.channelKind.isLarge',
+          )}
+        </p>
       )}
 
       <label className="block space-y-1">
@@ -279,22 +356,26 @@ export function ChannelSettingsForm({
         </p>
       </label>
 
-      <label className="block space-y-1">
-        <span className="text-xs text-ink-soft">{t('communities.memberList.label')}</span>
-        <select
-          className={SELECT_CLASS}
-          value={memberListVisibility}
-          onChange={(e) => setMemberListVisibility(e.target.value as ChannelMemberListVisibility)}
-        >
-          <option value="managers">{t('communities.memberList.managers')}</option>
-          <option value="members">{t('communities.memberList.members')}</option>
-        </select>
-        <p className="text-[11px] text-ink-faint">
-          {memberListVisibility === 'managers'
-            ? t('communities.memberList.managersHint')
-            : t('communities.memberList.membersHint')}
-        </p>
-      </label>
+      {/* Only a small (mls) channel can show its roster to members; a big/broadcast channel
+          never does, so the setting is hidden rather than misleading. */}
+      {encryptionMode === 'mls' && (
+        <label className="block space-y-1">
+          <span className="text-xs text-ink-soft">{t('communities.memberList.label')}</span>
+          <select
+            className={SELECT_CLASS}
+            value={memberListVisibility}
+            onChange={(e) => setMemberListVisibility(e.target.value as ChannelMemberListVisibility)}
+          >
+            <option value="managers">{t('communities.memberList.managers')}</option>
+            <option value="members">{t('communities.memberList.members')}</option>
+          </select>
+          <p className="text-[11px] text-ink-faint">
+            {memberListVisibility === 'managers'
+              ? t('communities.memberList.managersHint')
+              : t('communities.memberList.membersHint')}
+          </p>
+        </label>
+      )}
 
       <label className="block space-y-1">
         <span className="text-xs text-ink-soft">{t('communities.disappearingMessages')}</span>

@@ -2465,6 +2465,39 @@ describe('no-roster rule: community membership is not member-enumerable', () => 
     expect((await roster()).statusCode).toBe(200)
   })
 
+  it('a group_key (big/broadcast) channel never exposes its roster, even if opted in', async () => {
+    const owner = await createUser('Owner')
+    const member = await createUser('Member')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, member)
+    // big channel: group_key
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels`,
+      headers: auth(owner),
+      payload: {
+        metaCiphertext: sealed(),
+        encryptionMode: 'group_key',
+        joinPolicy: 'open',
+        memberListVisibility: 'members', // opted in, but must be ignored for group_key
+      },
+    })
+    expect(res.statusCode).toBe(201)
+    const channelId = res.json().channelId
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/join`,
+      headers: auth(member),
+    })
+
+    const roster = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/members`,
+      headers: auth(member),
+    })
+    expect(roster.statusCode).toBe(403)
+  })
+
   it('reports a coarse size band (exact only for a small community)', async () => {
     const owner = await createUser('Owner')
     const communityId = await createCommunity(owner)
