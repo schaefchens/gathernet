@@ -2501,6 +2501,39 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
     expect(res.statusCode).toBe(400)
   })
 
+  it('a CLOSED roll-call is still listed (so a manager can sweep), and the sweep consumes it', async () => {
+    const owner = await createUser('RcClosedVisible')
+    const silent = await createUser('RcSilent2')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    await addMember(owner, communityId, silent)
+    await joinOpenChannel(silent, communityId, channelId)
+    const artifactId = await start(owner, communityId, channelId, 1)
+    // force the deadline into the past
+    await testDb.db
+      .update(channelArtifacts)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(channelArtifacts.artifactId, artifactId))
+
+    // Past its deadline it must STILL be served — otherwise the sweep UI can never appear.
+    const whileClosed = (await artifactsOf(owner, communityId, channelId)).json()
+      .artifacts as Array<Record<string, unknown>>
+    expect(whileClosed.map((a) => a.artifactId)).toContain(artifactId)
+
+    const sweep = await app.inject({
+      method: 'POST',
+      url: `${rollcallsUrl(communityId, channelId)}/${artifactId}/sweep`,
+      headers: auth(owner),
+    })
+    expect(sweep.statusCode).toBe(200)
+
+    // ...and the sweep consumes it, so closed roll-calls don't pile up.
+    const afterSweep = (await artifactsOf(owner, communityId, channelId)).json().artifacts as Array<
+      Record<string, unknown>
+    >
+    expect(afterSweep.map((a) => a.artifactId)).not.toContain(artifactId)
+  })
+
   it('sweeping an OPEN roll-call is refused', async () => {
     const owner = await createUser('RcOwner2')
     const communityId = await createCommunity(owner)

@@ -2288,7 +2288,13 @@ export async function listArtifacts(
     .where(
       and(
         eq(channelArtifacts.channelId, channelId),
-        or(isNull(channelArtifacts.expiresAt), gt(channelArtifacts.expiresAt, now)),
+        or(
+          isNull(channelArtifacts.expiresAt),
+          gt(channelArtifacts.expiresAt, now),
+          // A roll-call's expiresAt is its DEADLINE, not a TTL: keep serving it after it
+          // closes so a manager can still sweep (the sweep then deletes it).
+          eq(channelArtifacts.kind, 'rollcall'),
+        ),
       ),
     )
     .orderBy(asc(channelArtifacts.createdAt))
@@ -2720,6 +2726,22 @@ export async function respondRollcall(
   })
 }
 
+/** A swept roll-call is spent: delete it (responses cascade) so it stops being served and
+ *  can't be swept twice against stale responses. */
+async function consumeRollcall(
+  db: Db,
+  registry: ConnectionRegistry,
+  communityId: string,
+  channelId: string,
+  artifactId: string,
+): Promise<void> {
+  await db.delete(channelArtifacts).where(eq(channelArtifacts.artifactId, artifactId))
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_artifact_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
+}
+
 /**
  * Sweep a closed roll-call: mark every active member who did NOT respond as removed, and
  * return them (with their devices) so the manager's client can do the key work in one
@@ -2767,7 +2789,10 @@ export async function sweepRollcall(
     .from(channelMembers)
     .where(and(eq(channelMembers.channelId, channelId), eq(channelMembers.status, 'active')))
   const toRemove = active.map((m) => m.accountId).filter((a) => !responded.has(a) && !exempt.has(a))
-  if (toRemove.length === 0) return { removedAccountIds: [], removedDeviceIds: [] }
+  if (toRemove.length === 0) {
+    await consumeRollcall(db, registry, communityId, channelId, artifactId)
+    return { removedAccountIds: [], removedDeviceIds: [] }
+  }
 
   const devs = await db
     .select({ deviceId: devices.deviceId })
@@ -2798,6 +2823,7 @@ export async function sweepRollcall(
       removed,
     ])
   }
+  await consumeRollcall(db, registry, communityId, channelId, artifactId)
   return {
     removedAccountIds: toRemove as RollcallSweepResponse['removedAccountIds'],
     removedDeviceIds: devs.map((d) => d.deviceId) as RollcallSweepResponse['removedDeviceIds'],
