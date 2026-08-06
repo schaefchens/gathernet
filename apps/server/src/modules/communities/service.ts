@@ -2790,12 +2790,14 @@ export async function sweepRollcall(
       ),
     )
   for (const removed of toRemove) registry.evictAccountFromChannel(removed, channelId)
-  // One event for the whole sweep — clients refetch the channel rather than receiving N
-  // per-member events (and non-responders are never named to members).
-  await emitToChannel(db, registry, communityId, channelId, {
-    type: 'community.channel_updated',
-    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
-  })
+  // Tell each removed member THEMSELVES (they're no longer an active member, so a plain
+  // channel broadcast would never reach them — they'd be silently stuck in a channel they
+  // can't post to). Same mechanism as a manual kick, so clients already handle it.
+  for (const removed of toRemove) {
+    await announceChannelMember(db, registry, communityId, channelId, removed, 'none', 'member', [
+      removed,
+    ])
+  }
   return {
     removedAccountIds: toRemove as RollcallSweepResponse['removedAccountIds'],
     removedDeviceIds: devs.map((d) => d.deviceId) as RollcallSweepResponse['removedDeviceIds'],

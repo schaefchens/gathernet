@@ -2560,6 +2560,14 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
       (m) => m.status === 'active',
     )
     expect(active.map((m) => m.accountId)).not.toContain(silent.accountId)
+
+    // The removed member must be able to SEE they're out (their client is told directly and
+    // their own channel status flips) — otherwise they sit in a channel they can't post to.
+    const theirView = (await detail(silent, communityId)).json()
+    const theirChannel = (
+      theirView.channels as Array<{ channelId: string; myStatus: string }>
+    ).find((c) => c.channelId === channelId)
+    expect(theirChannel?.myStatus).not.toBe('active')
   })
 
   it('a plain member cannot start or sweep a roll-call', async () => {

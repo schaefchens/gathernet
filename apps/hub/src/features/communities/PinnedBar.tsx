@@ -100,6 +100,7 @@ export function PinnedBar({
   const [createError, setCreateError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [rollcallWindow, setRollcallWindow] = useState<number>(10080)
+  const [tick, setTick] = useState(() => Date.now())
   const [askingRollcall, setAskingRollcall] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composing = composeMode !== 'none'
@@ -115,7 +116,16 @@ export function PinnedBar({
     return off
   }, [communityId, channelId, pinPolicy])
 
-  const now = Date.now()
+  // Advance `now` every 15s so deadlines take effect without a manual reload.
+  useEffect(() => {
+    const id = setInterval(() => setTick(Date.now()), 15_000)
+    return () => clearInterval(id)
+  }, [])
+
+  // `now` must advance on its own: a roll-call deadline (or an event archiving) passes with
+  // no store change, so without a tick the banner would stay "open" forever and the manager
+  // would never see the sweep button until something else forced a re-render.
+  const now = tick
   const active = artifacts.filter((a) => a.status === 'active')
   // Pins/links/media (newest-first) vs one-shot events (upcoming/ongoing only, soonest
   // first). A past event auto-archives ~2h after it ends (or starts, if no end).
