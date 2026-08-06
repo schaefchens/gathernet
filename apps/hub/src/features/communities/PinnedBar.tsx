@@ -455,9 +455,6 @@ export function PinnedBar({
                     {!closed && isManager && (
                       <span className="text-[11px] text-ink-faint">{t('rollcall.exempt')}</span>
                     )}
-                    <span className="text-[11px] text-ink-faint">
-                      {t('rollcall.responses', { count: a.artifact.responseCount })}
-                    </span>
                     {isManager && closed && (
                       <span className="ml-auto text-[11px] text-ink-faint">
                         {t('rollcall.sweepInModeration')}

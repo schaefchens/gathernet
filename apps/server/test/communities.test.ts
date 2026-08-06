@@ -2419,7 +2419,7 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
     return artifactId
   }
 
-  it('members see only the response COUNT; managers see who responded', async () => {
+  it('members learn nothing about others; only managers see the count and who responded', async () => {
     const owner = await createUser('RcOwner')
     const responder = await createUser('RcResponder')
     const other = await createUser('RcOther')
@@ -2443,14 +2443,18 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
       Record<string, unknown>
     >
     const memberView = asMember.find((a) => a.artifactId === artifactId)
-    expect(memberView?.responseCount).toBe(1)
-    expect(memberView?.responders).toEqual([]) // no name list for members
+    // A member learns NOTHING about others: no name list and no count (an exact count of who
+    // is responsive is the same class of figure we band at community level).
+    expect(memberView?.responders).toEqual([])
+    expect(memberView?.responseCount).toBe(0)
+    expect(memberView?.respondedByMe).toBe(false) // `other` didn't answer
 
     const asManager = (await artifactsOf(owner, communityId, channelId)).json().artifacts as Array<
       Record<string, unknown>
     >
     const managerView = asManager.find((a) => a.artifactId === artifactId)
     expect(managerView?.responders).toEqual([responder.accountId])
+    expect(managerView?.responseCount).toBe(1)
   })
 
   it('stores the deadline the client SIGNED (a server-chosen one breaks verification)', async () => {

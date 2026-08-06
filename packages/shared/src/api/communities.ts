@@ -347,7 +347,12 @@ export const channelArtifactSchema = z.object({
    * as a headcount to reconcile socially, not an exact figure.
    */
   ticketCount: z.number().int().nonnegative().default(0),
-  /** roll-call: how many members confirmed they're still here (visible to everyone) */
+  /**
+   * roll-call: how many members confirmed — MANAGERS ONLY (0 for members). An exact count of
+   * who is alive and responsive is the same class of figure we band at community level, and
+   * across successive roll-calls it would expose attrition. A member needs only their own
+   * state (`respondedByMe`).
+   */
   responseCount: z.number().int().nonnegative().default(0),
   /** roll-call: whether the CALLER has already confirmed (no one else's state) */
   respondedByMe: z.boolean().default(false),

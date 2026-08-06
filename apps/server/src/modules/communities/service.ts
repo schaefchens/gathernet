@@ -2208,7 +2208,7 @@ function toArtifact(
     createdAt: r.createdAt.getTime(),
     expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
     ticketCount,
-    responseCount: responders.length,
+    responseCount: managerView ? responders.length : 0,
     respondedByMe: !!callerAccountId && responders.includes(callerAccountId),
     responders: managerView ? (responders as ChannelArtifact['responders']) : [],
   }
