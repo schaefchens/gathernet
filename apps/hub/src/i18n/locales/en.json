@@ -484,7 +484,6 @@
     "open": "Still here? Please confirm by {{deadline}}.",
     "closed": "Roll-call closed.",
     "confirm": "I'm still here",
-    "confirmed": "✓ You confirmed",
     "responses_one": "{{count}} confirmed",
     "responses_other": "{{count}} confirmed",
     "sweep": "Remove those who didn't answer",
@@ -498,10 +497,8 @@
     "window_43200": "30 days",
     "removed_one": "{{count}} member removed",
     "removed_other": "{{count}} members removed",
-    "exempt": "You're exempt — moderators and the owner are never removed.",
     "openManager": "Waiting for members to confirm until {{deadline}}.",
     "section": "Membership check",
-    "sweepInModeration": "Sweep in Moderation",
     "cancel": "Cancel this check",
     "discard": "Discard without removing",
     "exists": "A membership check is already running in this channel."

@@ -119,12 +119,20 @@ export function PinnedBar({
   const pins = active.filter((a) => a.body.kind !== 'event' && a.body.kind !== 'rollcall')
   // Roll-calls: newest first. An OPEN one asks members to confirm; a CLOSED one waits for a
   // manager to sweep (so it stays visible past its deadline).
-  // Only the NEWEST roll-call is ever shown: stale ones would stack up in the bar and the
-  // oldest would mask the one that actually needs attention.
+  // Show a roll-call only while it is ACTIONABLE for THIS viewer: still open, not yet
+  // answered, and they're not exempt. Once confirmed it disappears — a prompt that lingers for
+  // the rest of a 30-day window is nagging, not asking. Managers track it in Moderation.
   const rollcalls = active
     .filter((a) => a.body.kind === 'rollcall')
     .sort((x, y) => y.artifact.createdAt - x.artifact.createdAt)
     .slice(0, 1)
+    .filter(
+      (a) =>
+        !isManager &&
+        !a.artifact.respondedByMe &&
+        !!a.artifact.expiresAt &&
+        a.artifact.expiresAt > now,
+    )
   const events = active
     .filter((a): a is VerifiedArtifact & { body: Extract<ArtifactBody, { kind: 'event' }> } => {
       if (a.body.kind !== 'event') return false
@@ -417,7 +425,6 @@ export function PinnedBar({
           <div className="space-y-1 border-t border-edge px-3 py-2">
             {/* Roll-calls: confirm you're still here / manager sweeps the silent. */}
             {rollcalls.map((a) => {
-              const closed = !!a.artifact.expiresAt && a.artifact.expiresAt <= now
               const deadline = a.artifact.expiresAt
                 ? new Date(a.artifact.expiresAt).toLocaleString(i18n.language, {
                     dateStyle: 'short',
@@ -431,36 +438,15 @@ export function PinnedBar({
                 >
                   <p className="text-xs text-ink">
                     <span aria-hidden>🙋 </span>
-                    {closed
-                      ? t('rollcall.closed')
-                      : isManager
-                        ? t('rollcall.openManager', { deadline })
-                        : t('rollcall.open', { deadline })}
+                    {t('rollcall.open', { deadline })}
                   </p>
-                  <div className="flex items-center gap-2">
-                    {/* Managers + the owner are exempt from the sweep, so never ask THEM to
-                        confirm — it would be a prompt with no consequence. */}
-                    {!closed && !isManager && !a.artifact.respondedByMe && (
-                      <button
-                        type="button"
-                        className="btn-gold text-xs px-2 py-0.5"
-                        onClick={() => respondRollcall(a.artifact.artifactId)}
-                      >
-                        {t('rollcall.confirm')}
-                      </button>
-                    )}
-                    {!closed && !isManager && a.artifact.respondedByMe && (
-                      <span className="text-[11px] text-olive">{t('rollcall.confirmed')}</span>
-                    )}
-                    {!closed && isManager && (
-                      <span className="text-[11px] text-ink-faint">{t('rollcall.exempt')}</span>
-                    )}
-                    {isManager && closed && (
-                      <span className="ml-auto text-[11px] text-ink-faint">
-                        {t('rollcall.sweepInModeration')}
-                      </span>
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    className="btn-gold text-xs px-2 py-0.5"
+                    onClick={() => respondRollcall(a.artifact.artifactId)}
+                  >
+                    {t('rollcall.confirm')}
+                  </button>
                 </div>
               )
             })}
