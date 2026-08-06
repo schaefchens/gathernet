@@ -2349,3 +2349,68 @@ describe('pinned channel artifacts (relayed, server-opaque)', () => {
     expect(after.find((a) => a.artifactId === artifactId)?.participants).toHaveLength(0)
   })
 })
+
+describe('no-roster rule: community membership is not member-enumerable', () => {
+  const members = (communityId: string, user: TestUser) =>
+    app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/members`,
+      headers: auth(user),
+    })
+
+  it('refuses the roster to a casual member, allows it for the owner', async () => {
+    const owner = await createUser('Owner')
+    const casual = await createUser('Casual')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, casual)
+
+    expect((await members(communityId, casual)).statusCode).toBe(403)
+    const asOwner = await members(communityId, owner)
+    expect(asOwner.statusCode).toBe(200)
+    expect(asOwner.json().members.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('allows the roster to a channel moderator who is not a community leader', async () => {
+    const owner = await createUser('Owner')
+    const mod = await createUser('Mod')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, mod)
+    const channelId = await createChannel(owner, communityId)
+    // mod joins the (open) channel, then owner promotes them to channel moderator
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/join`,
+      headers: auth(mod),
+    })
+    const promote = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/moderators/${mod.accountId}`,
+      headers: auth(owner),
+      payload: { action: 'set' },
+    })
+    expect(promote.statusCode).toBe(200)
+
+    expect((await members(communityId, mod)).statusCode).toBe(200)
+  })
+
+  it('detail hides the roster from a casual member but keeps it for the owner', async () => {
+    const owner = await createUser('Owner')
+    const casual = await createUser('Casual')
+    const communityId = await createCommunity(owner)
+    await addMember(owner, communityId, casual)
+
+    const asCasual = (await detail(casual, communityId)).json()
+    expect(asCasual.members).toEqual([])
+    const asOwner = (await detail(owner, communityId)).json()
+    expect(asOwner.members.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('reports a coarse size band (exact only for a small community)', async () => {
+    const owner = await createUser('Owner')
+    const communityId = await createCommunity(owner)
+    const body = (await detail(owner, communityId)).json()
+    // a brand-new community is tiny → exact count plus the 'few' band
+    expect(body.memberCount).toBe(1)
+    expect(body.memberBucket).toBe('few')
+  })
+})

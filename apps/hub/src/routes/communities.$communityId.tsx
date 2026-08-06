@@ -252,6 +252,8 @@ function CommunityDetailScreen() {
             myAccountId={myAccountId}
             members={detail.members}
             memberCount={detail.memberCount}
+            memberBucket={detail.memberBucket}
+            channelIds={sorted.map((c) => c.channelId)}
           />
 
           {isLeader && <InvitePanel communityId={communityId} />}

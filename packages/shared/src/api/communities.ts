@@ -123,6 +123,31 @@ export const communityMemberSchema = z.object({
   role: communityRoleSchema,
 })
 
+/**
+ * Coarse community-size band. Large communities report only a band — an exact head count
+ * is an intelligence signal about a congregation, and the no-roster rule means nobody is
+ * enumerating the people behind it anyway.
+ */
+export const memberCountBucketSchema = z.enum([
+  'few', // ≤ 10
+  'dozens', // ≤ 100
+  'hundreds', // ≤ 1_000
+  'thousands', // ≤ 10_000
+  'tensOfThousands', // ≤ 100_000
+  'hundredsOfThousands', // more
+])
+export type MemberCountBucket = z.infer<typeof memberCountBucketSchema>
+
+/** Bucket an exact count into its size band (server-side; clients render the label). */
+export function bucketMemberCount(count: number): MemberCountBucket {
+  if (count <= 10) return 'few'
+  if (count <= 100) return 'dozens'
+  if (count <= 1_000) return 'hundreds'
+  if (count <= 10_000) return 'thousands'
+  if (count <= 100_000) return 'tensOfThousands'
+  return 'hundredsOfThousands'
+}
+
 /** Cursor pagination for large rosters/device lists. `after` = last id seen. */
 export const paginationQuerySchema = z.object({
   after: z.string().optional(),
@@ -334,10 +359,18 @@ export const communityDetailResponseSchema = z.object({
     root: communityRootSchema.nullable(),
   }),
   myRole: communityRoleSchema,
-  /** first page of active members (≤ COMMUNITY_MEMBER_PAGE_SIZE); page the rest via GET …/members */
+  /**
+   * First page of active members — MANAGERS ONLY (community leaders/owner, or a moderator
+   * of some channel here). Empty for casual members: enumerating a community's people is
+   * never a member-level capability. Members instead see the "active members" they've
+   * actually seen in their own decrypted channel history (derived client-side).
+   */
   members: z.array(communityMemberSchema),
-  /** total active-member count (members may be a truncated first page) */
-  memberCount: z.number().int().nonnegative(),
+  /** exact active-member count, but ONLY for small communities (≤ EXACT_MEMBER_COUNT_MAX);
+   *  null above that — read `memberBucket` instead. */
+  memberCount: z.number().int().nonnegative().nullable(),
+  /** coarse size band, always present (never leaks an exact figure for a large community) */
+  memberBucket: memberCountBucketSchema,
   channels: z.array(communityChannelSchema),
 })
 

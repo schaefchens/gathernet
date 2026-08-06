@@ -48,6 +48,13 @@ export const CHANNEL_KEY_GRANT_BATCH_MAX = 1000
 /** Roster page size for paginated community/channel member listings. */
 export const COMMUNITY_MEMBER_PAGE_SIZE = 100
 
+/**
+ * Above this many active members a community's size is reported only as a BUCKET
+ * ('hundreds', 'thousands', …) — never an exact figure. An exact count of a large
+ * community is an intelligence signal (and small groups genuinely want "(7)").
+ */
+export const EXACT_MEMBER_COUNT_MAX = 50
+
 /** MLS key package pool per device. */
 export const KEY_PACKAGE_TARGET = 50
 export const KEY_PACKAGE_REPLENISH_BELOW = 20

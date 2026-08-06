@@ -3,22 +3,39 @@ import type {
   CommunityMember,
   CommunityMembersPageResponse,
   CommunityRole,
+  MemberCountBucket,
 } from '@gathernet/shared'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../lib/api.ts'
+import { useCommunityChat } from '../../stores/community-chat.ts'
 
 interface MemberPanelProps {
   communityId: string
   myRole: CommunityRole
   myAccountId: string | null
-  /** first page of members (server-bounded); the rest load on demand */
+  /** first page of the roster — MANAGERS ONLY (empty for casual members, by design) */
   members: CommunityMember[]
-  /** total active members — a mega-community may far exceed the first page */
-  memberCount: number
+  /** exact count for small communities; null when large (use `memberBucket`) */
+  memberCount: number | null
+  /** coarse size band, always present */
+  memberBucket: MemberCountBucket
+  /** this community's channelIds — used to derive the "active members" a casual member
+   *  has actually seen in their own decrypted history */
+  channelIds: string[]
 }
+
+/** Literal i18n keys for the size bands (the typed t() needs literals). */
+const BUCKET_KEY = {
+  few: 'communities.sizeFew',
+  dozens: 'communities.sizeDozens',
+  hundreds: 'communities.sizeHundreds',
+  thousands: 'communities.sizeThousands',
+  tensOfThousands: 'communities.sizeTensOfThousands',
+  hundredsOfThousands: 'communities.sizeHundredsOfThousands',
+} as const satisfies Record<MemberCountBucket, string>
 
 const ROLE_BADGE: Record<CommunityRole, string> = {
   owner: 'text-gold border-gold',
@@ -32,18 +49,41 @@ export function MemberPanel({
   myAccountId,
   members,
   memberCount,
+  memberBucket,
+  channelIds,
 }: MemberPanelProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const isOwner = myRole === 'owner'
   const isLeader = myRole === 'owner' || myRole === 'leader'
+  // The server sends the roster to managers only; its presence is the signal.
+  const hasRoster = members.length > 0
 
   // Extra pages loaded on demand beyond the detail's first page.
   const [extra, setExtra] = useState<CommunityMember[]>([])
   const [loadingMore, setLoadingMore] = useState(false)
   const roster = [...members, ...extra]
-  const hasMore = roster.length < memberCount
+  // Only pageable when we know the exact total (small community) — a large one reports a
+  // band, so we just offer "load more" while pages keep coming back full.
+  const hasMore = hasRoster && (memberCount === null || roster.length < memberCount)
+
+  // Casual members: the people they've actually SEEN — unique senders across this
+  // community's decrypted channel history. Never a roster; purely local, no server call.
+  const messagesByChannel = useCommunityChat((s) => s.messages)
+  const seen = useMemo(() => {
+    if (hasRoster) return []
+    const byAccount = new Map<string, string>()
+    for (const channelId of channelIds) {
+      for (const m of messagesByChannel[channelId] ?? []) {
+        if (m.senderAccountId === myAccountId) continue
+        if (!byAccount.has(m.senderAccountId)) {
+          byAccount.set(m.senderAccountId, m.senderName ?? m.senderAccountId.slice(0, 8))
+        }
+      }
+    }
+    return [...byAccount].map(([accountId, name]) => ({ accountId, name }))
+  }, [hasRoster, channelIds, messagesByChannel, myAccountId])
 
   const loadMore = async () => {
     if (loadingMore || roster.length === 0) return
@@ -89,8 +129,33 @@ export function MemberPanel({
     <section className="card space-y-3">
       <h2 className="font-medium text-ink-soft">
         {t('communities.members')}
-        <span className="ml-1 text-xs text-ink-faint">({memberCount})</span>
+        <span className="ml-1 text-xs text-ink-faint">
+          {memberCount !== null ? `(${memberCount})` : `· ${t(BUCKET_KEY[memberBucket])}`}
+        </span>
       </h2>
+
+      {/* Casual members never see the roster — only the people they've encountered in
+          their own visible history, plus the community's coarse size. */}
+      {!hasRoster && (
+        <div className="space-y-2">
+          <p className="text-xs text-ink-faint">{t('communities.activeMembersHint')}</p>
+          {seen.length === 0 ? (
+            <p className="text-sm text-ink-faint">{t('communities.noActiveMembers')}</p>
+          ) : (
+            <ul className="space-y-1">
+              {seen.map((s) => (
+                <li
+                  key={s.accountId}
+                  className="flex items-center gap-2 bg-overlay rounded-md px-3 py-1.5 text-sm"
+                >
+                  <span className="flex-1 truncate">{s.name}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <ul className="space-y-2">
         {roster.map((member) => {
           const isSelf = member.accountId === myAccountId
@@ -162,7 +227,9 @@ export function MemberPanel({
           disabled={loadingMore}
           onClick={() => void loadMore()}
         >
-          {t('communities.loadMoreMembers', { count: memberCount - roster.length })}
+          {memberCount !== null
+            ? t('communities.loadMoreMembers', { count: memberCount - roster.length })
+            : t('communities.loadMore')}
         </button>
       )}
 

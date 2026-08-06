@@ -43,8 +43,10 @@ import type {
   UpdateCommunityRequest,
 } from '@gathernet/shared'
 import {
+  bucketMemberCount,
   COMMUNITY_MEDIA_MAX_BYTES,
   COMMUNITY_MEMBER_PAGE_SIZE,
+  EXACT_MEMBER_COUNT_MAX,
   GROUP_KEY_BROADCAST_MAX_MEMBERS,
   GROUP_KEY_DISCUSSION_MAX_MEMBERS,
   INVITE_CODE_LENGTH,
@@ -158,6 +160,34 @@ async function requireChannelManager(
   })
   if (cm?.status === 'active' && cm.role === 'moderator') return
   throw new ServiceError(403, 'not_a_moderator')
+}
+
+/**
+ * Whether an account may see this community's ROSTER: community leaders/owner, or a
+ * moderator of any channel in it (they need it to invite + moderate). Casual members never
+ * enumerate a community's people — they see only the "active members" their own decrypted
+ * channel history reveals. @see listCommunityMembers
+ */
+async function isCommunityManager(
+  db: DbOrTx,
+  communityId: string,
+  membership: MemberRow,
+): Promise<boolean> {
+  if (isLeaderRole(membership.role)) return true
+  const mod = await db
+    .select({ channelId: channelMembers.channelId })
+    .from(channelMembers)
+    .innerJoin(communityChannels, eq(communityChannels.channelId, channelMembers.channelId))
+    .where(
+      and(
+        eq(communityChannels.communityId, communityId),
+        eq(channelMembers.accountId, membership.accountId),
+        eq(channelMembers.status, 'active'),
+        eq(channelMembers.role, 'moderator'),
+      ),
+    )
+    .limit(1)
+  return mod.length > 0
 }
 
 async function activeMemberAccountIds(db: DbOrTx, communityId: string): Promise<string[]> {
@@ -346,28 +376,33 @@ export async function getCommunityDetail(
   })
   if (!community) throw new ServiceError(404, 'community_not_found')
 
-  // First page only — a mega-community can have 100k members. The rest are
-  // paged via GET …/members. Ordered by accountId so the page boundary is
-  // stable and lines up with the paginated endpoint.
-  const memberRows = await db
-    .select({
-      accountId: communityMembers.accountId,
-      role: communityMembers.role,
-      displayName: accounts.displayName,
-    })
-    .from(communityMembers)
-    .innerJoin(accounts, eq(accounts.accountId, communityMembers.accountId))
-    .where(
-      and(eq(communityMembers.communityId, communityId), eq(communityMembers.status, 'active')),
-    )
-    .orderBy(asc(communityMembers.accountId))
-    .limit(COMMUNITY_MEMBER_PAGE_SIZE)
+  // Roster: MANAGERS ONLY (see listCommunityMembers). Casual members get an empty list and
+  // derive "active members" from their own visible channel history instead. First page only
+  // — a mega-community can have 100k members; the rest are paged via GET …/members. Ordered
+  // by accountId so the page boundary is stable and lines up with that endpoint.
+  const canSeeRoster = await isCommunityManager(db, communityId, membership)
+  const memberRows = canSeeRoster
+    ? await db
+        .select({
+          accountId: communityMembers.accountId,
+          role: communityMembers.role,
+          displayName: accounts.displayName,
+        })
+        .from(communityMembers)
+        .innerJoin(accounts, eq(accounts.accountId, communityMembers.accountId))
+        .where(
+          and(eq(communityMembers.communityId, communityId), eq(communityMembers.status, 'active')),
+        )
+        .orderBy(asc(communityMembers.accountId))
+        .limit(COMMUNITY_MEMBER_PAGE_SIZE)
+    : []
   const [memberCountRow] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(communityMembers)
     .where(
       and(eq(communityMembers.communityId, communityId), eq(communityMembers.status, 'active')),
     )
+  const activeCount = memberCountRow?.count ?? memberRows.length
 
   const isLeader = isLeaderRole(membership.role)
   const channelRows = await db
@@ -468,14 +503,20 @@ export async function getCommunityDetail(
       displayName: m.displayName,
       role: m.role,
     })),
-    memberCount: memberCountRow?.count ?? memberRows.length,
+    // Exact only for small communities; larger ones report a coarse band so no exact head
+    // count of a congregation ever leaves the server.
+    memberCount: activeCount <= EXACT_MEMBER_COUNT_MAX ? activeCount : null,
+    memberBucket: bucketMemberCount(activeCount),
     channels,
   }
 }
 
 /**
- * Paginated active-member roster (any active member may read it, for chat name
- * resolution / member browsing). Ordered by accountId; `after` = last accountId.
+ * Paginated active-member roster — MANAGERS ONLY (leaders/owner, or a moderator of some
+ * channel here). Casual members must never enumerate a community's people; their client
+ * derives "active members" from the senders in their own decrypted channel history, and
+ * message bubbles are labelled from the sender name carried inside the sealed body.
+ * Ordered by accountId; `after` = last accountId.
  */
 export async function listCommunityMembers(
   db: Db,
@@ -484,7 +525,12 @@ export async function listCommunityMembers(
   after?: string,
   limit?: number,
 ): Promise<CommunityMembersPageResponse> {
-  await requireActiveMembership(db, communityId, accountId)
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  // MANAGERS ONLY. Wholesale enumeration of a community's people is not a member-level
+  // capability — see isCommunityManager + the no-roster rule.
+  if (!(await isCommunityManager(db, communityId, membership))) {
+    throw new ServiceError(403, 'not_a_manager')
+  }
   const pageSize = Math.min(limit ?? COMMUNITY_MEMBER_PAGE_SIZE, 500)
   const conds = [
     eq(communityMembers.communityId, communityId),
