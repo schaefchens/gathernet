@@ -3,9 +3,16 @@ import { useTranslation } from 'react-i18next'
 import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
 import { buildThreadIndex } from '../../lib/thread-index.ts'
+import { WsRequestError } from '../../lib/ws-client.ts'
 import { MessageBubble } from './MessageBubble.tsx'
 import { ThreadView } from './ThreadView.tsx'
 import { VoiceRecorder } from './VoiceRecorder.tsx'
+
+/** True when a send failed because this account is no longer a member of the channel — the
+ *  important case: the view was stale and the message would otherwise vanish silently. */
+function isNotAMemberError(err: unknown): boolean {
+  return err instanceof WsRequestError && err.code === 'not_a_member'
+}
 
 interface MessageThreadProps {
   messages: StoredMessage[]
@@ -82,6 +89,9 @@ export function MessageThread({
   const [sending, setSending] = useState(false)
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
   const [viewOnce, setViewOnce] = useState(false)
+  /** last send failure, shown above the composer — a silently dropped message is worse than
+   *  an error (a removed member would otherwise type into the void) */
+  const [sendError, setSendError] = useState<string | null>(null)
   /** open thread's root message id (threaded channels only) */
   const [openThreadRoot, setOpenThreadRoot] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -133,6 +143,13 @@ export function MessageThread({
       setReplyingTo(null)
     } catch (err) {
       console.error('media send failed', err)
+      setSendError(
+        isNotAMemberError(err)
+          ? t('chat.sendFailedNotMember')
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      )
     }
   }
 
@@ -146,6 +163,13 @@ export function MessageThread({
       await onSendVoice(blob, durationMs, replyTo, once)
     } catch (err) {
       console.error('voice send failed', err)
+      setSendError(
+        isNotAMemberError(err)
+          ? t('chat.sendFailedNotMember')
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      )
     }
   }
 
@@ -159,9 +183,17 @@ export function MessageThread({
     setReplyingTo(null)
     setViewOnce(false)
     try {
+      setSendError(null)
       await onSend(text, replyTo, once)
     } catch (err) {
       console.error('send failed', err)
+      setSendError(
+        isNotAMemberError(err)
+          ? t('chat.sendFailedNotMember')
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      )
       setDraft(text)
       setViewOnce(once)
     } finally {
@@ -238,6 +270,11 @@ export function MessageThread({
         </p>
       ) : (
         <div className="pt-3 border-t border-edge">
+          {sendError && (
+            <p className="mb-2 rounded-md border border-danger/50 bg-danger/10 px-2 py-1 text-xs text-danger">
+              {sendError}
+            </p>
+          )}
           {replyPreview && (
             <div className="flex items-center gap-2 mb-2 text-xs text-ink-soft">
               <span className="flex-1 min-w-0 truncate border-l-2 border-indigo-soft/60 pl-2">

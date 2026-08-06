@@ -170,7 +170,8 @@
     "viewOnceViewing": "This disappears after you close the chat",
     "viewOnceOpened": "Opened — this message is gone",
     "viewOnceSeen": "View once — opened by recipient",
-    "pin": "Pin"
+    "pin": "Pin",
+    "sendFailedNotMember": "You're no longer a member of this channel, so your message wasn't sent. Reload to see the channel's current state."
   },
   "pins": {
     "title": "Pinned ({{count}})",

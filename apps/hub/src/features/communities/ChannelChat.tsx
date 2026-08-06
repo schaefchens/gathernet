@@ -1,9 +1,10 @@
 import type { ChannelAccess, ChannelPinPolicy, ChannelPostPolicy, Friend } from '@gathernet/shared'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../../lib/api.ts'
 import { copyMedia } from '../../lib/media.ts'
+import { WsRequestError } from '../../lib/ws-client.ts'
 import { channelArtifactsStore } from '../../stores/channel-artifacts.ts'
 import { communityChatStore, useCommunityChat } from '../../stores/community-chat.ts'
 import { useSession } from '../../stores/session.ts'
@@ -60,6 +61,7 @@ export function ChannelChat({
   const status = useCommunityChat((s) => s.channels[channelId] ?? 'idle')
   const messages = useCommunityChat((s) => s.messages[channelId] ?? NO_MESSAGES)
   const myAccountId = useSession((s) => s.accountId)
+  const queryClient = useQueryClient()
   const threadRef = useRef<HTMLDivElement>(null)
   const [pinError, setPinError] = useState<string | null>(null)
   // Friends list — so the per-message "Connect" affordance is hidden for existing friends.
@@ -68,6 +70,24 @@ export function ChannelChat({
     queryFn: () => api<{ friends: Friend[] }>('GET', '/api/v1/friends'),
   })
   const friendAccountIds = friends.data?.friends.map((f) => f.accountId)
+
+  /**
+   * A send refused with `not_a_member` means this account was removed while the view was
+   * stale (e.g. a roll-call sweep). Refetch so the UI stops showing a composer it can't use,
+   * and drop the channel's local MLS state — rejoining needs a fresh external join anyway.
+   * The error is re-thrown so the composer can tell the user what happened.
+   */
+  const withMembershipCheck = async <T,>(run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run()
+    } catch (err) {
+      if (err instanceof WsRequestError && err.code === 'not_a_member') {
+        void communityChatStore.forgetChannel(channelId)
+        void queryClient.invalidateQueries({ queryKey: ['community', communityId] })
+      }
+      throw err
+    }
+  }
 
   /** Build a pin snapshot from a channel message and post it (a suggestion under
    *  moderators policy; the pinned bar reflects its status once it round-trips). A
@@ -192,7 +212,7 @@ export function ChannelChat({
               messages={messages}
               ready={status === 'ready'}
               onSend={(text, replyTo, once) =>
-                communityChatStore.send(channelId, text, replyTo, once)
+                withMembershipCheck(() => communityChatStore.send(channelId, text, replyTo, once))
               }
               onSendMedia={(file, caption, replyTo, once) =>
                 communityChatStore.sendMedia(channelId, file, caption, replyTo, once)

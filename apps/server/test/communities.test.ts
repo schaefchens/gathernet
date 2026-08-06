@@ -2677,6 +2677,42 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
     expect(sweepOld.statusCode).toBe(409)
   })
 
+  it('a swept member is not locked out: they see the channel as non-active and can rejoin', async () => {
+    const owner = await createUser('RcRejoinOwner')
+    const silent = await createUser('RcRejoiner')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId) // open join policy
+    await addMember(owner, communityId, silent)
+    await joinOpenChannel(silent, communityId, channelId)
+
+    const artifactId = await start(owner, communityId, channelId, 1)
+    await testDb.db
+      .update(channelArtifacts)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(channelArtifacts.artifactId, artifactId))
+    const sweep = await app.inject({
+      method: 'POST',
+      url: `${rollcallsUrl(communityId, channelId)}/${artifactId}/sweep`,
+      headers: auth(owner),
+    })
+    expect(sweep.statusCode).toBe(200)
+
+    // Their own view must show them OUT (so the client offers the join panel, not a composer).
+    const after = (await detail(silent, communityId)).json()
+    const chan = (after.channels as Array<{ channelId: string; myStatus: string }>).find(
+      (c) => c.channelId === channelId,
+    )
+    expect(chan?.myStatus).toBe('none')
+
+    // ...and rejoining works — a sweep must never be a permanent lockout.
+    const rejoin = await app.inject({
+      method: 'POST',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/join`,
+      headers: auth(silent),
+    })
+    expect(rejoin.statusCode).toBe(200)
+  })
+
   it('a plain member cannot start or sweep a roll-call', async () => {
     const owner = await createUser('RcOwner4')
     const member = await createUser('RcMember4')
