@@ -167,11 +167,14 @@ export const channelArtifactsStore = {
     if (!record || !kMeta) throw new Error('locked')
     const epoch = await getKMetaEpoch(communityId)
     const body: ArtifactBody = { v: 1, kind: 'rollcall', ...(prompt ? { prompt } : {}) }
-    // buildArtifact mints the id + seals/signs; the server sets expiresAt from the window.
-    const built = await buildArtifact(channelId, body, kMeta, epoch, record, null)
+    // The deadline must be SIGNED (artifactTuple binds expiresAt) — otherwise the stored
+    // artifact wouldn't verify on any client and would be dropped as invalid.
+    const expiresAt = Date.now() + windowMinutes * 60_000
+    const built = await buildArtifact(channelId, body, kMeta, epoch, record, expiresAt)
     await api('POST', `${rollcallBase(communityId, channelId)}`, {
       artifactId: built.artifactId,
       windowMinutes,
+      expiresAt,
       sealEpoch: built.sealEpoch,
       sealedBody: built.sealedBody,
       issuerDeviceId: built.issuerDeviceId,

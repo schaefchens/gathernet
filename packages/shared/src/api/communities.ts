@@ -392,6 +392,12 @@ export const rollcallWindowSchema = z
 export const startRollcallRequestSchema = z.object({
   artifactId: z.uuid(),
   windowMinutes: rollcallWindowSchema,
+  /**
+   * The deadline the client SIGNED (epoch ms). It must be sent, not derived server-side: the
+   * artifact signature binds expiresAt, so a server-chosen deadline would make every
+   * roll-call fail client-side verification. Validated against `windowMinutes`.
+   */
+  expiresAt: z.number().int().positive(),
   /** sealed body (title/prompt) + signature, same shape as any artifact */
   sealEpoch: z.number().int().nonnegative(),
   sealedBody: z.base64().max(CHANNEL_ARTIFACT_BODY_MAX_B64),

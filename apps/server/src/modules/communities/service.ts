@@ -2650,6 +2650,12 @@ export async function startRollcall(
   await loadChannel(db, communityId, channelId)
   await requireChannelManager(db, channelId, membership)
   await requireOwnDevice(db, accountId, input.issuerDeviceId)
+  // The signature binds expiresAt, so we store the deadline the CLIENT signed — we only
+  // check it matches the declared window (small tolerance for clock skew / latency).
+  const expected = Date.now() + input.windowMinutes * 60_000
+  if (Math.abs(input.expiresAt - expected) > 5 * 60_000) {
+    throw new ServiceError(400, 'rollcall_deadline')
+  }
   await db
     .insert(channelArtifacts)
     .values({
@@ -2662,7 +2668,7 @@ export async function startRollcall(
       issuerDeviceId: input.issuerDeviceId,
       issuerSig: bufOf(input.issuerSig),
       createdBy: accountId,
-      expiresAt: new Date(Date.now() + input.windowMinutes * 60_000),
+      expiresAt: new Date(input.expiresAt),
     })
     .onConflictDoNothing()
   await emitToChannel(db, registry, communityId, channelId, {

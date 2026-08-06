@@ -2408,6 +2408,7 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
       payload: {
         artifactId,
         windowMinutes,
+        expiresAt: Date.now() + windowMinutes * 60_000,
         sealEpoch: 0,
         sealedBody: fakeB64(32),
         issuerDeviceId: manager.deviceId,
@@ -2450,6 +2451,54 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
     >
     const managerView = asManager.find((a) => a.artifactId === artifactId)
     expect(managerView?.responders).toEqual([responder.accountId])
+  })
+
+  it('stores the deadline the client SIGNED (a server-chosen one breaks verification)', async () => {
+    const owner = await createUser('RcDeadline')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    const artifactId = randomUUID()
+    const expiresAt = Date.now() + 1440 * 60_000
+    const res = await app.inject({
+      method: 'POST',
+      url: rollcallsUrl(communityId, channelId),
+      headers: auth(owner),
+      payload: {
+        artifactId,
+        windowMinutes: 1440,
+        expiresAt,
+        sealEpoch: 0,
+        sealedBody: fakeB64(32),
+        issuerDeviceId: owner.deviceId,
+        issuerSig: fakeB64(64),
+      },
+    })
+    expect(res.statusCode).toBe(201)
+    const listed = (await artifactsOf(owner, communityId, channelId)).json().artifacts as Array<
+      Record<string, unknown>
+    >
+    expect(listed.find((a) => a.artifactId === artifactId)?.expiresAt).toBe(expiresAt)
+  })
+
+  it('rejects a deadline that does not match the declared window', async () => {
+    const owner = await createUser('RcSkew')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    const res = await app.inject({
+      method: 'POST',
+      url: rollcallsUrl(communityId, channelId),
+      headers: auth(owner),
+      payload: {
+        artifactId: randomUUID(),
+        windowMinutes: 1,
+        expiresAt: Date.now() + 30 * 86_400_000, // claims 1 minute, asks for 30 days
+        sealEpoch: 0,
+        sealedBody: fakeB64(32),
+        issuerDeviceId: owner.deviceId,
+        issuerSig: fakeB64(64),
+      },
+    })
+    expect(res.statusCode).toBe(400)
   })
 
   it('sweeping an OPEN roll-call is refused', async () => {
@@ -2527,6 +2576,7 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
       payload: {
         artifactId: randomUUID(),
         windowMinutes: 1440,
+        expiresAt: Date.now() + 1440 * 60_000,
         sealEpoch: 0,
         sealedBody: fakeB64(32),
         issuerDeviceId: member.deviceId,
