@@ -168,10 +168,14 @@ export function MemberPanel({
           return (
             <li
               key={member.accountId}
-              className="flex items-center gap-2 bg-overlay rounded-md px-3 py-2"
+              className="flex flex-wrap items-center gap-2 bg-overlay rounded-md px-3 py-2"
             >
-              <span className="flex-1 text-sm truncate">
-                {member.displayName}
+              <span className="min-w-0 flex-1 text-sm truncate">
+                {/* A member who joined by bare code can reach the roster before their
+                    display name does — render the placeholder, not an empty row. */}
+                {member.displayName || (
+                  <span className="text-ink-faint italic">{t('connect.thisPerson')}</span>
+                )}
                 {isSelf && (
                   <span className="ml-1 text-xs text-ink-faint">({t('communities.you')})</span>
                 )}

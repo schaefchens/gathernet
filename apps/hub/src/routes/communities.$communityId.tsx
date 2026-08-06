@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { CommunityIcon, LockIcon } from '../components/icons.tsx'
 import { ChannelChat } from '../features/communities/ChannelChat.tsx'
 import { ChannelJoinPanel } from '../features/communities/ChannelJoinPanel.tsx'
 import { ChannelSettingsForm } from '../features/communities/ChannelSettingsForm.tsx'
@@ -30,6 +31,17 @@ const ROLE_BADGE = {
   owner: 'text-gold border-gold',
   leader: 'text-indigo-soft border-indigo-soft',
   member: 'text-ink-soft border-edge',
+} as const
+
+/** Coarse size bands, shown instead of a count when a community is too large for a
+ *  roster. Mirrors MemberPanel — the typed t() needs literal keys. */
+const BUCKET_KEY = {
+  few: 'communities.sizeFew',
+  dozens: 'communities.sizeDozens',
+  hundreds: 'communities.sizeHundreds',
+  thousands: 'communities.sizeThousands',
+  tensOfThousands: 'communities.sizeTensOfThousands',
+  hundredsOfThousands: 'communities.sizeHundredsOfThousands',
 } as const
 
 function CommunityDetailScreen() {
@@ -150,42 +162,66 @@ function CommunityDetailScreen() {
     // space (no magic-number height that overruns when a description / tab row is present).
     // On mobile it's normal document flow; the pane uses a dvh-based fallback height.
     <div className="space-y-4 md:h-[calc(100dvh-7rem)] md:flex md:flex-col md:gap-4 md:space-y-0">
-      <div className="flex items-center gap-3">
-        <Link
-          to="/communities"
-          className="text-ink-soft hover:text-ink"
-          aria-label={t('common.back')}
-        >
-          ←
-        </Link>
-        <CommunityAvatar
-          communityId={communityId}
-          mediaId={detail.community.avatarMediaId}
-          label={communityName}
-          size="md"
-        />
-        <h1 className="flex-1 font-display text-2xl truncate">{communityName}</h1>
-        {isLeader && (
-          <button
-            type="button"
-            className="btn-quiet text-xs px-2 py-1"
-            onClick={() => setShowSettings((s) => !s)}
+      <div className="card space-y-3 p-4">
+        <div className="flex items-center gap-3">
+          <Link
+            to="/communities"
+            className="text-ink-soft hover:text-gold-bright"
+            aria-label={t('common.back')}
           >
-            {t('communities.communitySettings')}
-          </button>
+            ←
+          </Link>
+          <CommunityAvatar
+            communityId={communityId}
+            mediaId={detail.community.avatarMediaId}
+            label={communityName}
+            size="md"
+          />
+          <h1 className="flex-1 font-display text-2xl font-semibold truncate text-gold-bright">
+            {communityName}
+          </h1>
+          <span
+            className={`shrink-0 text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5 ${ROLE_BADGE[detail.myRole]}`}
+          >
+            {t(`communities.roles.${detail.myRole}`)}
+          </span>
+        </div>
+
+        {/* Trust chips. Only claims that are actually true: the transport really is
+            end-to-end encrypted, and the size is the exact roster count for small
+            communities or the coarse band for large ones — large communities expose
+            no roster at all, so there is no number to show. */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="chip-row flex-1">
+            <span className="chip">
+              <LockIcon size={16} />
+              {t('chat.encrypted')}
+            </span>
+            <span className="chip">
+              <CommunityIcon size={16} />
+              {detail.memberCount !== null
+                ? t('communities.memberCount', { count: detail.memberCount })
+                : t(BUCKET_KEY[detail.memberBucket])}
+            </span>
+          </div>
+          {isLeader && (
+            <button
+              type="button"
+              className="btn-quiet shrink-0 text-xs px-2 py-1"
+              onClick={() => setShowSettings((s) => !s)}
+            >
+              {t('communities.communitySettings')}
+            </button>
+          )}
+        </div>
+
+        {communityMeta?.description && !showSettings && (
+          <ClampedMarkdown
+            text={communityMeta.description}
+            className="text-sm text-ink-soft [&_p]:mb-2 [&_ul]:mb-2"
+          />
         )}
-        <span
-          className={`text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5 ${ROLE_BADGE[detail.myRole]}`}
-        >
-          {t(`communities.roles.${detail.myRole}`)}
-        </span>
       </div>
-      {communityMeta?.description && !showSettings && (
-        <ClampedMarkdown
-          text={communityMeta.description}
-          className="text-sm text-ink-soft [&_p]:mb-2 [&_ul]:mb-2"
-        />
-      )}
 
       {showSettings && isLeader && (
         <CommunitySettingsForm
@@ -261,7 +297,9 @@ function CommunityDetailScreen() {
           {isLeader && <InvitePanel communityId={communityId} />}
         </div>
 
-        <div className="md:col-span-2 md:min-h-0 md:flex md:flex-col">
+        {/* Chat first on mobile — opening a community should land you in the
+            conversation, not above three panels of settings. */}
+        <div className="order-first md:order-none md:col-span-2 md:min-h-0 md:flex md:flex-col">
           {selectedChannel ? (
             <ChannelWorkspace
               key={selectedChannel.channelId}

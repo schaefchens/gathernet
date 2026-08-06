@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { AttachIcon, EyeIcon, SendIcon } from '../../components/icons.tsx'
 import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
 import { buildThreadIndex } from '../../lib/thread-index.ts'
@@ -12,6 +13,12 @@ import { VoiceRecorder } from './VoiceRecorder.tsx'
  *  important case: the view was stale and the message would otherwise vanish silently. */
 function isNotAMemberError(err: unknown): boolean {
   return err instanceof WsRequestError && err.code === 'not_a_member'
+}
+
+/** Local calendar day, used to decide where a date divider belongs. */
+function dayKey(ts: number): string {
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 }
 
 interface MessageThreadProps {
@@ -215,9 +222,11 @@ export function MessageThread({
 
   return (
     <>
+      {/* The parchment page. Everything inside it inherits the warm, dark-on-light
+          palette from the .parchment scope in app.css. */}
       <div
         ref={listRef}
-        className="flex-1 overflow-y-auto py-4 space-y-2"
+        className="parchment flex-1 overflow-y-auto rounded-lg px-3 py-4 space-y-2"
         onScroll={() => {
           const el = listRef.current
           if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
@@ -239,26 +248,36 @@ export function MessageThread({
             prev?.senderAccountId !== message.senderAccountId
           const replyCount =
             threadIndex && message.id ? (threadIndex.descendantCount.get(message.id) ?? 0) : 0
+          const newDay = !prev || dayKey(prev.sentAt) !== dayKey(message.sentAt)
           return (
-            <MessageBubble
-              key={message.seq}
-              message={message}
-              quoted={!threaded && message.replyTo ? byId.get(message.replyTo) : null}
-              showSender={showSender}
-              myAccountId={myAccountId}
-              onReact={onReact}
-              onEdit={onEdit}
-              onDelete={onDelete}
-              onConsume={onConsume}
-              onPin={onPin}
-              onReport={onReport}
-              onModRemove={onModRemove}
-              onConnect={onConnect}
-              isFriend={friendSet.has(message.senderAccountId)}
-              onReply={onReply}
-              replyCount={replyCount}
-              onOpenThread={threaded ? openThreadFor : undefined}
-            />
+            <div key={message.seq} className="space-y-2">
+              {newDay && (
+                <p className="rule-orn py-2">
+                  {new Date(message.sentAt).toLocaleDateString(undefined, {
+                    day: 'numeric',
+                    month: 'long',
+                  })}
+                </p>
+              )}
+              <MessageBubble
+                message={message}
+                quoted={!threaded && message.replyTo ? byId.get(message.replyTo) : null}
+                showSender={showSender}
+                myAccountId={myAccountId}
+                onReact={onReact}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onConsume={onConsume}
+                onPin={onPin}
+                onReport={onReport}
+                onModRemove={onModRemove}
+                onConnect={onConnect}
+                isFriend={friendSet.has(message.senderAccountId)}
+                onReply={onReply}
+                replyCount={replyCount}
+                onOpenThread={threaded ? openThreadFor : undefined}
+              />
+            </div>
           )
         })}
         <div ref={bottomRef} />
@@ -291,7 +310,7 @@ export function MessageThread({
             </div>
           )}
           <form
-            className="flex gap-2"
+            className="flex items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault()
               void send()
@@ -310,13 +329,13 @@ export function MessageThread({
                 />
                 <button
                   type="button"
-                  className="btn-quiet px-3"
+                  className="btn-icon"
                   disabled={!ready}
                   title={t('chat.attach')}
                   aria-label={t('chat.attach')}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  📎
+                  <AttachIcon />
                 </button>
               </>
             )}
@@ -326,18 +345,24 @@ export function MessageThread({
             {supportsViewOnce && (
               <button
                 type="button"
-                className={`px-3 ${viewOnce ? 'btn-gold' : 'btn-quiet'}`}
+                className="btn-icon"
                 disabled={!ready}
                 aria-pressed={viewOnce}
                 title={t('chat.viewOnce')}
                 aria-label={t('chat.viewOnce')}
+                style={
+                  viewOnce
+                    ? { color: '#16110a', backgroundColor: 'var(--color-gold-bright)' }
+                    : undefined
+                }
                 onClick={() => setViewOnce((v) => !v)}
               >
-                👁
+                <EyeIcon />
               </button>
             )}
             <input
               ref={composerRef}
+              className="composer-field"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder={ready ? t('chat.placeholder') : t('chat.cannotSend')}
@@ -346,10 +371,12 @@ export function MessageThread({
             />
             <button
               type="submit"
-              className="btn-gold"
+              className="btn-send"
+              aria-label={t('chat.send')}
+              title={t('chat.send')}
               disabled={!ready || !draft.trim() || sending}
             >
-              {t('chat.send')}
+              <SendIcon />
             </button>
           </form>
         </div>

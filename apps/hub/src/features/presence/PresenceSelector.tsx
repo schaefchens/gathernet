@@ -17,6 +17,7 @@ export function PresenceSelector() {
       <span className={`inline-block w-2.5 h-2.5 rounded-full ${DOT[self]}`} />
       <select
         value={self}
+        aria-label={t('friends.presenceLabel')}
         onChange={(e) => void setSelf(e.target.value as SelfStatus)}
         className="bg-transparent border-none p-0 pr-5 text-sm text-ink-soft focus:outline-none w-auto"
       >

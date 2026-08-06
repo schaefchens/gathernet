@@ -147,7 +147,7 @@ async function createAccount(page: Page, displayName: string): Promise<void> {
   await page.getByRole('button', { name: 'Continue' }).click()
 
   // Argon2id (64 MiB) + account creation + MLS init can take a moment.
-  await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible({ timeout: 60_000 })
 }
 
 interface GrantMessage {

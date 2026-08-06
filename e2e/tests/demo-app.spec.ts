@@ -40,7 +40,7 @@ async function createHubAccount(context: BrowserContext, displayName: string): P
   await page.getByPlaceholder('Unlock password', { exact: true }).fill(PASSWORD)
   await page.getByPlaceholder('Repeat password').fill(PASSWORD)
   await page.getByRole('button', { name: 'Continue' }).click()
-  await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible({ timeout: 60_000 })
   await page.close()
 }
 

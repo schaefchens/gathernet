@@ -16,6 +16,21 @@
     "showMore": "Show more",
     "showLess": "Show less"
   },
+  "nav": {
+    "primary": "Main navigation",
+    "chats": "Chats",
+    "communities": "Communities",
+    "connect": "Connect",
+    "tagline": "Secure. Faithful. Together."
+  },
+  "chats": {
+    "title": "Chats",
+    "empty": "No conversations yet. Connect with someone, or join a community.",
+    "people": "People",
+    "protectedTitle": "Your messages are protected",
+    "protectedBody": "End-to-end encrypted. No one outside the conversation can read them.",
+    "pickOne": "Choose a conversation to start reading."
+  },
   "welcome": {
     "title": "Gathernet",
     "tagline": "Fellowship, privately.",
@@ -105,7 +120,8 @@
     "takingSpaceTitle": "Taking space from",
     "blockedUntil": "until {{date}}",
     "lift": "Lift now",
-    "chat": "Chat"
+    "chat": "Chat",
+    "presenceLabel": "Presence"
   },
   "addFriend": {
     "title": "Add a friend",
@@ -316,7 +332,6 @@
     "invalidCode": "That code is invalid, expired, or already used.",
     "alreadyMember": "You're already a member of this community.",
     "notFound": "Community not found.",
-    "channelCount": "{{count}} channels",
     "channels": "Channels",
     "noChannels": "No channels yet.",
     "selectChannel": "Select a channel to start chatting.",
@@ -478,7 +493,11 @@
       "communityHint": "A ceiling for the whole community; a channel can be stricter. Fewer devices means fewer copies of the keys — but a member whose only device is lost or taken must restore from their recovery phrase and drop the old device before rejoining.",
       "channelHint": "Applies to this channel (the stricter of the two limits wins). It also sets how many people fit: about {{capacity}} in a small group channel.",
       "blocked": "This channel allows {{count}} device(s) per person. Drop one of your other devices in Settings, then join again."
-    }
+    },
+    "memberCount_one": "{{count}} member",
+    "memberCount_other": "{{count}} members",
+    "channelCount_one": "{{count}} channel",
+    "channelCount_other": "{{count}} channels"
   },
   "rollcall": {
     "ask": "Ask who's still here",

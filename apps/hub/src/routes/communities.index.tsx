@@ -118,7 +118,7 @@ function CommunityCard({
     <Link
       to="/communities/$communityId"
       params={{ communityId: community.communityId }}
-      className="card flex items-center gap-3 py-3 hover:border-indigo-soft transition-colors"
+      className="card flex items-center gap-3 py-3 transition-colors hover:border-gold"
     >
       <CommunityAvatar
         communityId={community.communityId}

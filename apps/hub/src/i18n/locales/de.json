@@ -16,6 +16,21 @@
     "showMore": "Mehr anzeigen",
     "showLess": "Weniger anzeigen"
   },
+  "nav": {
+    "primary": "Hauptnavigation",
+    "chats": "Chats",
+    "communities": "Gemeinschaften",
+    "connect": "Verbinden",
+    "tagline": "Sicher. Treu. Gemeinsam."
+  },
+  "chats": {
+    "title": "Chats",
+    "empty": "Noch keine Unterhaltungen. Verbinde dich mit jemandem oder tritt einer Gemeinschaft bei.",
+    "people": "Personen",
+    "protectedTitle": "Deine Nachrichten sind geschützt",
+    "protectedBody": "Ende-zu-Ende-verschlüsselt. Niemand außerhalb der Unterhaltung kann sie lesen.",
+    "pickOne": "Wähle eine Unterhaltung aus, um zu lesen."
+  },
   "welcome": {
     "title": "Gathernet",
     "tagline": "Gemeinschaft, privat.",
@@ -105,7 +120,8 @@
     "takingSpaceTitle": "Abstand von",
     "blockedUntil": "bis {{date}}",
     "lift": "Jetzt aufheben",
-    "chat": "Chat"
+    "chat": "Chat",
+    "presenceLabel": "Status"
   },
   "addFriend": {
     "title": "Freund hinzufügen",
@@ -316,7 +332,6 @@
     "invalidCode": "Der Code ist ungültig, abgelaufen oder bereits verwendet.",
     "alreadyMember": "Du bist bereits Mitglied dieser Gemeinschaft.",
     "notFound": "Gemeinschaft nicht gefunden.",
-    "channelCount": "{{count}} Kanäle",
     "channels": "Kanäle",
     "noChannels": "Noch keine Kanäle.",
     "selectChannel": "Wähle einen Kanal, um zu chatten.",
@@ -478,7 +493,11 @@
       "communityHint": "Obergrenze für die ganze Gemeinschaft; ein Kanal kann strenger sein. Weniger Geräte bedeuten weniger Kopien der Schlüssel — aber wer sein einziges Gerät verliert oder abgenommen bekommt, muss über die Wiederherstellungsphrase neu einsteigen und das alte Gerät entfernen.",
       "channelHint": "Gilt für diesen Kanal (die strengere der beiden Grenzen zählt). Sie bestimmt auch, wie viele Personen hineinpassen: etwa {{capacity}} in einem Kanal für kleine Gruppen.",
       "blocked": "Dieser Kanal erlaubt {{count}} Gerät(e) pro Person. Entferne in den Einstellungen ein anderes Gerät und tritt dann erneut bei."
-    }
+    },
+    "memberCount_one": "{{count}} Mitglied",
+    "memberCount_other": "{{count}} Mitglieder",
+    "channelCount_one": "{{count}} Kanal",
+    "channelCount_other": "{{count}} Kanäle"
   },
   "rollcall": {
     "ask": "Fragen, wer noch dabei ist",

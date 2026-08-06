@@ -35,7 +35,7 @@ async function createAccount(page: Page, displayName: string): Promise<void> {
   await page.getByRole('button', { name: 'Continue' }).click()
 
   // Argon2id (64 MiB) + account creation + MLS init can take a moment.
-  await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible({ timeout: 60_000 })
 }
 
 test('full journey: accounts, invite, presence, E2EE chat, invisible', async ({ browser }) => {
@@ -105,7 +105,7 @@ test('full journey: accounts, invite, presence, E2EE chat, invisible', async ({ 
 
   // Anna goes invisible; Ben sees her as offline.
   await anna.getByRole('link', { name: 'Gathernet' }).click()
-  await anna.locator('header select').selectOption('invisible')
+  await anna.getByLabel('Presence').selectOption('invisible')
   await ben.getByRole('link', { name: 'Gathernet' }).click()
   await expect(ben.locator('li', { hasText: 'Anna' }).getByText('Offline')).toBeVisible({
     timeout: 20_000,

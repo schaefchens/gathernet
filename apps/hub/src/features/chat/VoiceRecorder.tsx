@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { MicIcon } from '../../components/icons.tsx'
 
 /** Prefer Opus-in-WebM; fall back to whatever the browser records. */
 function pickMime(): string | undefined {
@@ -116,13 +117,13 @@ export function VoiceRecorder({
   return (
     <button
       type="button"
-      className="btn-quiet px-3"
+      className="btn-icon"
       disabled={disabled}
       title={t('chat.recordVoice')}
       aria-label={t('chat.recordVoice')}
       onClick={() => void start()}
     >
-      🎤
+      <MicIcon />
     </button>
   )
 }

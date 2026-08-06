@@ -74,13 +74,17 @@ export function CommunityAvatar({
     }
   }, [communityId, mediaId, kMetaVersion])
 
+  // Communities read as struck seals: gold ring, jewel-tone field, serif monogram.
   const base = `${SIZE_CLASS[size]} rounded-full shrink-0 object-cover`
-  if (url) return <img src={url} alt="" className={base} />
+  if (url) {
+    return (
+      <span className={`${SIZE_CLASS[size]} seal shrink-0 overflow-hidden p-0`}>
+        <img src={url} alt="" className={base} />
+      </span>
+    )
+  }
   return (
-    <span
-      className={`${SIZE_CLASS[size]} rounded-full shrink-0 grid place-items-center bg-overlay border border-edge text-ink-soft font-medium uppercase`}
-      aria-hidden
-    >
+    <span className={`${SIZE_CLASS[size]} seal uppercase`} aria-hidden>
       {initials(label)}
     </span>
   )

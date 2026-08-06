@@ -1,30 +1,80 @@
 @import "tailwindcss";
 
 /*
- * Gathernet theme — dark-first, biblical color direction:
- * midnight indigo surfaces, old-gold accents, parchment text.
+ * Cormorant Garamond — the display serif, self-hosted. Variable weight axis
+ * (300–700) subset to latin + latin-ext, so German umlauts and the punctuation
+ * the UI actually uses survive: ~43 KB each, no off-origin request, precached by
+ * the service worker and therefore fine over the onion service. Licensed under
+ * the SIL OFL; see /fonts/OFL.txt.
+ */
+@font-face {
+  font-family: "Cormorant Garamond";
+  src: url("/fonts/cormorant-garamond-var.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cormorant Garamond";
+  src: url("/fonts/cormorant-garamond-italic-var.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/*
+ * Gathernet theme — "illuminated manuscript, not chat app".
+ *
+ * Two surfaces: a near-black violet *binding* (rail, sidebar, headers, composer,
+ * panels) wrapping a warm parchment *page* (the message canvas). Gold is the only
+ * accent. See screenshots/prototype_chat.png and screenshots/concept-desktop.png.
+ *
+ * Colour utilities compile to var() references, so `.parchment` can re-declare the
+ * ink/surface tokens and flip everything inside it to dark-on-parchment without
+ * every component having to know which surface it landed on.
  */
 @theme {
-  --color-base: #0b0f1a;
-  --color-raised: #121828;
-  --color-overlay: #1a2138;
-  --color-edge: #26304b;
+  /* Chrome — the binding */
+  --color-night: #060815;
+  --color-raised: #171420;
+  --color-overlay: #171128;
+  --color-edge: #2a2140;
+  --color-selected: #1f102d;
+  --color-accent-surface: #231534;
 
-  --color-ink: #ede6d6;
-  --color-ink-soft: #a8a395;
-  --color-ink-faint: #6e6c63;
+  /* Ink on chrome */
+  --color-ink: #f0e6d2;
+  --color-ink-soft: #b3a68c;
+  --color-ink-faint: #7d7259;
 
-  --color-gold: #c9a227;
-  --color-gold-bright: #e0b93e;
-  --color-indigo: #4c5b9e;
-  --color-indigo-soft: #6b7bc4;
+  /* Gold — the only accent */
+  --color-gold: #c9962f;
+  --color-gold-bright: #f8d06f;
+  --color-gold-deep: #a1722a;
 
-  --color-olive: #7ba05b;
-  --color-amber: #c9a227;
-  --color-danger: #b4553f;
+  /* Parchment — the page (values used by the .parchment scope below) */
+  --color-canvas: #e1bb80;
+  --color-canvas-raised: #f2ddb7;
+  --color-canvas-edge: #c9a86a;
+  --color-canvas-ink: #2a2213;
+
+  /* Jewel tones — avatars, sender names, nested replies */
+  --color-indigo: #3b2a63;
+  --color-indigo-soft: #a58fd8;
+  --color-plum: #4a1d3f;
+  --color-maroon: #5c1a24;
+  --color-olive: #4c5320;
+  --color-forest: #24401f;
+
+  /* Status */
+  --color-amber: #d8a33c;
+  --color-danger: #c2564a;
 
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
-  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-display:
+    "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia,
+    serif;
 
   --radius-md: 10px;
   --radius-lg: 16px;
@@ -35,25 +85,84 @@ html {
 }
 
 body {
-  @apply bg-base text-ink font-sans antialiased;
+  @apply bg-night text-ink font-sans antialiased;
 }
 
 .font-display {
   font-family: var(--font-display);
 }
 
-/* Recovery-phrase display: discourage screenshots-by-default styling cues */
-.phrase-word {
-  @apply bg-overlay border border-edge rounded-md px-3 py-2 font-mono text-sm;
+/* ---------------------------------------------------------------- surfaces */
+
+/*
+ * The parchment page. Re-declares the palette so utilities used by children
+ * (text-ink, bg-raised, border-edge, …) resolve to warm, dark-on-light values.
+ * The inset shadow draws the inner frame + vignette and, unlike a positioned
+ * pseudo-element, stays put while the canvas scrolls.
+ */
+.parchment {
+  --color-night: #e1bb80;
+  --color-raised: #f2ddb7;
+  --color-overlay: #e9cf9f;
+  --color-edge: #c9a86a;
+  --color-selected: #e5c894;
+  --color-accent-surface: #dcb87c;
+
+  --color-ink: #2a2213;
+  --color-ink-soft: #5c4d33;
+  --color-ink-faint: #8a7550;
+
+  --color-gold: #8a6a1f;
+  --color-gold-bright: #a1722a;
+  --color-indigo-soft: #4a3378;
+  --color-danger: #8c3327;
+
+  background-color: var(--color-night);
+  background-image:
+    radial-gradient(120% 80% at 50% 0%, rgba(255, 244, 214, 0.55), transparent 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg fill='none' stroke='%238a6a3a' stroke-width='1.1' opacity='.28'%3E%3Cpath d='M16 220C16 176 34 150 34 112S12 44 30 0'/%3E%3Cpath d='M204 0c0 44-18 70-18 108s22 68 4 112'/%3E%3Cpath d='M34 150c18-6 30-20 34-40M34 96c-16-8-24-22-24-42M186 70c-18-6-30-20-34-40M186 124c16-8 24-22 24-42'/%3E%3C/g%3E%3Cg fill='%238a6a3a' opacity='.2'%3E%3Cellipse cx='72' cy='106' rx='9' ry='4' transform='rotate(-28 72 106)'/%3E%3Cellipse cx='8' cy='52' rx='9' ry='4' transform='rotate(24 8 52)'/%3E%3Cellipse cx='148' cy='26' rx='9' ry='4' transform='rotate(28 148 26)'/%3E%3Cellipse cx='212' cy='80' rx='9' ry='4' transform='rotate(-24 212 80)'/%3E%3C/g%3E%3C/svg%3E");
+  background-repeat: no-repeat, repeat;
+  box-shadow:
+    inset 0 0 0 1px rgba(138, 106, 58, 0.45),
+    inset 0 0 60px rgba(120, 82, 30, 0.22);
+  color: var(--color-ink);
 }
+
+.card {
+  @apply bg-overlay rounded-lg p-6;
+  border: 1px solid color-mix(in oklab, var(--color-gold) 22%, transparent);
+}
+
+/* Ornamental hairline card — the detail-panel treatment. */
+.card-gold {
+  @apply bg-overlay rounded-lg p-4;
+  border: 1px solid color-mix(in oklab, var(--color-gold) 45%, transparent);
+}
+
+.section-label {
+  @apply text-[11px] font-medium uppercase tracking-[0.14em] text-ink-faint;
+}
+
+/* --------------------------------------------------------------- controls */
 
 input,
 textarea {
-  @apply bg-overlay border border-edge rounded-md px-3 py-2 text-ink placeholder:text-ink-faint focus:outline-none focus:border-indigo-soft w-full;
+  @apply bg-overlay border border-edge rounded-md px-3 py-2 text-ink placeholder:text-ink-faint focus:outline-none w-full;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: color-mix(in oklab, var(--color-gold) 60%, transparent);
 }
 
 button {
   @apply cursor-pointer;
+}
+
+:where(a, button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--color-gold-bright);
+  outline-offset: 2px;
 }
 
 .btn-gold,
@@ -63,17 +172,279 @@ button {
 }
 
 .btn-gold {
-  @apply bg-gold text-base hover:bg-gold-bright;
+  color: #16110a;
+  background-image: linear-gradient(
+    180deg,
+    var(--color-gold-bright) 0%,
+    var(--color-gold) 55%,
+    var(--color-gold-deep) 100%
+  );
+  border: 1px solid color-mix(in oklab, var(--color-gold-bright) 70%, transparent);
+}
+
+.btn-gold:hover:not(:disabled) {
+  background-image: linear-gradient(
+    180deg,
+    #ffe08c 0%,
+    var(--color-gold-bright) 55%,
+    var(--color-gold) 100%
+  );
 }
 
 .btn-quiet {
-  @apply bg-raised border border-edge text-ink hover:border-indigo-soft;
+  @apply bg-transparent text-ink;
+  border: 1px solid var(--color-edge);
+}
+
+.btn-quiet:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--color-gold) 55%, transparent);
+  color: var(--color-gold-bright);
 }
 
 .btn-danger {
   @apply bg-transparent border border-danger text-danger hover:bg-danger hover:text-ink;
 }
 
-.card {
-  @apply bg-raised border border-edge rounded-lg p-6;
+/* Round icon button — composer attachments, mic, panel actions. */
+.btn-icon {
+  @apply grid place-items-center rounded-full transition-colors shrink-0;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--color-gold-bright);
+  border: 1px solid color-mix(in oklab, var(--color-gold) 40%, transparent);
+}
+
+.btn-icon:hover:not(:disabled) {
+  border-color: var(--color-gold-bright);
+  background-color: color-mix(in oklab, var(--color-gold) 12%, transparent);
+}
+
+.btn-icon:disabled {
+  @apply opacity-40 cursor-not-allowed;
+}
+
+/* Solid gold send circle. */
+.btn-send {
+  @apply grid place-items-center rounded-full transition-transform shrink-0;
+  width: 2.75rem;
+  height: 2.75rem;
+  color: #16110a;
+  background-image: linear-gradient(
+    160deg,
+    var(--color-gold-bright) 0%,
+    var(--color-gold) 50%,
+    var(--color-gold-deep) 100%
+  );
+  border: 1px solid color-mix(in oklab, var(--color-gold-bright) 70%, transparent);
+}
+
+.btn-send:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.btn-send:disabled {
+  @apply opacity-40 cursor-not-allowed;
+}
+
+/* Pill text field for the composer. */
+.composer-field {
+  @apply flex-1 min-w-0 rounded-full px-4 py-2.5 text-sm;
+  background-color: color-mix(in oklab, var(--color-night) 70%, black);
+  border: 1px solid color-mix(in oklab, var(--color-gold) 32%, transparent);
+}
+
+/* ------------------------------------------------------------- messages */
+
+.bubble {
+  @apply rounded-lg px-3 py-2 text-sm;
+}
+
+/* Incoming — a card laid on the page. */
+.bubble-in {
+  background-color: var(--color-canvas-raised);
+  border: 1px solid color-mix(in oklab, #8a6a3a 35%, transparent);
+  color: var(--color-canvas-ink);
+  box-shadow: 0 1px 2px rgba(90, 62, 20, 0.14);
+}
+
+/* Own — deep olive with cream text. Re-scopes ink so children stay legible. */
+.bubble-own {
+  --color-ink: #efe4c8;
+  --color-ink-soft: #c7bb99;
+  --color-ink-faint: #a99d78;
+  --color-indigo-soft: #cdbf94;
+  background-color: #363212;
+  border: 1px solid #4c4a1e;
+  color: var(--color-ink);
+}
+
+/* Nested reply — violet, sitting on the page. */
+.bubble-nested {
+  --color-ink: #ece2ff;
+  --color-ink-soft: #bfb0dd;
+  --color-ink-faint: #9d8fc0;
+  --color-indigo-soft: #d3c4f5;
+  background-color: #2a1046;
+  border: 1px solid #43265f;
+  color: var(--color-ink);
+}
+
+/* Sender-name tints — assigned per sender, matching their avatar. */
+.tint-0 {
+  color: #7a2233;
+}
+.tint-1 {
+  color: #2f5c2a;
+}
+.tint-2 {
+  color: #3b3080;
+}
+.tint-3 {
+  color: #6d2a5e;
+}
+
+/* Date divider with diamond ornaments. */
+.rule-orn {
+  @apply flex items-center justify-center gap-3 text-xs;
+  color: var(--color-ink-soft);
+}
+
+.rule-orn::before,
+.rule-orn::after {
+  content: "";
+  flex: 1 1 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--color-gold) 55%, transparent)
+  );
+}
+
+.rule-orn::after {
+  background: linear-gradient(
+    270deg,
+    transparent,
+    color-mix(in oklab, var(--color-gold) 55%, transparent)
+  );
+}
+
+/* --------------------------------------------------------------- emblems */
+
+/* Heraldic roundel — community and app marks. */
+.seal {
+  @apply grid place-items-center rounded-full shrink-0 font-display;
+  background-image: radial-gradient(circle at 35% 25%, #3a1e52, #1a0c28);
+  border: 2px solid var(--color-gold);
+  box-shadow:
+    inset 0 0 0 1px rgba(248, 208, 111, 0.35),
+    0 2px 8px rgba(0, 0, 0, 0.45);
+  color: var(--color-gold-bright);
+}
+
+/*
+ * Trust chips across a group header. Stacked on narrow screens; only once they sit
+ * on one row do they get the thin gold rules between them — a divider on a wrapped
+ * chip reads as a stray vertical bar.
+ */
+.chip-row {
+  @apply flex flex-col gap-2 text-xs sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4;
+}
+
+.chip {
+  @apply flex items-center gap-2 text-ink-soft;
+}
+
+@media (width >= 40rem) {
+  .chip + .chip {
+    padding-left: 1rem;
+    border-left: 1px solid color-mix(in oklab, var(--color-gold) 30%, transparent);
+  }
+}
+
+/* Oxblood notice banner. */
+.banner-alert {
+  @apply flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm;
+  background-color: #2a0c18;
+  border: 1px solid color-mix(in oklab, var(--color-gold) 35%, transparent);
+  color: var(--color-gold-bright);
+}
+
+/* ------------------------------------------------------------ navigation */
+
+.rail-item {
+  @apply grid place-items-center rounded-xl transition-colors;
+  width: 2.75rem;
+  height: 2.75rem;
+  color: var(--color-ink-soft);
+}
+
+.rail-item:hover {
+  color: var(--color-gold-bright);
+  background-color: var(--color-selected);
+}
+
+.rail-item[aria-current="page"] {
+  color: var(--color-gold-bright);
+  background-color: var(--color-accent-surface);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-gold) 40%, transparent);
+}
+
+.tab-item {
+  @apply flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-display transition-colors;
+  color: var(--color-ink-soft);
+}
+
+.tab-item[aria-current="page"] {
+  color: var(--color-gold-bright);
+}
+
+/* Elevated centre action in the mobile tab bar. */
+.tab-action {
+  @apply grid place-items-center rounded-full;
+  width: 3.5rem;
+  height: 3.5rem;
+  margin-top: -1.5rem;
+  color: var(--color-gold-bright);
+  background-color: var(--color-accent-surface);
+  border: 2px solid var(--color-gold);
+  box-shadow:
+    0 0 18px rgba(201, 150, 47, 0.45),
+    inset 0 0 0 1px rgba(248, 208, 111, 0.3);
+}
+
+/* Sidebar conversation row. */
+.list-row {
+  @apply flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors;
+  border: 1px solid transparent;
+}
+
+.list-row:hover {
+  background-color: var(--color-selected);
+}
+
+.list-row[aria-current="page"],
+.list-row[data-active="true"] {
+  background-color: var(--color-selected);
+  border-color: color-mix(in oklab, var(--color-gold) 40%, transparent);
+}
+
+/* --------------------------------------------------------------- misc */
+
+/* Recovery-phrase display: discourage screenshots-by-default styling cues */
+.phrase-word {
+  @apply bg-overlay rounded-md px-3 py-2 font-mono text-sm;
+  border: 1px solid color-mix(in oklab, var(--color-gold) 30%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must beat the utility classes
+       that set these durations — overriding them is the point. */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: as above. */
+    transition-duration: 0.01ms !important;
+  }
 }

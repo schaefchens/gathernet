@@ -45,7 +45,7 @@ async function createAccount(page: Page, displayName: string): Promise<string> {
   await page.getByPlaceholder('Unlock password', { exact: true }).fill(PASSWORD)
   await page.getByPlaceholder('Repeat password').fill(PASSWORD)
   await page.getByRole('button', { name: 'Continue' }).click()
-  await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible({ timeout: 60_000 })
   return words.join(' ')
 }
 
@@ -58,7 +58,7 @@ async function restoreAccount(page: Page, phrase: string): Promise<void> {
   await page.getByPlaceholder('Unlock password', { exact: true }).fill(PASSWORD)
   await page.getByPlaceholder('Repeat password').fill(PASSWORD)
   await page.getByRole('button', { name: 'Continue' }).click()
-  await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible({ timeout: 60_000 })
 }
 
 async function newUser(
@@ -84,7 +84,15 @@ async function addChannel(
   if (opts.emoji) await page.getByPlaceholder('Emoji').fill(opts.emoji)
   await page.getByPlaceholder('Channel title').fill(opts.title)
   if (opts.encryptionMode) {
-    await page.getByLabel('Channel type').selectOption(opts.encryptionMode)
+    // "Channel type" offers the product-level kinds, not the raw crypto modes: small
+    // presets mls, large/broadcast preset group_key (broadcast also restricts posting).
+    const kind =
+      opts.encryptionMode === 'mls'
+        ? 'small'
+        : opts.postPolicy === 'moderators'
+          ? 'broadcast'
+          : 'large'
+    await page.getByLabel('Channel type').selectOption(kind)
   }
   if (opts.joinPolicy) await page.getByLabel('Who can join').selectOption(opts.joinPolicy)
   if (opts.postPolicy) await page.getByLabel('Who can post').selectOption(opts.postPolicy)
@@ -289,7 +297,11 @@ test('communities v2: K_meta syncs to a restored second device via receipt-key g
   await restoreAccount(bob2, bobPhrase)
   await bob2.getByRole('link', { name: 'Communities' }).click()
   // The community is listed, but its name can't be decrypted yet → placeholder.
-  await bob2.getByRole('link', { name: /Encrypted community/ }).click()
+  // Scoped to the content pane: the desktop sidebar lists the same communities.
+  await bob2
+    .getByRole('main')
+    .getByRole('link', { name: /Encrypted community/ })
+    .click()
   await expect(bob2.getByRole('heading', { name: 'Encrypted community' })).toBeVisible({
     timeout: 30_000,
   })
@@ -298,7 +310,11 @@ test('communities v2: K_meta syncs to a restored second device via receipt-key g
   // other devices. The grant reaches the second device, which decrypts the
   // metadata live (community.key_grants_available → fetch + open).
   await bob1.getByRole('link', { name: 'Communities' }).click()
-  await bob1.getByRole('link', { name: /Grace Fellowship/ }).click()
+  // Scoped to the content pane: the desktop sidebar lists the same communities.
+  await bob1
+    .getByRole('main')
+    .getByRole('link', { name: /Grace Fellowship/ })
+    .click()
   await expect(bob2.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
     timeout: 40_000,
   })
