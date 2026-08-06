@@ -15,6 +15,7 @@ import {
   postChannelKeyGrantsRequestSchema,
   postCommitRequestSchema,
   postKeyGrantsRequestSchema,
+  postParticipationRequestSchema,
   postReportRequestSchema,
   postTicketRequestSchema,
   publishChannelGroupInfoRequestSchema,
@@ -27,6 +28,7 @@ import {
   setMemberRoleRequestSchema,
   setModeratorRequestSchema,
   setMutedRequestSchema,
+  startRollcallRequestSchema,
   updateChannelRequestSchema,
   updateCommunityRequestSchema,
   uploadMediaRequestSchema,
@@ -82,6 +84,7 @@ import {
   removeMember,
   resolveJoinRequest,
   resolveReport,
+  respondRollcall,
   revokeCommunityInvite,
   rotateChannel,
   rotateCommunity,
@@ -89,6 +92,8 @@ import {
   setMemberRole,
   setModerator,
   setMuted,
+  startRollcall,
+  sweepRollcall,
   triggerChannelReminder,
   updateChannel,
   updateCommunity,
@@ -545,6 +550,66 @@ export function registerCommunityRoutes(
         body,
       )
       return { ok: true }
+    },
+  )
+
+  /* -------------------------------- roll-calls ------------------------------- */
+
+  // Manager opens a roll-call ("who is still here") with a deadline.
+  app.post<{ Params: { id: string; channelId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/rollcalls',
+    auth,
+    async (request, reply) => {
+      const session = requireSession(request)
+      const body = startRollcallRequestSchema.parse(request.body)
+      await startRollcall(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        body,
+      )
+      reply.status(201)
+      return { ok: true }
+    },
+  )
+
+  // A member confirms "I'm still here" (identified + device-signed).
+  app.post<{ Params: { id: string; channelId: string; artifactId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/rollcalls/:artifactId/respond',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      const body = postParticipationRequestSchema.parse(request.body)
+      await respondRollcall(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.artifactId,
+        body,
+      )
+      return { ok: true }
+    },
+  )
+
+  // Manager sweeps a CLOSED roll-call: non-responders out in one batch; the response tells
+  // the client which leaves/devices to drop so the key work is a single operation.
+  app.post<{ Params: { id: string; channelId: string; artifactId: string } }>(
+    '/api/v1/communities/:id/channels/:channelId/rollcalls/:artifactId/sweep',
+    auth,
+    async (request) => {
+      const session = requireSession(request)
+      return sweepRollcall(
+        db,
+        registry,
+        session.accountId,
+        request.params.id,
+        request.params.channelId,
+        request.params.artifactId,
+      )
     },
   )
 

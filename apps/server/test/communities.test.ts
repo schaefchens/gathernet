@@ -5,6 +5,7 @@ import {
   generateEciesKeypairExtractable,
   importEciesPrivateKey,
 } from '@gathernet/shared'
+import { eq } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
@@ -2380,6 +2381,159 @@ describe('pinned channel artifacts (relayed, server-opaque)', () => {
       Record<string, unknown>
     >
     expect(listed.find((a) => a.artifactId === artifactId)?.ticketCount).toBe(1)
+  })
+})
+
+describe('roll-call: "who is still here" + one-sweep removal', () => {
+  const rollcallsUrl = (communityId: string, channelId: string) =>
+    `/api/v1/communities/${communityId}/channels/${channelId}/rollcalls`
+  const artifactsOf = (user: TestUser, communityId: string, channelId: string) =>
+    app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/artifacts`,
+      headers: auth(user),
+    })
+
+  async function start(
+    manager: TestUser,
+    communityId: string,
+    channelId: string,
+    windowMinutes: number,
+  ): Promise<string> {
+    const artifactId = randomUUID()
+    const res = await app.inject({
+      method: 'POST',
+      url: rollcallsUrl(communityId, channelId),
+      headers: auth(manager),
+      payload: {
+        artifactId,
+        windowMinutes,
+        sealEpoch: 0,
+        sealedBody: fakeB64(32),
+        issuerDeviceId: manager.deviceId,
+        issuerSig: fakeB64(64),
+      },
+    })
+    expect(res.statusCode).toBe(201)
+    return artifactId
+  }
+
+  it('members see only the response COUNT; managers see who responded', async () => {
+    const owner = await createUser('RcOwner')
+    const responder = await createUser('RcResponder')
+    const other = await createUser('RcOther')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    for (const u of [responder, other]) {
+      await addMember(owner, communityId, u)
+      await joinOpenChannel(u, communityId, channelId)
+    }
+    const artifactId = await start(owner, communityId, channelId, 1440)
+
+    const respond = await app.inject({
+      method: 'POST',
+      url: `${rollcallsUrl(communityId, channelId)}/${artifactId}/respond`,
+      headers: auth(responder),
+      payload: { deviceId: responder.deviceId, sig: fakeB64(64) },
+    })
+    expect(respond.statusCode).toBe(200)
+
+    const asMember = (await artifactsOf(other, communityId, channelId)).json().artifacts as Array<
+      Record<string, unknown>
+    >
+    const memberView = asMember.find((a) => a.artifactId === artifactId)
+    expect(memberView?.responseCount).toBe(1)
+    expect(memberView?.responders).toEqual([]) // no name list for members
+
+    const asManager = (await artifactsOf(owner, communityId, channelId)).json().artifacts as Array<
+      Record<string, unknown>
+    >
+    const managerView = asManager.find((a) => a.artifactId === artifactId)
+    expect(managerView?.responders).toEqual([responder.accountId])
+  })
+
+  it('sweeping an OPEN roll-call is refused', async () => {
+    const owner = await createUser('RcOwner2')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    const artifactId = await start(owner, communityId, channelId, 1440)
+    const sweep = await app.inject({
+      method: 'POST',
+      url: `${rollcallsUrl(communityId, channelId)}/${artifactId}/sweep`,
+      headers: auth(owner),
+    })
+    expect(sweep.statusCode).toBe(409)
+  })
+
+  it('at the deadline, non-responders are removed in one sweep; responders and managers stay', async () => {
+    const owner = await createUser('RcOwner3')
+    const responder = await createUser('RcStays')
+    const silent = await createUser('RcGoes')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    for (const u of [responder, silent]) {
+      await addMember(owner, communityId, u)
+      await joinOpenChannel(u, communityId, channelId)
+    }
+    // 1-minute window (the testing option), then force it closed.
+    const artifactId = await start(owner, communityId, channelId, 1)
+    await app.inject({
+      method: 'POST',
+      url: `${rollcallsUrl(communityId, channelId)}/${artifactId}/respond`,
+      headers: auth(responder),
+      payload: { deviceId: responder.deviceId, sig: fakeB64(64) },
+    })
+    await testDb.db
+      .update(channelArtifacts)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(channelArtifacts.artifactId, artifactId))
+
+    const sweep = await app.inject({
+      method: 'POST',
+      url: `${rollcallsUrl(communityId, channelId)}/${artifactId}/sweep`,
+      headers: auth(owner),
+    })
+    expect(sweep.statusCode).toBe(200)
+    const body = sweep.json() as { removedAccountIds: string[]; removedDeviceIds: string[] }
+    expect(body.removedAccountIds).toEqual([silent.accountId])
+    expect(body.removedDeviceIds).toContain(silent.deviceId)
+    // the owner (a manager) is exempt, and the responder stays
+    expect(body.removedAccountIds).not.toContain(owner.accountId)
+    expect(body.removedAccountIds).not.toContain(responder.accountId)
+
+    // and the silent member is no longer active in the channel
+    const roster = await app.inject({
+      method: 'GET',
+      url: `/api/v1/communities/${communityId}/channels/${channelId}/members`,
+      headers: auth(owner),
+    })
+    const active = (roster.json().members as Array<{ accountId: string; status: string }>).filter(
+      (m) => m.status === 'active',
+    )
+    expect(active.map((m) => m.accountId)).not.toContain(silent.accountId)
+  })
+
+  it('a plain member cannot start or sweep a roll-call', async () => {
+    const owner = await createUser('RcOwner4')
+    const member = await createUser('RcMember4')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    await addMember(owner, communityId, member)
+    await joinOpenChannel(member, communityId, channelId)
+    const start1 = await app.inject({
+      method: 'POST',
+      url: rollcallsUrl(communityId, channelId),
+      headers: auth(member),
+      payload: {
+        artifactId: randomUUID(),
+        windowMinutes: 1440,
+        sealEpoch: 0,
+        sealedBody: fakeB64(32),
+        issuerDeviceId: member.deviceId,
+        issuerSig: fakeB64(64),
+      },
+    })
+    expect(start1.statusCode).toBe(403)
   })
 })
 

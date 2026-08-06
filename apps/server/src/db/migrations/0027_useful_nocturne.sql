@@ -1,0 +1,1 @@
+ALTER TYPE "public"."channel_artifact_kind" ADD VALUE 'rollcall';

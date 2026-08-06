@@ -305,7 +305,7 @@ export type CapabilityResponse = z.infer<typeof capabilityResponseSchema>
 /* ------------------- pinned channel artifacts (relayed) ------------------- */
 
 /** pin (a message snapshot) | link | media | event (one-shot). */
-export const channelArtifactKindSchema = z.enum(['pin', 'link', 'media', 'event'])
+export const channelArtifactKindSchema = z.enum(['pin', 'link', 'media', 'event', 'rollcall'])
 export type ChannelArtifactKind = z.infer<typeof channelArtifactKindSchema>
 
 /**
@@ -347,6 +347,11 @@ export const channelArtifactSchema = z.object({
    * as a headcount to reconcile socially, not an exact figure.
    */
   ticketCount: z.number().int().nonnegative().default(0),
+  /** roll-call: how many members confirmed they're still here (visible to everyone) */
+  responseCount: z.number().int().nonnegative().default(0),
+  /** roll-call: WHO responded — MANAGERS ONLY (empty for members; the no-roster rule). A
+   *  manager needs it to compute who to remove; members only ever see the count. */
+  responders: z.array(accountIdSchema).default([]),
 })
 export type ChannelArtifact = z.infer<typeof channelArtifactSchema>
 
@@ -362,12 +367,47 @@ export const deleteTicketRequestSchema = z.object({
 })
 export type DeleteTicketRequest = z.infer<typeof deleteTicketRequestSchema>
 
-/** A member records/withdraws IDENTIFIED participation (roll-call responses). */
+/** A member confirms "I'm still here" — identified + device-signed so it can't be forged. */
 export const postParticipationRequestSchema = z.object({
   deviceId: deviceIdSchema,
   sig: z.base64(),
 })
 export type PostParticipationRequest = z.infer<typeof postParticipationRequestSchema>
+
+/**
+ * Roll-call windows a manager may pick. `1` exists for TESTING (the user asked for it) — a
+ * one-minute window is not a sensible production policy.
+ */
+export const ROLLCALL_WINDOW_MINUTES = [1, 1440, 4320, 10080, 20160, 43200] as const
+export const rollcallWindowSchema = z
+  .number()
+  .int()
+  .refine((v) => (ROLLCALL_WINDOW_MINUTES as readonly number[]).includes(v), {
+    message: 'invalid_window',
+  })
+
+/** Open a roll-call: an artifact whose deadline is now + window. */
+export const startRollcallRequestSchema = z.object({
+  artifactId: z.uuid(),
+  windowMinutes: rollcallWindowSchema,
+  /** sealed body (title/prompt) + signature, same shape as any artifact */
+  sealEpoch: z.number().int().nonnegative(),
+  sealedBody: z.base64().max(CHANNEL_ARTIFACT_BODY_MAX_B64),
+  issuerDeviceId: deviceIdSchema,
+  issuerSig: z.base64(),
+})
+export type StartRollcallRequest = z.infer<typeof startRollcallRequestSchema>
+
+/**
+ * Result of a sweep: who was removed, and their devices, so the manager's client can do the
+ * key work in ONE operation (mls → a single commit removing those leaves; group_key → one
+ * rotation granted only to the remainder). Non-responders are never exposed to members.
+ */
+export const rollcallSweepResponseSchema = z.object({
+  removedAccountIds: z.array(accountIdSchema),
+  removedDeviceIds: z.array(deviceIdSchema),
+})
+export type RollcallSweepResponse = z.infer<typeof rollcallSweepResponseSchema>
 
 /** Author posts a pinned artifact it minted (server relays, never validates). */
 export const postArtifactRequestSchema = z.object({

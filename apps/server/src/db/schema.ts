@@ -620,6 +620,8 @@ export const channelArtifactKindEnum = pgEnum('channel_artifact_kind', [
   'link',
   'media',
   'event',
+  /** "who is still here" — identified responses; non-responders are removed in one sweep */
+  'rollcall',
 ])
 
 export const communities = pgTable('communities', {

@@ -39,9 +39,11 @@ import type {
   PostTicketRequest,
   ReminderTriggerRequest,
   ResolveReportRequest,
+  RollcallSweepResponse,
   RotateChannelRequest,
   RotateRequest,
   ServerMessage,
+  StartRollcallRequest,
   UpdateChannelRequest,
   UpdateCommunityRequest,
 } from '@gathernet/shared'
@@ -2185,7 +2187,12 @@ export async function getCapability(
 
 type ArtifactRow = typeof channelArtifacts.$inferSelect
 
-function toArtifact(r: ArtifactRow, ticketCount = 0): ChannelArtifact {
+function toArtifact(
+  r: ArtifactRow,
+  ticketCount = 0,
+  responders: string[] = [],
+  managerView = false,
+): ChannelArtifact {
   return {
     artifactId: r.artifactId,
     channelId: r.channelId as GroupId,
@@ -2200,6 +2207,8 @@ function toArtifact(r: ArtifactRow, ticketCount = 0): ChannelArtifact {
     createdAt: r.createdAt.getTime(),
     expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
     ticketCount,
+    responseCount: responders.length,
+    responders: managerView ? (responders as ChannelArtifact['responders']) : [],
   }
 }
 
@@ -2292,8 +2301,32 @@ export async function listArtifacts(
     .where(eq(channelArtifactTickets.channelId, channelId))
     .groupBy(channelArtifactTickets.artifactId)
   const ticketsByArtifact = new Map(ticketRows.map((t) => [t.artifactId, t.count]))
+  // Roll-call responses are IDENTIFIED. Everyone sees the count; only a manager sees WHO
+  // responded (they need it to compute the sweep) — members never get a name list.
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  const isManager = await isCommunityManager(db, communityId, membership)
+  const respRows = await db
+    .select({
+      artifactId: channelArtifactParticipants.artifactId,
+      accountId: channelArtifactParticipants.accountId,
+    })
+    .from(channelArtifactParticipants)
+    .where(eq(channelArtifactParticipants.channelId, channelId))
+  const respByArtifact = new Map<string, string[]>()
+  for (const r of respRows) {
+    const list = respByArtifact.get(r.artifactId) ?? []
+    list.push(r.accountId)
+    respByArtifact.set(r.artifactId, list)
+  }
   return {
-    artifacts: rows.map((r) => toArtifact(r, ticketsByArtifact.get(r.artifactId) ?? 0)),
+    artifacts: rows.map((r) =>
+      toArtifact(
+        r,
+        ticketsByArtifact.get(r.artifactId) ?? 0,
+        respByArtifact.get(r.artifactId) ?? [],
+        isManager,
+      ),
+    ),
   }
 }
 
@@ -2591,6 +2624,173 @@ export async function moderationRemoveMessage(
       seq,
     },
   })
+}
+
+/* ------------------------------- roll-calls -------------------------------- */
+
+/**
+ * Open a roll-call ("who is still here"): an artifact whose `expiresAt` is the deadline.
+ * Manager-only. Members confirm with an identified, device-signed response; at the deadline a
+ * manager sweeps the non-responders out in ONE key operation. This is the alternative to
+ * tracking inactivity server-side: nothing is surveilled, the prompt is visible to everyone,
+ * and being removed means "didn't answer", not "was offline on Tuesday".
+ */
+export async function startRollcall(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  input: StartRollcallRequest,
+): Promise<void> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  await loadChannel(db, communityId, channelId)
+  await requireChannelManager(db, channelId, membership)
+  await requireOwnDevice(db, accountId, input.issuerDeviceId)
+  await db
+    .insert(channelArtifacts)
+    .values({
+      artifactId: input.artifactId,
+      channelId,
+      communityId,
+      kind: 'rollcall',
+      sealEpoch: input.sealEpoch,
+      sealedBody: bufOf(input.sealedBody),
+      issuerDeviceId: input.issuerDeviceId,
+      issuerSig: bufOf(input.issuerSig),
+      createdBy: accountId,
+      expiresAt: new Date(Date.now() + input.windowMinutes * 60_000),
+    })
+    .onConflictDoNothing()
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_artifact_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
+  // Reach members whose app is closed — content-free, category-gated.
+  const recipients = await activeChannelAccountIds(db, channelId)
+  void notifyOfflineManagers(db, recipients, communityId, (a) => registry.isAccountOnline(a))
+}
+
+/**
+ * Confirm "I'm still here" for an open roll-call. Identified on purpose — the whole point is
+ * knowing who did NOT answer — and device-signed so a response can't be forged by the relay.
+ * Own-account only; refused once the deadline has passed.
+ */
+export async function respondRollcall(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  artifactId: string,
+  input: PostParticipationRequest,
+): Promise<void> {
+  await requireActiveMembership(db, communityId, accountId)
+  await loadChannel(db, communityId, channelId)
+  await requireOwnDevice(db, accountId, input.deviceId)
+  const artifact = await db.query.channelArtifacts.findFirst({
+    where: and(
+      eq(channelArtifacts.artifactId, artifactId),
+      eq(channelArtifacts.channelId, channelId),
+    ),
+  })
+  if (artifact?.kind !== 'rollcall') throw new ServiceError(404, 'artifact_not_found')
+  if (artifact.expiresAt && artifact.expiresAt <= new Date()) {
+    throw new ServiceError(409, 'rollcall_closed')
+  }
+  await db
+    .insert(channelArtifactParticipants)
+    .values({ artifactId, accountId, channelId, deviceId: input.deviceId, sig: bufOf(input.sig) })
+    .onConflictDoUpdate({
+      target: [channelArtifactParticipants.artifactId, channelArtifactParticipants.accountId],
+      set: { deviceId: input.deviceId, sig: bufOf(input.sig) },
+    })
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_artifact_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
+}
+
+/**
+ * Sweep a closed roll-call: mark every active member who did NOT respond as removed, and
+ * return them (with their devices) so the manager's client can do the key work in one
+ * operation. Guardrails: never the owner, and leaders/moderators are exempt — a dormant
+ * leader is a human problem, not a cron job's. Non-responders are never shown to members.
+ */
+export async function sweepRollcall(
+  db: Db,
+  registry: ConnectionRegistry,
+  accountId: string,
+  communityId: string,
+  channelId: string,
+  artifactId: string,
+): Promise<RollcallSweepResponse> {
+  const membership = await requireActiveMembership(db, communityId, accountId)
+  await loadChannel(db, communityId, channelId)
+  await requireChannelManager(db, channelId, membership)
+  const artifact = await db.query.channelArtifacts.findFirst({
+    where: and(
+      eq(channelArtifacts.artifactId, artifactId),
+      eq(channelArtifacts.channelId, channelId),
+    ),
+  })
+  if (artifact?.kind !== 'rollcall') throw new ServiceError(404, 'artifact_not_found')
+  if (!artifact.expiresAt || artifact.expiresAt > new Date()) {
+    throw new ServiceError(409, 'rollcall_open')
+  }
+
+  const responded = new Set(
+    (
+      await db
+        .select({ accountId: channelArtifactParticipants.accountId })
+        .from(channelArtifactParticipants)
+        .where(eq(channelArtifactParticipants.artifactId, artifactId))
+    ).map((r) => r.accountId),
+  )
+  const exempt = await channelManagerAccountIds(db, communityId, channelId)
+  const community = await db.query.communities.findFirst({
+    where: eq(communities.communityId, communityId),
+  })
+  if (community) exempt.add(community.ownerAccountId)
+
+  const active = await db
+    .select({ accountId: channelMembers.accountId })
+    .from(channelMembers)
+    .where(and(eq(channelMembers.channelId, channelId), eq(channelMembers.status, 'active')))
+  const toRemove = active.map((m) => m.accountId).filter((a) => !responded.has(a) && !exempt.has(a))
+  if (toRemove.length === 0) return { removedAccountIds: [], removedDeviceIds: [] }
+
+  const devs = await db
+    .select({ deviceId: devices.deviceId })
+    .from(devices)
+    .where(and(inArray(devices.accountId, toRemove), eq(devices.status, 'active')))
+  await db
+    .update(channelMembers)
+    .set({ status: 'removed' })
+    .where(
+      and(eq(channelMembers.channelId, channelId), inArray(channelMembers.accountId, toRemove)),
+    )
+  // group_key: the remaining managers must rotate K_channel so the removed can't read on.
+  await db
+    .update(communityChannels)
+    .set({ rotationPending: true })
+    .where(
+      and(
+        eq(communityChannels.channelId, channelId),
+        eq(communityChannels.encryptionMode, 'group_key'),
+      ),
+    )
+  for (const removed of toRemove) registry.evictAccountFromChannel(removed, channelId)
+  // One event for the whole sweep — clients refetch the channel rather than receiving N
+  // per-member events (and non-responders are never named to members).
+  await emitToChannel(db, registry, communityId, channelId, {
+    type: 'community.channel_updated',
+    payload: { communityId: communityId as CommunityId, channelId: channelId as GroupId },
+  })
+  return {
+    removedAccountIds: toRemove as RollcallSweepResponse['removedAccountIds'],
+    removedDeviceIds: devs.map((d) => d.deviceId) as RollcallSweepResponse['removedDeviceIds'],
+  }
 }
 
 /** How far ahead of the reminder instant a departing client may "early-fire" (trades

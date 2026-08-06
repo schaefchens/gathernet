@@ -68,6 +68,8 @@ function record(
     createdAt: 1000,
     expiresAt: built.expiresAt,
     ticketCount: 0,
+    responseCount: 0,
+    responders: [],
   }
 }
 
