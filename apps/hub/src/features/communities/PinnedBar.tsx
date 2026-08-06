@@ -10,17 +10,6 @@ import { MediaAttachment } from '../chat/MediaAttachment.tsx'
 
 const EMPTY: VerifiedArtifact[] = []
 
-/** Roll-call answer windows (minutes) — 1 is a TESTING option, not a sensible policy.
- *  Literal i18n keys so the typed t() accepts them. */
-const ROLLCALL_WINDOWS = [
-  { minutes: 1, key: 'rollcall.window_1' },
-  { minutes: 1440, key: 'rollcall.window_1440' },
-  { minutes: 4320, key: 'rollcall.window_4320' },
-  { minutes: 10080, key: 'rollcall.window_10080' },
-  { minutes: 20160, key: 'rollcall.window_20160' },
-  { minutes: 43200, key: 'rollcall.window_43200' },
-] as const
-
 /** Emoji marker for each artifact kind. */
 const KIND_ICON: Record<ArtifactBody['kind'], string> = {
   pin: '📌',
@@ -99,9 +88,7 @@ export function PinnedBar({
   const [busy, setBusy] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [rollcallWindow, setRollcallWindow] = useState<number>(10080)
   const [tick, setTick] = useState(() => Date.now())
-  const [askingRollcall, setAskingRollcall] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const composing = composeMode !== 'none'
 
@@ -176,16 +163,6 @@ export function PinnedBar({
       .respondRollcall(communityId, channelId, artifactId)
       .then(reload)
       .catch((err) => fail('rollcall respond failed', err))
-  const sweepRollcall = (artifactId: string) =>
-    void channelArtifactsStore
-      .sweepRollcall(communityId, channelId, artifactId)
-      .then(reload)
-      .catch((err) => fail('rollcall sweep failed', err))
-  const startRollcall = (windowMinutes: number) =>
-    void channelArtifactsStore
-      .startRollcall(communityId, channelId, windowMinutes)
-      .then(reload)
-      .catch((err) => fail('rollcall start failed', err))
 
   const fail = (label: string, err: unknown) => {
     console.error(label, err)
@@ -322,46 +299,7 @@ export function PinnedBar({
             >
               {t('pins.composeFile')}
             </button>
-            {isManager && (
-              <button
-                type="button"
-                className="rounded-full border border-edge px-2 py-0.5"
-                onClick={() => setAskingRollcall((v) => !v)}
-              >
-                {t('rollcall.ask')}
-              </button>
-            )}
           </div>
-
-          {isManager && askingRollcall && (
-            <div className="space-y-2 rounded-md border border-gold/40 bg-gold/10 p-2">
-              <label className="block space-y-1">
-                <span className="text-[11px] text-ink-soft">{t('rollcall.window')}</span>
-                <select
-                  className="w-full bg-overlay border border-edge rounded-md px-2 py-1 text-sm"
-                  value={rollcallWindow}
-                  onChange={(e) => setRollcallWindow(Number(e.target.value))}
-                >
-                  {ROLLCALL_WINDOWS.map((w) => (
-                    <option key={w.minutes} value={w.minutes}>
-                      {t(w.key)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="text-[11px] text-ink-faint">{t('rollcall.sweepHint')}</p>
-              <button
-                type="button"
-                className="btn-gold text-xs px-3"
-                onClick={() => {
-                  startRollcall(rollcallWindow)
-                  setAskingRollcall(false)
-                }}
-              >
-                {t('rollcall.ask')}
-              </button>
-            </div>
-          )}
 
           {createError && (
             <p className="rounded-md border border-danger/50 bg-danger/10 px-2 py-1 text-[11px] text-danger">
@@ -518,18 +456,11 @@ export function PinnedBar({
                       {t('rollcall.responses', { count: a.artifact.responseCount })}
                     </span>
                     {isManager && closed && (
-                      <button
-                        type="button"
-                        className="btn-danger text-xs px-2 py-0.5 ml-auto"
-                        onClick={() => sweepRollcall(a.artifact.artifactId)}
-                      >
-                        {t('rollcall.sweep')}
-                      </button>
+                      <span className="ml-auto text-[11px] text-ink-faint">
+                        {t('rollcall.sweepInModeration')}
+                      </span>
                     )}
                   </div>
-                  {isManager && closed && (
-                    <p className="text-[11px] text-ink-faint">{t('rollcall.sweepHint')}</p>
-                  )}
                 </div>
               )
             })}

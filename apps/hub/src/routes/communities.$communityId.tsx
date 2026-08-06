@@ -432,6 +432,7 @@ function ChannelWorkspace({
         <ModerationPanel
           communityId={communityId}
           channelId={channel.channelId}
+          pinPolicy={channel.pinPolicy}
           isLeader={isLeader}
           members={members}
           myAccountId={myAccountId}

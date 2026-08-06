@@ -2,6 +2,7 @@ import type {
   ChannelInviteResponse,
   ChannelMemberEntry,
   ChannelMembersResponse,
+  ChannelPinPolicy,
   CommunityMember,
   ListReportsResponse,
   ReportEntry,
@@ -14,11 +15,25 @@ import { makeDeviceResolver } from '../../lib/community-keys.ts'
 import { openReport, type ReportBody } from '../../lib/reports.ts'
 import { secureStore } from '../../lib/storage.ts'
 import { wsClient } from '../../lib/ws-client.ts'
+import { channelArtifactsStore, useChannelArtifacts } from '../../stores/channel-artifacts.ts'
 import { communityChatStore } from '../../stores/community-chat.ts'
+
+/** Roll-call answer windows (minutes) — 1 is a TESTING option, not a sensible policy.
+ *  Literal i18n keys so the typed t() accepts them. */
+const ROLLCALL_WINDOWS = [
+  { minutes: 1, key: 'rollcall.window_1' },
+  { minutes: 1440, key: 'rollcall.window_1440' },
+  { minutes: 4320, key: 'rollcall.window_4320' },
+  { minutes: 10080, key: 'rollcall.window_10080' },
+  { minutes: 20160, key: 'rollcall.window_20160' },
+  { minutes: 43200, key: 'rollcall.window_43200' },
+] as const
 
 interface ModerationPanelProps {
   communityId: string
   channelId: string
+  /** needed to load/verify this channel's artifacts (roll-calls live there) */
+  pinPolicy: ChannelPinPolicy
   /** community leader/owner — may toggle channel moderators */
   isLeader: boolean
   /** community roster, for the "invite member" picker */
@@ -36,6 +51,7 @@ interface ModerationPanelProps {
 export function ModerationPanel({
   communityId,
   channelId,
+  pinPolicy,
   isLeader,
   members,
   myAccountId,
@@ -45,6 +61,38 @@ export function ModerationPanel({
   const queryClient = useQueryClient()
   const [inviteChoice, setInviteChoice] = useState('')
   const [inviteCode, setInviteCode] = useState<string | null>(null)
+  const [rollcallWindow, setRollcallWindow] = useState<number>(10080)
+  const [rollcallBusy, setRollcallBusy] = useState(false)
+  const [rollcallError, setRollcallError] = useState<string | null>(null)
+  const [tick, setTick] = useState(() => Date.now())
+
+  // Roll-calls live in the channel's artifacts; this tab doesn't render the pinned bar, so
+  // load them here too. The tick makes a passing deadline flip the UI without a reload.
+  const artifacts = useChannelArtifacts((s) => s.byChannel[channelId])
+  useEffect(() => {
+    void channelArtifactsStore.load(communityId, channelId, pinPolicy)
+    const id = setInterval(() => setTick(Date.now()), 15_000)
+    return () => clearInterval(id)
+  }, [communityId, channelId, pinPolicy])
+  const rollcalls = (artifacts ?? [])
+    .filter((a) => a.status === 'active' && a.body.kind === 'rollcall')
+    .sort((x, y) => y.artifact.createdAt - x.artifact.createdAt)
+  const openRollcall = rollcalls.find((a) => !!a.artifact.expiresAt && a.artifact.expiresAt > tick)
+  const closedRollcall = rollcalls.find(
+    (a) => !!a.artifact.expiresAt && a.artifact.expiresAt <= tick,
+  )
+
+  const runRollcall = (fn: () => Promise<unknown>) => {
+    setRollcallBusy(true)
+    setRollcallError(null)
+    void fn()
+      .then(() => channelArtifactsStore.load(communityId, channelId, pinPolicy))
+      .catch((err: unknown) => {
+        console.error('rollcall action failed', err)
+        setRollcallError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => setRollcallBusy(false))
+  }
 
   const rosterKey = ['channel-members', communityId, channelId]
   const roster = useQuery({
@@ -163,6 +211,79 @@ export function ModerationPanel({
               />
             ))}
           </ul>
+        )}
+      </section>
+
+      {/* roll-call: "who is still here" — manager lifecycle lives here; members answer the
+          prompt shown in the channel's pinned bar. */}
+      <section className="space-y-2">
+        <h3 className="text-xs uppercase tracking-wide text-ink-faint">{t('rollcall.section')}</h3>
+        {rollcallError && <p className="text-[11px] text-danger">{rollcallError}</p>}
+        {openRollcall ? (
+          <div className="space-y-1 rounded-md bg-overlay px-3 py-2">
+            <p className="text-sm text-ink-soft">
+              {t('rollcall.openManager', {
+                deadline: new Date(openRollcall.artifact.expiresAt ?? 0).toLocaleString(),
+              })}
+            </p>
+            <p className="text-xs text-ink-faint">
+              {t('rollcall.responses', { count: openRollcall.artifact.responseCount })}
+            </p>
+          </div>
+        ) : closedRollcall ? (
+          <div className="space-y-2 rounded-md bg-overlay px-3 py-2">
+            <p className="text-sm text-ink-soft">{t('rollcall.closed')}</p>
+            <p className="text-xs text-ink-faint">
+              {t('rollcall.responses', { count: closedRollcall.artifact.responseCount })}
+            </p>
+            <button
+              type="button"
+              className="btn-danger text-xs px-2 py-1"
+              disabled={rollcallBusy}
+              onClick={() =>
+                runRollcall(() =>
+                  channelArtifactsStore.sweepRollcall(
+                    communityId,
+                    channelId,
+                    closedRollcall.artifact.artifactId,
+                  ),
+                )
+              }
+            >
+              {t('rollcall.sweep')}
+            </button>
+            <p className="text-[11px] text-ink-faint">{t('rollcall.sweepHint')}</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <label className="block space-y-1">
+              <span className="text-xs text-ink-soft">{t('rollcall.window')}</span>
+              <select
+                className="w-full bg-overlay border border-edge rounded-md px-3 py-2 text-sm"
+                value={rollcallWindow}
+                onChange={(e) => setRollcallWindow(Number(e.target.value))}
+              >
+                {ROLLCALL_WINDOWS.map((w) => (
+                  <option key={w.minutes} value={w.minutes}>
+                    {t(w.key)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn-quiet w-full text-sm"
+              disabled={rollcallBusy}
+              onClick={() =>
+                runRollcall(() =>
+                  channelArtifactsStore.startRollcall(communityId, channelId, rollcallWindow),
+                )
+              }
+            >
+              {t('rollcall.ask')}
+            </button>
+            <p className="text-[11px] text-ink-faint">{t('rollcall.sweepHint')}</p>
+          </div>
         )}
       </section>
 
