@@ -56,7 +56,7 @@ import {
   INVITE_CODE_LENGTH,
   SMALL_GROUP_MAX_MEMBERS,
 } from '@gathernet/shared'
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import {
   accounts,
@@ -2777,6 +2777,25 @@ export async function sweepRollcall(
   if (!artifact.expiresAt || artifact.expiresAt > new Date()) {
     throw new ServiceError(409, 'rollcall_open')
   }
+  // Refuse to sweep a SUPERSEDED roll-call: members answer the current one, so sweeping an
+  // older one would remove people who did confirm. (Only reachable for roll-calls that predate
+  // the one-at-a-time rule.)
+  const newer = await db
+    .select({ artifactId: channelArtifacts.artifactId })
+    .from(channelArtifacts)
+    .where(
+      and(
+        eq(channelArtifacts.channelId, channelId),
+        eq(channelArtifacts.kind, 'rollcall'),
+        // Exclude SELF explicitly: the DB keeps microsecond precision while the value read
+        // back into JS is millisecond-truncated, so a bare `createdAt > artifact.createdAt`
+        // matches the row itself.
+        ne(channelArtifacts.artifactId, artifactId),
+        gt(channelArtifacts.createdAt, artifact.createdAt),
+      ),
+    )
+    .limit(1)
+  if (newer.length > 0) throw new ServiceError(409, 'rollcall_superseded')
 
   const responded = new Set(
     (

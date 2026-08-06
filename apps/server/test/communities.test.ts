@@ -2645,6 +2645,38 @@ describe('roll-call: "who is still here" + one-sweep removal', () => {
     expect(theirChannel?.myStatus).not.toBe('active')
   })
 
+  it('refuses to sweep a SUPERSEDED roll-call (members answered the current one)', async () => {
+    const owner = await createUser('RcSuperseded')
+    const communityId = await createCommunity(owner)
+    const channelId = await createChannel(owner, communityId)
+    // An old roll-call that closed, plus a newer one (the state that predates one-at-a-time).
+    const oldId = await start(owner, communityId, channelId, 1)
+    await testDb.db
+      .update(channelArtifacts)
+      .set({ expiresAt: new Date(Date.now() - 1000), createdAt: new Date(Date.now() - 60_000) })
+      .where(eq(channelArtifacts.artifactId, oldId))
+    const newId = randomUUID()
+    await testDb.db.insert(channelArtifacts).values({
+      artifactId: newId,
+      channelId,
+      communityId,
+      kind: 'rollcall',
+      sealEpoch: 0,
+      sealedBody: Buffer.from('x'),
+      issuerDeviceId: owner.deviceId,
+      issuerSig: Buffer.from('y'),
+      createdBy: owner.accountId,
+      expiresAt: new Date(Date.now() - 500),
+    })
+
+    const sweepOld = await app.inject({
+      method: 'POST',
+      url: `${rollcallsUrl(communityId, channelId)}/${oldId}/sweep`,
+      headers: auth(owner),
+    })
+    expect(sweepOld.statusCode).toBe(409)
+  })
+
   it('a plain member cannot start or sweep a roll-call', async () => {
     const owner = await createUser('RcOwner4')
     const member = await createUser('RcMember4')

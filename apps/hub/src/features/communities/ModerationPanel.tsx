@@ -67,12 +67,23 @@ export function ModerationPanel({
   const [tick, setTick] = useState(() => Date.now())
 
   // Roll-calls live in the channel's artifacts; this tab doesn't render the pinned bar, so
-  // load them here too. The tick makes a passing deadline flip the UI without a reload.
+  // load them here too. It must also REFETCH: a member confirming changes the count, and the
+  // tick alone only re-renders (which is why confirmations never appeared here).
   const artifacts = useChannelArtifacts((s) => s.byChannel[channelId])
   useEffect(() => {
-    void channelArtifactsStore.load(communityId, channelId, pinPolicy)
-    const id = setInterval(() => setTick(Date.now()), 15_000)
-    return () => clearInterval(id)
+    const reload = () => void channelArtifactsStore.load(communityId, channelId, pinPolicy)
+    reload()
+    const off = wsClient.on('community.channel_artifact_updated', (m) => {
+      if (m.payload.channelId === channelId) reload()
+    })
+    const id = setInterval(() => {
+      setTick(Date.now())
+      reload() // keep the count + open/closed state fresh even if a WS event is missed
+    }, 15_000)
+    return () => {
+      off()
+      clearInterval(id)
+    }
   }, [communityId, channelId, pinPolicy])
   const rollcalls = (artifacts ?? [])
     .filter((a) => a.status === 'active' && a.body.kind === 'rollcall')
