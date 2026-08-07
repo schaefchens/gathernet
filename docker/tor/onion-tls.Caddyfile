@@ -1,0 +1,22 @@
+# TLS terminator for the onion's :443 in DEV.
+#
+# Tor forwards onion:443 here; this forwards to the plain `pnpm dev` server on the host.
+# Vite therefore keeps serving plain HTTP on localhost and the normal dev loop is
+# unchanged — the TLS only exists so WebKit (every iOS browser) treats the onion as a
+# secure context and gives the app crypto.subtle. See docs/onion.md.
+#
+# The cert is minted by the `tor` container, which is the only one that knows the address
+# before it exists, and shared through the `onioncerts` volume.
+{
+	auto_https off
+}
+
+:8443 {
+	tls /certs/onion.crt /certs/onion.key
+
+	# The dev server is on the host, not in this network. Host header is preserved so
+	# Vite's allowedHosts check sees the .onion it was configured with.
+	reverse_proxy host.docker.internal:5173 {
+		header_up Host {host}
+	}
+}

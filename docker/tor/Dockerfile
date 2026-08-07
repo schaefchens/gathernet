@@ -6,7 +6,9 @@
 # the key controls the address.
 FROM alpine:3.20
 
-RUN apk add --no-cache tor su-exec
+# openssl: the entrypoint mints the onion's TLS cert here, since this is the only
+# container that knows the address before it exists. See docs/onion.md.
+RUN apk add --no-cache tor su-exec openssl
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -49,6 +49,7 @@ services:
     build: ./docker/tor
     environment:
       HS_TARGET: host.docker.internal:5173
+      HS_TLS_TARGET: onion-tls:8443
     extra_hosts:
       # Lets the container reach the host's dev server on Linux too (automatic on macOS).
       - 'host.docker.internal:host-gateway'
@@ -57,9 +58,30 @@ services:
       # Seed the onion identity from a locally-held (vanity) key, if present. Gitignored —
       # the key is a secret. Empty/absent → Tor generates a random address.
       - ./docker/tor/seed:/seed:ro
+      # Where the entrypoint mints the onion's TLS cert, for `onion-tls` to serve.
+      - onioncerts:/certs
+    restart: unless-stopped
+
+  # Terminates TLS for the onion's :443 and forwards to the plain dev server. A separate
+  # hop rather than `server.https` in Vite, so `pnpm dev` keeps serving plain HTTP on
+  # localhost and nothing about the normal dev loop changes.
+  onion-tls:
+    image: caddy:2-alpine
+    # Wait for the cert `tor` mints — Caddy will not boot with `tls` naming a missing file.
+    command: >
+      sh -c 'i=0; while [ ! -f /certs/onion.crt ] && [ "$$i" -lt 60 ]; do sleep 1; i=$$((i+1)); done;
+             exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile'
+    volumes:
+      - ./docker/tor/onion-tls.Caddyfile:/etc/caddy/Caddyfile:ro
+      - onioncerts:/certs:ro
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      - tor
     restart: unless-stopped
 
 volumes:
   pgdata:
   rustfsdata:
   tordata:
+  onioncerts:

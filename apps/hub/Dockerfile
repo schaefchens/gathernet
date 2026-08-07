@@ -25,5 +25,10 @@ RUN pnpm --filter @gathernet/hub build
 
 FROM caddy:2-alpine
 COPY apps/hub/Caddyfile /etc/caddy/Caddyfile
+COPY apps/hub/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh && mkdir -p /etc/caddy/conf.d
 COPY --from=web /app/apps/hub/dist /srv
-EXPOSE 8080
+# 8080 plain (clearnet, behind a fronting proxy); 8443 the onion's TLS, added at start
+# only when the tor container has minted a cert. See docs/onion.md.
+EXPOSE 8080 8443
+ENTRYPOINT ["/docker-entrypoint.sh"]

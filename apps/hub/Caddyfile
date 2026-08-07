@@ -2,7 +2,9 @@
 	auto_https off
 }
 
-:8080 {
+# The app, shared by the plain :8080 site and the onion's TLS :8443 one so the two can
+# never drift apart.
+(app) {
 	encode zstd gzip
 
 	@api path /api/* /healthz
@@ -31,7 +33,21 @@
 		# generates) — the expression is evaluated with the env value substituted at load,
 		# so deployments without an onion send no header. Tor Browser only honours this
 		# over HTTPS clearnet (TLS is terminated by the fronting proxy).
+		#
+		# Points at http://, not https://: Tor Browser is Firefox, which already treats
+		# .onion as a secure context, and the onion's TLS cert is self-signed by default
+		# (docs/onion.md) — sending Tor Browser to an interstitial would be a downgrade.
+		# Swap this to https:// once a CA-issued cert is in place.
 		@onion expression `"{$ONION_HOST:}" != ""`
 		header @onion Onion-Location "http://{$ONION_HOST:}{uri}"
 	}
 }
+
+:8080 {
+	import app
+}
+
+# The onion's TLS site, when there is one. Written by docker-entrypoint.sh rather than
+# kept here, because `tls` pointing at a file that doesn't exist stops Caddy from
+# booting at all — and a clearnet-only deployment has no onion and no cert.
+import /etc/caddy/conf.d/*.caddy

@@ -42,6 +42,10 @@ services:
       # Set to the address the `tor` service prints (docker compose logs tor) to advertise
       # the onion via the Onion-Location header. Unset → no header (clearnet only).
       ONION_HOST: ${ONION_HOST:-}
+    volumes:
+      # The onion's TLS cert, minted by the `tor` container (the only one that knows the
+      # address before it exists). Read-only: `web` terminates, it does not issue.
+      - onioncerts:/certs:ro
     depends_on:
       - server
 
@@ -52,6 +56,7 @@ services:
     build: ./docker/tor
     environment:
       HS_TARGET: web:8080
+      HS_TLS_TARGET: web:8443
     depends_on:
       - web
     volumes:
@@ -59,8 +64,11 @@ services:
       # Seed the onion identity from a locally-held (vanity) key, if present. Gitignored —
       # the key is a secret; back it up out-of-band. Absent → Tor generates a random address.
       - ./docker/tor/seed:/seed:ro
+      # Where the entrypoint mints the onion's TLS cert, for `web` to serve.
+      - onioncerts:/certs
     restart: unless-stopped
 
 volumes:
   pgdata:
   tordata:
+  onioncerts:

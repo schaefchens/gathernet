@@ -35,7 +35,8 @@ echo '<addr>.onion' > apps/hub/.onion-host
 pnpm dev
 ```
 
-Now open `http://<addr>.onion` in **Tor Browser**. The address stays the same on every
+Now open `http://<addr>.onion` in **Tor Browser** (or `https://<addr>.onion` from an
+iPhone — see "HTTPS on the onion" below). The address stays the same on every
 restart, so this file only needs setting once. (`ONION_HOST=<addr>.onion pnpm dev` also
 works, but Turbo's strict env mode drops it unless declared — the file is simpler.)
 
@@ -59,6 +60,41 @@ ONION_HOST=<addr>.onion docker compose -f docker-compose.prod.yml up -d web
 The header is only emitted when `ONION_HOST` is set (clearnet-only deploys send nothing),
 and Tor Browser only honours it over **HTTPS** — so the clearnet site must be behind a
 TLS-terminating proxy (the Caddyfile itself runs with `auto_https off` on :8080).
+
+## HTTPS on the onion (required for iOS)
+
+The hidden service answers on **both** `:80` and `:443`.
+
+`:443` exists because of WebKit. Chromium and Tor Browser implement the "`.onion` is a
+potentially trustworthy origin" rule, so `http://<addr>.onion` is a **secure context**
+there and `crypto.subtle` works. WebKit never implemented it — and on iOS *every* browser
+is WebKit, Brave and Firefox included, because Apple requires it. Over plain HTTP an
+iPhone therefore gets `isSecureContext === false` and no `crypto.subtle`, and the app
+cannot enroll a device at all: `buildEnrollment` generates the receipt keypair with
+`crypto.subtle.generateKey`, so creating an account and restoring a passphrase both fail
+right after the unlock-password step, with a generic error.
+
+`:80` stays because the default cert is **self-signed**. Browsers refuse to register a
+service worker on an origin with a certificate error, so moving everyone to `:443` would
+take Web Push away from the Chromium users who work today. Two ports, no regression.
+Note the two are separate origins (`http://x.onion` and `https://x.onion` do not share
+storage), so a device enrolled on one is not enrolled on the other.
+
+The cert is minted by the **tor** container — the only one that knows the address before
+it exists — into the `onioncerts` volume, and read by whatever terminates TLS (`web` in
+prod, the `onion-tls` sidecar in dev, which keeps `pnpm dev` on plain HTTP so the normal
+dev loop is untouched). It is issued for 10 years on purpose: iOS pins an accepted
+exception to the certificate, and a cert that rotated would re-prompt every time.
+
+**iOS will show a certificate warning.** Tap through it once ("Show Details" → "visit this
+website"). That is the cost of a self-signed cert, and it is a real one — teaching
+at-risk users to click past TLS warnings is a bad habit to build.
+
+To remove the warning, drop a **CA-issued** cert into the volume as `onion.crt` /
+`onion.key` and restart; the entrypoint leaves existing files alone. HARICA issues
+certificates for v3 `.onion` addresses (paid, EV-only — they are the only CA that does).
+With a trusted cert, `:443` becomes good enough for every client, service workers included,
+and `:80` and the `Onion-Location` header can both be pointed at HTTPS.
 
 ## What does *not* work over onion (by design)
 
