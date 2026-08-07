@@ -171,7 +171,7 @@ export function MessageThread({
           palette from the .parchment scope in app.css. */}
       <div
         ref={listRef}
-        className="parchment flex flex-1 flex-col overflow-y-auto rounded-lg"
+        className="parchment flex flex-1 flex-col overflow-y-auto"
         onScroll={() => {
           const el = listRef.current
           if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80

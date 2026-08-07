@@ -180,7 +180,7 @@ function CommunityDetailScreen() {
     // On md+ the page fills the viewport and the channel pane flexes to the remaining
     // space (no magic-number height that overruns when a description / tab row is present).
     // On mobile it's normal document flow; the pane uses a dvh-based fallback height.
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         // On a phone the Chats list is the sidebar: it expands a community into its
         // channels, so that is where "back" should land you.
@@ -279,16 +279,18 @@ function CommunityDetailScreen() {
       />
 
       {showInfo && selectedChannel && channelTitle && (
-        <ChannelInfo
-          channel={selectedChannel}
-          title={channelTitle}
-          description={channelMeta?.description}
-          communityDescription={communityMeta?.description}
-        />
+        <div className="px-4 pt-3">
+          <ChannelInfo
+            channel={selectedChannel}
+            title={channelTitle}
+            description={channelMeta?.description}
+            communityDescription={communityMeta?.description}
+          />
+        </div>
       )}
 
       {showSettings && isLeader && (
-        <div className="min-h-0 flex-1 overflow-y-auto pb-20 md:pb-0">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-20 md:pb-4">
           <CommunitySettingsForm
             key={communityMeta ? 'loaded' : 'empty'}
             communityId={communityId}
@@ -325,7 +327,7 @@ function CommunityDetailScreen() {
             Channels are reached from the Chats list, which expands a community into
             its channels — the phone's equivalent of the desktop sidebar. */}
         {!isDesktop && showPeople ? (
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pt-3">
             <button
               type="button"
               className="btn-quiet text-xs"

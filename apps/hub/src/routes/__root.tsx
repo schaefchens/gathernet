@@ -197,7 +197,7 @@ function AppShell() {
         <main
           className={
             isConversation(pathname)
-              ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3 pb-20 md:pb-3'
+              ? 'flex min-h-0 flex-1 flex-col overflow-hidden pb-16 md:pb-0'
               : 'w-full flex-1 overflow-y-auto mx-auto max-w-4xl px-4 py-6 pb-24 md:pb-6'
           }
         >

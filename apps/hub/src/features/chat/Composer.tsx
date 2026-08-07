@@ -105,7 +105,7 @@ export function Composer({
   }
 
   return (
-    <div className="border-t border-edge pt-3">
+    <div className="border-t border-edge px-4 pt-3 pb-3">
       {error && (
         <p className="mb-2 rounded-md border border-danger/50 bg-danger/10 px-2 py-1 text-xs text-danger">
           {error}

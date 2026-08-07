@@ -39,7 +39,7 @@ export function PageHeader({
   const { t } = useTranslation()
 
   return (
-    <div className="flex items-center gap-3 border-b border-edge pb-3">
+    <div className="flex items-center gap-3 border-b border-edge px-4 pt-3 pb-3">
       {backTo && (
         <Link
           to={backTo}
