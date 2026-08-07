@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChevronIcon, MoreIcon } from '../../components/icons.tsx'
+import { MoreIcon } from '../../components/icons.tsx'
 import { api } from '../../lib/api.ts'
 import type { CommunityMeta } from '../../lib/community-keys.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
@@ -389,29 +389,18 @@ function CommunityRow({
   })
 
   return (
-    <div className="flex items-center">
-      {/* Collapse the community's channels without leaving where you are — the row
-          itself still opens the community. */}
+    // The row itself is the `.list-row`, not the link inside it, so the avatar is the
+    // first thing in it and lands in the same column as every friend's avatar. A
+    // chevron in front of it used to push the whole community off that column.
+    <div className="list-row" data-active={active}>
+      {/* The mark is the disclosure: it collapses the community's channels without
+          leaving where you are. The rest of the row still opens the community. */}
       <button
         type="button"
-        className="shrink-0 rounded px-1 py-1 text-ink-faint hover:text-gold-bright"
+        className="shrink-0 rounded-full"
         aria-expanded={expanded}
         aria-label={expanded ? t('chats.collapse') : t('chats.expand')}
         onClick={onToggle}
-      >
-        <ChevronIcon
-          size={14}
-          className={expanded ? 'rotate-90 transition-transform' : 'transition-transform'}
-        />
-      </button>
-      <Link
-        to="/communities/$communityId"
-        params={{ communityId: community.communityId }}
-        className="list-row min-w-0 flex-1"
-        data-active={active}
-        // The community and its channels are different destinations: this row means
-        // "show me the community", so it clears whichever channel was last open.
-        onClick={() => selectChannel(community.communityId, null)}
       >
         <CommunityAvatar
           communityId={community.communityId}
@@ -419,6 +408,15 @@ function CommunityRow({
           label={name}
           size="sm"
         />
+      </button>
+      <Link
+        to="/communities/$communityId"
+        params={{ communityId: community.communityId }}
+        className="flex min-w-0 flex-1 items-center gap-3"
+        // The community and its channels are different destinations: this row means
+        // "show me the community", so it clears whichever channel was last open.
+        onClick={() => selectChannel(community.communityId, null)}
+      >
         <span className="min-w-0 flex-1">
           <span
             className={`block truncate font-display ${unread ? 'font-semibold text-ink' : 'font-medium'}`}
