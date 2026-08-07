@@ -65,19 +65,68 @@ fi
   done
   if [ -f "$HS_DIR/hostname" ]; then
     ONION="$(cat "$HS_DIR/hostname")"
-    # Mint the TLS cert here, because this is the only container that knows the address
-    # before it exists. Kept in the same volume as the onion key so it is as stable as
-    # the address is: iOS pins an accepted exception to the certificate, so a cert that
-    # rotated (Caddy's internal CA reissues twice a day) would re-prompt every time.
-    # A real CA cert dropped into this volume is used instead of generating one.
-    if [ -n "$HS_TLS_TARGET" ] && [ -d "$CERT_DIR" ]; then
-      if [ ! -f "$CERT_DIR/onion.crt" ] || [ ! -f "$CERT_DIR/onion.key" ]; then
-        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -sha256 \
-          -subj "/CN=$ONION" -addext "subjectAltName=DNS:$ONION" \
-          -keyout "$CERT_DIR/onion.key" -out "$CERT_DIR/onion.crt" >/dev/null 2>&1
+    # Mint the TLS material here, because this is the only container that knows the
+    # address before it exists.
+    #
+    # A private CA and a leaf under it, not one self-signed cert, because the point is
+    # to make the warning go away and only a trust anchor can do that. Install the CA
+    # on the device once (docs/onion.md) and every leaf it signs is trusted — no
+    # interstitial, and service workers register, which a cert error would forbid.
+    #
+    # Apple is strict about the leaf and a plain `req -x509` satisfies none of it: a TLS
+    # server certificate needs extendedKeyUsage=serverAuth, must not claim CA:TRUE, and
+    # must not outlive 398 days. Break any of those and iOS refuses the connection
+    # outright rather than offering to continue.
+    #
+    # ONION_TLS_MANAGED=0 hands the directory over entirely — drop a CA-issued
+    # onion.crt/onion.key in and nothing here touches them.
+    if [ -n "$HS_TLS_TARGET" ] && [ -d "$CERT_DIR" ] && [ "${ONION_TLS_MANAGED:-1}" = "1" ]; then
+      CA_CRT="$CERT_DIR/onion-ca.crt"
+      CA_KEY="$CERT_DIR/onion-ca.key"
+      fresh_ca=0
+
+      if [ ! -f "$CA_CRT" ] || [ ! -f "$CA_KEY" ]; then
+        # The anchor is long-lived on purpose: it is the thing a person installs by hand,
+        # and the 398-day cap is a rule about server certificates, not roots.
+        # Name-constrained to this one address. Installing a root is handing a device a
+        # key that can vouch for anything, and this key sits on a server — so bound it
+        # to the single host it exists for. If it ever leaks it can still only
+        # impersonate this onion, not a bank.
+        openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -sha256 \
+          -subj "/CN=Gathernet onion CA/O=Gathernet" \
+          -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+          -addext "keyUsage=critical,keyCertSign,cRLSign" \
+          -addext "nameConstraints=critical,permitted;DNS:$ONION" \
+          -keyout "$CA_KEY" -out "$CA_CRT" >/dev/null 2>&1
+        chmod 644 "$CA_CRT"
+        chmod 640 "$CA_KEY"
+        fresh_ca=1
+        echo "minted onion CA (10y) — install $CA_CRT on iOS, see docs/onion.md"
+      fi
+
+      # Reissue when the leaf is missing, within 30 days of expiry, or orphaned by a new CA.
+      if [ "$fresh_ca" = "1" ] || [ ! -f "$CERT_DIR/onion.crt" ] || [ ! -f "$CERT_DIR/onion.key" ] \
+        || ! openssl x509 -in "$CERT_DIR/onion.crt" -noout -checkend 2592000 >/dev/null 2>&1; then
+        cat > /tmp/leaf.ext <<EXT
+subjectAltName=DNS:$ONION
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+EXT
+        openssl req -new -newkey rsa:2048 -nodes -subj "/CN=$ONION" \
+          -keyout /tmp/leaf.key -out /tmp/leaf.csr >/dev/null 2>&1
+        openssl x509 -req -in /tmp/leaf.csr -CA "$CA_CRT" -CAkey "$CA_KEY" -CAcreateserial \
+          -days 397 -sha256 -extfile /tmp/leaf.ext -out /tmp/leaf.crt >/dev/null 2>&1
+        mv /tmp/leaf.key "$CERT_DIR/onion.key"
+        # Leaf first, then the anchor: Caddy serves the file as the chain, so a client
+        # that already trusts the CA never has to fetch anything.
+        cat /tmp/leaf.crt "$CA_CRT" > "$CERT_DIR/onion.crt"
+        rm -f /tmp/leaf.csr /tmp/leaf.crt /tmp/leaf.ext
         chmod 644 "$CERT_DIR/onion.crt"
         chmod 640 "$CERT_DIR/onion.key"
-        echo "minted self-signed TLS cert for $ONION (10y)"
+        # 397 rather than Apple's 398-day ceiling, so a day of rounding anywhere in the
+        # chain of validators can't put it over.
+        echo "issued TLS leaf for $ONION (397d, serverAuth)"
       fi
       # The terminator runs as a different user; it only ever needs to read these.
       chmod o+r "$CERT_DIR/onion.key" 2>/dev/null || true

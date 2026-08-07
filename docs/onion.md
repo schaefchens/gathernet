@@ -86,15 +86,53 @@ prod, the `onion-tls` sidecar in dev, which keeps `pnpm dev` on plain HTTP so th
 dev loop is untouched). It is issued for 10 years on purpose: iOS pins an accepted
 exception to the certificate, and a cert that rotated would re-prompt every time.
 
-**iOS will show a certificate warning.** Tap through it once ("Show Details" → "visit this
-website"). That is the cost of a self-signed cert, and it is a real one — teaching
-at-risk users to click past TLS warnings is a bad habit to build.
+### Getting rid of the certificate warning
 
-To remove the warning, drop a **CA-issued** cert into the volume as `onion.crt` /
-`onion.key` and restart; the entrypoint leaves existing files alone. HARICA issues
-certificates for v3 `.onion` addresses (paid, EV-only — they are the only CA that does).
-With a trusted cert, `:443` becomes good enough for every client, service workers included,
-and `:80` and the `Onion-Location` header can both be pointed at HTTPS.
+Out of the box the chain is private, so the first visit warns. Tapping through works, but
+teaching at-risk users to click past TLS warnings is a bad habit — and a bypassed cert
+error also costs the origin its service worker. Two ways to make the warning go away.
+
+**Install the CA on the device (free, works today).** Copy the anchor out and get it onto
+the phone — AirDrop is easiest:
+
+```sh
+docker compose cp tor:/certs/onion-ca.crt ./onion-ca.crt   # public cert, not a secret
+```
+
+On iOS: open it → **Settings → General → VPN & Device Management** → install the profile →
+then **Settings → General → About → Certificate Trust Settings** and switch on full trust
+for "Gathernet onion CA". That second step is the one everyone forgets; without it the
+profile is installed but not trusted. Brave and every other iOS browser use the system
+trust store, so this covers all of them.
+
+The CA is **name-constrained** (`permitted;DNS:<addr>.onion`), so it can only ever vouch
+for this one address. That matters: installing a root normally hands the device a key that
+can impersonate any site, and this key lives on a server. Constrained, a leak still only
+buys an attacker this onion. Keep `onion-ca.key` as private as the onion key itself — both
+live in volumes you should not expose.
+
+**Or buy a CA-issued cert.** Set `ONION_TLS_MANAGED=0` on the `tor` service and drop your
+own `onion.crt` (leaf + chain) and `onion.key` into the `onioncerts` volume; nothing here
+will touch them. No install step for anyone, and `:443` then becomes good enough for every
+client, so `:80` and the `Onion-Location` header could both move to HTTPS.
+
+**Let's Encrypt cannot do this.** `.onion` is a reserved special-use name (RFC 7686), not
+in public DNS — so neither HTTP-01 nor DNS-01 validation can reach it, and Let's Encrypt
+issues only for publicly resolvable names. Under the CA/Browser Forum rules `.onion` needs
+its own validation method (proving control of the onion key), which historically was
+permitted only for EV certificates. HARICA is the CA that issues them; check their current
+terms and pricing.
+
+### Reissuing
+
+The leaf lasts 397 days (Apple rejects TLS server certificates valid for more than 398,
+and refuses any leaf without `extendedKeyUsage=serverAuth` or with `CA:TRUE` — a plain
+`openssl req -x509` cert has none of that right). The `tor` entrypoint reissues
+automatically once it is within 30 days of expiry, reusing the CA, so **installed devices
+keep working without reinstalling anything**.
+
+Caddy reads the cert once at startup and does not watch the file, so restart the
+terminator after a reissue — `docker compose restart onion-tls` in dev, `web` in prod.
 
 ## What does *not* work over onion (by design)
 
