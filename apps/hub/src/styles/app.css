@@ -504,9 +504,14 @@ button {
  * "Chats" and the labels ran into each other. The label is sans, not the display
  * serif — 11px is below where an old-style face holds its shape, and it is the same
  * job `.section-label` does in sans elsewhere.
+ *
+ * `justify-end` puts every label on one line. Connect's elevated disc is taller than
+ * a plain icon, so packing from the top started its label 10px below its neighbours';
+ * packing from the bottom lands all five labels together and bottom-aligns the icons
+ * with the disc, which is the row the eye actually reads.
  */
 .tab-item {
-  @apply flex min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[11px] transition-colors;
+  @apply flex min-w-0 flex-1 flex-col items-center justify-end gap-1 py-2 text-[11px] transition-colors;
   color: var(--color-ink-soft);
 }
 
