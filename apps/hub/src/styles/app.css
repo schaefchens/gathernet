@@ -547,6 +547,12 @@ button {
   );
 }
 
+/* Except under Connect, where the rule would strike straight through the disc. The
+   disc is lit and elevated already — it needs no second mark. */
+.tab-item:has(.tab-action)::before {
+  content: none;
+}
+
 /*
  * Elevated centre action in the mobile tab bar.
  *
