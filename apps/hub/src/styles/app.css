@@ -511,7 +511,7 @@ button {
  * with the disc, which is the row the eye actually reads.
  */
 .tab-item {
-  @apply flex min-w-0 flex-1 flex-col items-center justify-end gap-1 py-2 text-[11px] transition-colors;
+  @apply relative flex min-w-0 flex-1 flex-col items-center justify-end gap-1 py-2 text-[11px] transition-colors;
   color: var(--color-ink-soft);
 }
 
@@ -522,6 +522,29 @@ button {
 
 .tab-item[aria-current="page"] {
   color: var(--color-gold-bright);
+}
+
+/*
+ * A gold rule over the current tab — the bar's answer to the lit tile the desktop
+ * rail uses. Drawn on the bar's own top edge rather than below it, and faded at both
+ * ends like the date dividers, so it reads as illumination on the rule instead of a
+ * tab bracket bolted on.
+ */
+.tab-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-gold) 22%,
+    var(--color-gold-bright) 50%,
+    var(--color-gold) 78%,
+    transparent
+  );
 }
 
 /*
