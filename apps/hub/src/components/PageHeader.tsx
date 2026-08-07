@@ -38,6 +38,9 @@ export function PageHeader({
 }) {
   const { t } = useTranslation()
 
+  // Carries its own inset and spans its container: `main` pads nothing, so the rule
+  // under the bar reaches both window edges here exactly as it does on a conversation
+  // screen, and every screen's bar is the same height.
   return (
     <div className="flex items-center gap-3 border-b border-edge px-4 pt-3 pb-3">
       {backTo && (

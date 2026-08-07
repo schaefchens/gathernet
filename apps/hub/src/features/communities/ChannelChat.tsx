@@ -148,17 +148,17 @@ export function ChannelChat({
       ) : (
         <>
           {status === 'untrusted' && (
-            <div className="mt-3 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-sm text-danger">
+            <div className="mx-4 mt-3 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-sm text-danger">
               {t('communities.channelUntrusted')}
             </div>
           )}
           {status === 'rotation_pending' && (
-            <div className="mt-3 rounded-md border border-gold/50 bg-gold/10 px-3 py-2 text-sm text-gold">
+            <div className="mx-4 mt-3 rounded-md border border-gold/50 bg-gold/10 px-3 py-2 text-sm text-gold">
               {t('communities.channelRotationPending')}
             </div>
           )}
           {pinError && (
-            <div className="mt-3 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-xs text-danger">
+            <div className="mx-4 mt-3 rounded-md border border-danger/50 bg-danger/10 px-3 py-2 text-xs text-danger">
               {t('pins.pinFailed')}: {pinError}
             </div>
           )}

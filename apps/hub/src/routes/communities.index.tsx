@@ -82,7 +82,7 @@ function CommunitiesScreen() {
   }, [list.map((c) => c.communityId).join(','), queryClient])
 
   return (
-    <div className="space-y-4">
+    <>
       <PageHeader
         backTo="/"
         title={t('communities.title')}
@@ -123,22 +123,24 @@ function CommunitiesScreen() {
         }
       />
 
-      {panel === 'create' && <CreatePanel onDone={() => setPanel('none')} />}
-      {panel === 'join' && <JoinPanel onDone={() => setPanel('none')} />}
+      <div className="space-y-4 px-4 py-6">
+        {panel === 'create' && <CreatePanel onDone={() => setPanel('none')} />}
+        {panel === 'join' && <JoinPanel onDone={() => setPanel('none')} />}
 
-      {communities.isLoading && <p className="text-ink-soft">{t('common.loading')}</p>}
-      {communities.data && list.length === 0 && panel === 'none' && (
-        <div className="card text-center text-ink-soft py-12">{t('communities.empty')}</div>
-      )}
+        {communities.isLoading && <p className="text-ink-soft">{t('common.loading')}</p>}
+        {communities.data && list.length === 0 && panel === 'none' && (
+          <div className="card text-center text-ink-soft py-12">{t('communities.empty')}</div>
+        )}
 
-      <ul className="space-y-2">
-        {list.map((community) => (
-          <li key={community.communityId}>
-            <CommunityCard community={community} roleBadge={ROLE_BADGE[community.myRole]} />
-          </li>
-        ))}
-      </ul>
-    </div>
+        <ul className="space-y-2">
+          {list.map((community) => (
+            <li key={community.communityId}>
+              <CommunityCard community={community} roleBadge={ROLE_BADGE[community.myRole]} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    </>
   )
 }
 

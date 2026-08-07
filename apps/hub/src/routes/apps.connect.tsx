@@ -101,7 +101,7 @@ function ConnectScreen() {
   }
 
   return (
-    <div className="space-y-4 max-w-md mx-auto">
+    <div className="mx-auto max-w-md space-y-4 px-4 py-6">
       <h1 className="font-display text-3xl">{t('apps.connectTitle')}</h1>
 
       {step.kind === 'entry' && <EntryTabs busy={busy} error={error} onLookUp={lookUp} />}

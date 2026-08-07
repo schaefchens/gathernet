@@ -17,32 +17,34 @@ function AddFriendScreen() {
   const [tab, setTab] = useState<Tab>('invite')
 
   return (
-    <div className="space-y-4 max-w-md mx-auto">
+    <>
       <PageHeader backTo="/" title={t('addFriend.title')} />
-      <div className="flex gap-1 bg-raised border border-edge rounded-md p-1">
-        {(['invite', 'code', 'scan'] as const).map((name) => (
-          <button
-            key={name}
-            type="button"
-            onClick={() => setTab(name)}
-            className={`flex-1 rounded px-3 py-1.5 text-sm transition-colors ${
-              tab === name ? 'bg-overlay text-gold' : 'text-ink-soft hover:text-ink'
-            }`}
-          >
-            {t(
-              name === 'invite'
-                ? 'addFriend.myInvite'
-                : name === 'code'
-                  ? 'addFriend.enterCode'
-                  : 'addFriend.scan',
-            )}
-          </button>
-        ))}
+      <div className="mx-auto max-w-md space-y-4 px-4 py-6">
+        <div className="flex gap-1 bg-raised border border-edge rounded-md p-1">
+          {(['invite', 'code', 'scan'] as const).map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => setTab(name)}
+              className={`flex-1 rounded px-3 py-1.5 text-sm transition-colors ${
+                tab === name ? 'bg-overlay text-gold' : 'text-ink-soft hover:text-ink'
+              }`}
+            >
+              {t(
+                name === 'invite'
+                  ? 'addFriend.myInvite'
+                  : name === 'code'
+                    ? 'addFriend.enterCode'
+                    : 'addFriend.scan',
+              )}
+            </button>
+          ))}
+        </div>
+        {tab === 'invite' && <MyInviteTab />}
+        {tab === 'code' && <EnterCodeTab />}
+        {tab === 'scan' && <ScanTab />}
       </div>
-      {tab === 'invite' && <MyInviteTab />}
-      {tab === 'code' && <EnterCodeTab />}
-      {tab === 'scan' && <ScanTab />}
-    </div>
+    </>
   )
 }
 

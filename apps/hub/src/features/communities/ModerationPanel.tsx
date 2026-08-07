@@ -206,7 +206,7 @@ export function ModerationPanel({
   const invitable = members.filter((m) => !rosterIds.has(m.accountId))
 
   return (
-    <div className="card space-y-5 overflow-y-auto h-[calc(100dvh-13rem)] md:h-auto md:flex-1 md:min-h-0">
+    <div className="card mx-4 mt-3 mb-3 space-y-5 overflow-y-auto h-[calc(100dvh-16rem)] md:h-auto md:flex-1 md:min-h-0">
       <h2 className="font-medium text-ink-soft">{t('communities.moderation')}</h2>
 
       {roster.isLoading && <p className="text-sm text-ink-soft">{t('common.loading')}</p>}

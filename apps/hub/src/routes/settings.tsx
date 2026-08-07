@@ -52,7 +52,7 @@ function SettingsScreen() {
   const [name, setName] = useState<string | null>(null)
 
   return (
-    <div className="space-y-6 max-w-md">
+    <div className="max-w-md space-y-6 px-4 py-6">
       <h1 className="font-display text-3xl">{t('settings.title')}</h1>
 
       <section className="card space-y-4">

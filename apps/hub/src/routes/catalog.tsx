@@ -16,9 +16,9 @@ function CatalogScreen() {
   const { t } = useTranslation()
 
   return (
-    <div className="space-y-4">
+    <>
       <PageHeader backTo="/" title={t('catalog.title')} />
-      <div className="card grid min-h-[50vh] place-items-center text-center">
+      <div className="card mx-4 my-6 grid min-h-[50vh] place-items-center text-center">
         <div className="max-w-sm space-y-3">
           <span className="seal mx-auto h-14 w-14" aria-hidden>
             <CatalogIcon size={26} />
@@ -27,6 +27,6 @@ function CatalogScreen() {
           <p className="text-sm text-ink-faint">{t('catalog.soonBody')}</p>
         </div>
       </div>
-    </div>
+    </>
   )
 }

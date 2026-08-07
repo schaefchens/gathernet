@@ -243,7 +243,7 @@ export function MessageThread({
       </div>
 
       {readOnly ? (
-        <p className="pt-3 border-t border-edge text-center text-xs text-ink-faint">
+        <p className="border-t border-edge px-4 pt-3 pb-3 text-center text-xs text-ink-faint">
           {readOnlyLabel ?? t('chat.readOnly')}
         </p>
       ) : (

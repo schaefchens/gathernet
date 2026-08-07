@@ -163,11 +163,11 @@ function CommunityDetailScreen() {
   const onDeleteChannel = (channelId: string) => deleteChannel.mutate(channelId)
 
   if (detailQuery.isLoading) {
-    return <p className="text-ink-soft">{t('common.loading')}</p>
+    return <p className="px-4 py-6 text-ink-soft">{t('common.loading')}</p>
   }
   if (detailQuery.isError || !detail) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 px-4 py-6">
         <Link to="/communities" className="text-ink-soft hover:text-ink">
           ← {t('communities.title')}
         </Link>
@@ -290,7 +290,7 @@ function CommunityDetailScreen() {
       )}
 
       {showSettings && isLeader && (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-20 md:pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-6">
           <CommunitySettingsForm
             key={communityMeta ? 'loaded' : 'empty'}
             communityId={communityId}
@@ -308,7 +308,7 @@ function CommunityDetailScreen() {
       )}
 
       {showCreate && isLeader && (
-        <div className="min-h-0 flex-1 overflow-y-auto pb-20 md:pb-0">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-6">
           <ChannelSettingsForm
             communityId={communityId}
             mode="create"
@@ -327,7 +327,7 @@ function CommunityDetailScreen() {
             Channels are reached from the Chats list, which expands a community into
             its channels — the phone's equivalent of the desktop sidebar. */}
         {!isDesktop && showPeople ? (
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pt-3">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pt-3 pb-6">
             <button
               type="button"
               className="btn-quiet text-xs"
@@ -441,7 +441,7 @@ function ChannelWorkspace({
       )}
 
       {view === 'settings' && canEdit && (
-        <div className="card min-h-0 flex-1 overflow-y-auto pb-20 md:pb-4">
+        <div className="card mx-4 mt-3 mb-3 min-h-0 flex-1 overflow-y-auto">
           <ChannelSettingsForm
             key={meta ? 'loaded' : 'empty'}
             communityId={communityId}

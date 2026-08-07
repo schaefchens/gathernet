@@ -62,7 +62,7 @@ function ChatsScreen() {
   const activeBlocks = blocks.data?.blocks ?? []
 
   return (
-    <div className="space-y-4">
+    <>
       <PageHeader
         title={t('chats.title')}
         actions={
@@ -102,91 +102,93 @@ function ChatsScreen() {
         }
       />
 
-      {requests.data?.incoming.length || requests.data?.outgoing.length ? (
-        <section className="space-y-2">
-          <h2 className="text-sm font-medium text-ink-soft">{t('connect.requestsTitle')}</h2>
-          <ul className="space-y-2">
-            {requests.data?.incoming.map((req) => (
-              <ConnectRequestRow
-                key={req.requestId}
-                req={req}
-                busy={acceptReq.isPending || declineReq.isPending}
-                onAccept={() => acceptReq.mutate(req.requestId)}
-                onDecline={() => declineReq.mutate(req.requestId)}
-              />
-            ))}
-            {requests.data?.outgoing.map((req) => (
-              <li
-                key={req.requestId}
-                className="card flex items-center gap-3 py-2.5 text-sm text-ink-soft"
-              >
-                <span className="flex-1 min-w-0 truncate">
-                  {t('connect.outgoingTo', { name: req.toDisplayName })}
-                </span>
-                <span className="text-xs text-ink-faint">{t('connect.pending')}</span>
-                <button
-                  type="button"
-                  className="btn-quiet text-xs disabled:opacity-40"
-                  disabled={cancelReq.isPending}
-                  onClick={() => cancelReq.mutate(req.requestId)}
+      <div className="space-y-4 px-4 py-6">
+        {requests.data?.incoming.length || requests.data?.outgoing.length ? (
+          <section className="space-y-2">
+            <h2 className="text-sm font-medium text-ink-soft">{t('connect.requestsTitle')}</h2>
+            <ul className="space-y-2">
+              {requests.data?.incoming.map((req) => (
+                <ConnectRequestRow
+                  key={req.requestId}
+                  req={req}
+                  busy={acceptReq.isPending || declineReq.isPending}
+                  onAccept={() => acceptReq.mutate(req.requestId)}
+                  onDecline={() => declineReq.mutate(req.requestId)}
+                />
+              ))}
+              {requests.data?.outgoing.map((req) => (
+                <li
+                  key={req.requestId}
+                  className="card flex items-center gap-3 py-2.5 text-sm text-ink-soft"
                 >
-                  {t('connect.cancel')}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+                  <span className="flex-1 min-w-0 truncate">
+                    {t('connect.outgoingTo', { name: req.toDisplayName })}
+                  </span>
+                  <span className="text-xs text-ink-faint">{t('connect.pending')}</span>
+                  <button
+                    type="button"
+                    className="btn-quiet text-xs disabled:opacity-40"
+                    disabled={cancelReq.isPending}
+                    onClick={() => cancelReq.mutate(req.requestId)}
+                  >
+                    {t('connect.cancel')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
-      {/* The sidebar owns this list on desktop; rendering it here too would put every
+        {/* The sidebar owns this list on desktop; rendering it here too would put every
           conversation in the DOM twice. Below `md` there is no sidebar, so it lives here. */}
-      {isDesktop ? (
-        <div className="card grid min-h-[55vh] place-items-center text-center">
-          <div className="space-y-3">
-            <span className="seal mx-auto h-14 w-14" aria-hidden>
-              <ChatIcon size={26} />
-            </span>
-            <p className="font-display text-xl text-ink-soft">{t('chats.pickOne')}</p>
-            {/* No "Add friend" here — the page header already offers it, and two
+        {isDesktop ? (
+          <div className="card grid min-h-[55vh] place-items-center text-center">
+            <div className="space-y-3">
+              <span className="seal mx-auto h-14 w-14" aria-hidden>
+                <ChatIcon size={26} />
+              </span>
+              <p className="font-display text-xl text-ink-soft">{t('chats.pickOne')}</p>
+              {/* No "Add friend" here — the page header already offers it, and two
                 links with the same name is one too many for anyone navigating by name. */}
-            <Link to="/communities" className="btn-quiet text-sm">
-              {t('chats.browseCommunities')}
-            </Link>
+              <Link to="/communities" className="btn-quiet text-sm">
+                {t('chats.browseCommunities')}
+              </Link>
+            </div>
           </div>
-        </div>
-      ) : (
-        <ChatList manage />
-      )}
+        ) : (
+          <ChatList manage />
+        )}
 
-      {activeBlocks.length > 0 && (
-        <section className="space-y-2 pt-2">
-          <h2 className="text-sm font-medium text-ink-soft">{t('friends.takingSpaceTitle')}</h2>
-          <ul className="space-y-2">
-            {activeBlocks.map((b) => (
-              <li
-                key={b.accountId}
-                className="card flex items-center gap-3 py-2.5 text-sm text-ink-soft"
-              >
-                <span className="flex-1 min-w-0 truncate">{b.displayName}</span>
-                <span className="text-xs text-ink-faint">
-                  {t('friends.blockedUntil', {
-                    date: new Date(b.expiresAt).toLocaleDateString(),
-                  })}
-                </span>
-                <button
-                  type="button"
-                  className="btn-quiet text-xs disabled:opacity-40"
-                  disabled={unblock.isPending}
-                  onClick={() => unblock.mutate(b.accountId)}
+        {activeBlocks.length > 0 && (
+          <section className="space-y-2 pt-2">
+            <h2 className="text-sm font-medium text-ink-soft">{t('friends.takingSpaceTitle')}</h2>
+            <ul className="space-y-2">
+              {activeBlocks.map((b) => (
+                <li
+                  key={b.accountId}
+                  className="card flex items-center gap-3 py-2.5 text-sm text-ink-soft"
                 >
-                  {t('friends.lift')}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
+                  <span className="flex-1 min-w-0 truncate">{b.displayName}</span>
+                  <span className="text-xs text-ink-faint">
+                    {t('friends.blockedUntil', {
+                      date: new Date(b.expiresAt).toLocaleDateString(),
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-quiet text-xs disabled:opacity-40"
+                    disabled={unblock.isPending}
+                    onClick={() => unblock.mutate(b.accountId)}
+                  >
+                    {t('friends.lift')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+    </>
   )
 }
 
