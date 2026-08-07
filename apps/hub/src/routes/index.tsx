@@ -102,7 +102,9 @@ function ChatsScreen() {
         }
       />
 
-      <div className="space-y-4 px-4 py-6">
+      {/* Tighter at the top than the other screens: this one opens on a search field
+          rather than on prose, and a field wants to sit near the bar it filters. */}
+      <div className="space-y-4 px-4 pt-3 pb-6">
         {requests.data?.incoming.length || requests.data?.outgoing.length ? (
           <section className="space-y-2">
             <h2 className="text-sm font-medium text-ink-soft">{t('connect.requestsTitle')}</h2>
