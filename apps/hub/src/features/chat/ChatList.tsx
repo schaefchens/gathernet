@@ -26,7 +26,7 @@ const BLOCK_DURATIONS = [
   { key: 'month', hours: 24 * 30 },
 ] as const
 
-type Filter = 'all' | 'unread' | 'communities'
+type Filter = 'all' | 'unread' | 'communities' | 'friends'
 
 /**
  * One line of preview for a conversation row. Mirrors what the bubble would show.
@@ -128,6 +128,7 @@ export function ChatList({ compact, manage }: { compact?: boolean; manage?: bool
   }
 
   const list = (communities.data?.communities ?? []).filter((c) => {
+    if (filter === 'friends') return false
     if (filter === 'unread' && !unreadCommunity(c.communityId)) return false
     if (!q) return true
     // A community stays in view when one of its channels matches, so you can find a
@@ -171,6 +172,7 @@ export function ChatList({ compact, manage }: { compact?: boolean; manage?: bool
     { id: 'all', label: t('chats.filterAll') },
     { id: 'unread', label: t('chats.filterUnread') },
     { id: 'communities', label: t('chats.filterCommunities') },
+    { id: 'friends', label: t('chats.filterFriends') },
   ]
 
   const controls = (
@@ -418,9 +420,7 @@ function CommunityRow({
         onClick={() => selectChannel(community.communityId, null)}
       >
         <span className="min-w-0 flex-1">
-          <span
-            className={`block truncate ${unread ? 'font-semibold text-ink' : 'font-medium'}`}
-          >
+          <span className={`block truncate ${unread ? 'font-semibold text-ink' : 'font-medium'}`}>
             {name}
           </span>
           <span className="block truncate text-xs text-ink-faint">
