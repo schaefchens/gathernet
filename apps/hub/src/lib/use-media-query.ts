@@ -25,3 +25,9 @@ export function useMediaQuery(query: string): boolean {
 
 /** True at Tailwind's `md` breakpoint and up — where the rail + sidebar appear. */
 export const DESKTOP_QUERY = '(min-width: 48rem)'
+
+/**
+ * True on pointer devices. A touch screen never fires hover, so anything revealed
+ * by `:hover` alone is simply unreachable there and needs an explicit control.
+ */
+export const HOVER_QUERY = '(hover: hover)'

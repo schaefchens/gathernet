@@ -139,7 +139,11 @@ function AppShell() {
             <Link to="/friends/add" className="btn-quiet flex-1 text-center text-xs">
               {t('friends.add')}
             </Link>
-            <Link to="/communities" className="btn-quiet flex-1 text-center text-xs">
+            <Link
+              to="/communities"
+              search={{ join: true }}
+              className="btn-quiet flex-1 text-center text-xs"
+            >
               {t('chats.joinCommunity')}
             </Link>
           </div>

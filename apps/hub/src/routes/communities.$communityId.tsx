@@ -281,32 +281,36 @@ function CommunityDetailScreen() {
       )}
 
       {showSettings && isLeader && (
-        <CommunitySettingsForm
-          key={communityMeta ? 'loaded' : 'empty'}
-          communityId={communityId}
-          initialMeta={communityMeta}
-          avatarMediaId={detail.community.avatarMediaId}
-          communityName={communityName}
-          maxDevicesPerMember={detail.community.maxDevicesPerMember}
-          onDone={() => {
-            setShowSettings(false)
-            invalidate()
-          }}
-          onCancel={() => setShowSettings(false)}
-        />
+        <div className="min-h-0 flex-1 overflow-y-auto pb-20 md:pb-0">
+          <CommunitySettingsForm
+            key={communityMeta ? 'loaded' : 'empty'}
+            communityId={communityId}
+            initialMeta={communityMeta}
+            avatarMediaId={detail.community.avatarMediaId}
+            communityName={communityName}
+            maxDevicesPerMember={detail.community.maxDevicesPerMember}
+            onDone={() => {
+              setShowSettings(false)
+              invalidate()
+            }}
+            onCancel={() => setShowSettings(false)}
+          />
+        </div>
       )}
 
       {showCreate && isLeader && (
-        <ChannelSettingsForm
-          communityId={communityId}
-          mode="create"
-          onDone={(channelId) => {
-            setShowCreate(false)
-            invalidate()
-            if (channelId) selectChannel(communityId, channelId)
-          }}
-          onCancel={() => setShowCreate(false)}
-        />
+        <div className="min-h-0 flex-1 overflow-y-auto pb-20 md:pb-0">
+          <ChannelSettingsForm
+            communityId={communityId}
+            mode="create"
+            onDone={(channelId) => {
+              setShowCreate(false)
+              invalidate()
+              if (channelId) selectChannel(communityId, channelId)
+            }}
+            onCancel={() => setShowCreate(false)}
+          />
+        </div>
       )}
 
       <div className="flex min-h-0 flex-1 flex-col">
@@ -428,7 +432,7 @@ function ChannelWorkspace({
       )}
 
       {view === 'settings' && canEdit && (
-        <div className="card min-h-0 flex-1 overflow-y-auto">
+        <div className="card min-h-0 flex-1 overflow-y-auto pb-20 md:pb-4">
           <ChannelSettingsForm
             key={meta ? 'loaded' : 'empty'}
             communityId={communityId}

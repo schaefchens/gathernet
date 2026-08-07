@@ -85,6 +85,7 @@ function ChatsScreen() {
                 </Link>
                 <Link
                   to="/communities"
+                  search={{ join: true }}
                   className="btn-icon h-9 w-9"
                   aria-label={t('chats.joinCommunity')}
                   title={t('chats.joinCommunity')}

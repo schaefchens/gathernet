@@ -150,3 +150,49 @@ export const CatalogIcon = (p: IconProps) =>
     </>,
     p,
   )
+
+export const SmileIcon = (p: IconProps) =>
+  svg(
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M8.5 14c.9 1.2 2.1 1.8 3.5 1.8s2.6-.6 3.5-1.8" />
+      <path d="M9.2 9.5h.01M14.8 9.5h.01" strokeWidth="2" />
+    </>,
+    p,
+  )
+
+export const ReplyIcon = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M9 7 4 12l5 5" />
+      <path d="M4 12h9a6 6 0 0 1 6 6v1" />
+    </>,
+    p,
+  )
+
+export const EditIcon = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M4 20h4l10-10a2.4 2.4 0 0 0-3.4-3.4L4.6 16.6 4 20Z" />
+      <path d="M13.5 7.5 16.5 10.5" />
+    </>,
+    p,
+  )
+
+export const TrashIcon = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M4.5 6.5h15M9.5 6.5V4.8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.7" />
+      <path d="M6.5 6.5 7.4 19a1.4 1.4 0 0 0 1.4 1.3h6.4A1.4 1.4 0 0 0 16.6 19l.9-12.5" />
+    </>,
+    p,
+  )
+
+export const FlagIcon = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M6 21V4" />
+      <path d="M6 4.6h10.5l-1.8 3.6 1.8 3.6H6" />
+    </>,
+    p,
+  )

@@ -26,7 +26,13 @@ import { DESKTOP_QUERY, useMediaQuery } from '../lib/use-media-query.ts'
 import { selectChannel } from '../stores/channel-selection.ts'
 import { communityChatStore } from '../stores/community-chat.ts'
 
-export const Route = createFileRoute('/communities/')({ component: CommunitiesScreen })
+export const Route = createFileRoute('/communities/')({
+  component: CommunitiesScreen,
+  /** `?join` arrives from the "Join a community" action, which should land on the
+   *  code form rather than on a list and a button to press. */
+  validateSearch: (search: Record<string, unknown>): { join?: boolean } =>
+    search.join === true || search.join === 'true' ? { join: true } : {},
+})
 
 const ROLE_BADGE: Record<CommunityRole, string> = {
   owner: 'text-gold border-gold',
@@ -39,8 +45,16 @@ type Panel = 'none' | 'create' | 'join'
 function CommunitiesScreen() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const [panel, setPanel] = useState<Panel>('none')
+  const { join } = Route.useSearch()
+  const [panel, setPanel] = useState<Panel>(join ? 'join' : 'none')
   const isDesktop = useMediaQuery(DESKTOP_QUERY)
+
+  // Follows the intent in both directions: arriving with `?join` opens the form even
+  // when the screen is already mounted, and navigating here plainly afterwards gives
+  // a clean list rather than a form left open from last time.
+  useEffect(() => {
+    setPanel(join ? 'join' : 'none')
+  }, [join])
 
   const communities = useQuery({
     queryKey: ['communities'],

@@ -377,6 +377,26 @@ button {
   color: var(--color-ink);
 }
 
+/* Icon action inside a message. Inherits the bubble's ink, so it reads correctly on
+   parchment, olive and violet alike. */
+.msg-action {
+  @apply grid h-5 w-5 shrink-0 place-items-center rounded transition-colors;
+  color: var(--color-ink-soft);
+}
+
+.msg-action:hover {
+  color: var(--color-ink);
+  background-color: color-mix(in oklab, currentColor 12%, transparent);
+}
+
+.msg-action-danger {
+  color: var(--color-danger);
+}
+
+.msg-action-danger:hover {
+  color: var(--color-danger);
+}
+
 /* Sender-name tints — assigned per sender, matching their avatar. */
 .tint-0 {
   color: #7a2233;

@@ -1,7 +1,18 @@
-import { useState } from 'react'
+import { type KeyboardEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import {
+  ConnectIcon,
+  EditIcon,
+  FlagIcon,
+  PinIcon,
+  PlusIcon,
+  ReplyIcon,
+  SmileIcon,
+  TrashIcon,
+} from '../../components/icons.tsx'
 import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
+import { HOVER_QUERY, useMediaQuery } from '../../lib/use-media-query.ts'
 import { MediaAttachment } from './MediaAttachment.tsx'
 import { PersonAvatar, tintIndex } from './PersonAvatar.tsx'
 
@@ -106,7 +117,6 @@ export function MessageBubble({
   flattenedParentName,
 }: MessageBubbleProps) {
   const { t } = useTranslation()
-  const [pickerOpen, setPickerOpen] = useState(false)
   const [customOpen, setCustomOpen] = useState(false)
   const [pinning, setPinning] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -124,6 +134,9 @@ export function MessageBubble({
   const [connectError, setConnectError] = useState<string | null>(null)
   const [connectSent, setConnectSent] = useState(false)
   const [rev, setRev] = useState<StoredMessage | null>(null)
+  const [actionsOpen, setActionsOpen] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const canHover = useMediaQuery(HOVER_QUERY)
 
   const inThread = threadDepth !== undefined
   const spent = !!message.viewOnceOpened
@@ -137,7 +150,6 @@ export function MessageBubble({
     if (!message.id) return
     const mine = message.reactions?.[emoji]?.includes(myAccountId ?? '') ?? false
     onReact?.(message.id, emoji, mine)
-    setPickerOpen(false)
     setCustomOpen(false)
   }
 
@@ -218,10 +230,29 @@ export function MessageBubble({
             {message.senderName}
           </p>
         )}
+        {/* On a touch screen the bubble itself reveals its actions — there is no hover
+            to reveal them, and a separate control per message is more clutter than the
+            actions it hides. Pointer devices keep the hover reveal and the bubble stays
+            inert. */}
         <div
           className={`bubble ${
             message.outgoing ? 'bubble-own' : nested ? 'bubble-nested' : 'bubble-in'
-          }`}
+          } relative ${!canHover && canAct ? 'cursor-pointer' : ''}`}
+          {...(!canHover && canAct
+            ? {
+                onClick: () => setActionsOpen((v) => !v),
+                // A touch device may still have a keyboard attached, so the same
+                // reveal is on Enter/Space rather than pointer-only.
+                onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+                  if (e.target !== e.currentTarget) return
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setActionsOpen((v) => !v)
+                  }
+                },
+                tabIndex: 0,
+              }
+            : {})}
         >
           {message.deletedAt ? (
             <p className="italic text-ink-faint">
@@ -281,13 +312,168 @@ export function MessageBubble({
               )}
             </>
           )}
-          <p className="text-[10px] text-ink-faint text-right mt-1">
-            {message.editedAt && !message.deletedAt && `${t('chat.edited')} · `}
-            {new Date(message.sentAt).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </p>
+          {/* Actions sit on the timestamp line, so revealing them costs no height and
+              the conversation never shifts. The row reserves the button height whether
+              or not they are showing. Hover on a pointer device; tap the bubble on a
+              touch screen. */}
+          <div className="relative mt-1 flex min-h-5 items-center gap-0.5">
+            {canAct && (canHover || actionsOpen) && (
+              <>
+                <button
+                  type="button"
+                  className="msg-action"
+                  title={t('chat.react')}
+                  aria-label={t('chat.react')}
+                  aria-expanded={pickerOpen}
+                  onClick={() => {
+                    setPickerOpen((v) => !v)
+                    setCustomOpen(false)
+                  }}
+                >
+                  <SmileIcon size={14} />
+                </button>
+                {onReply && (
+                  <button
+                    type="button"
+                    className="msg-action"
+                    title={t('chat.reply')}
+                    aria-label={t('chat.reply')}
+                    onClick={() => onReply(message)}
+                  >
+                    <ReplyIcon size={14} />
+                  </button>
+                )}
+                {onPin && !message.once && (
+                  <button
+                    type="button"
+                    className="msg-action"
+                    title={t('chat.pin')}
+                    aria-label={t('chat.pin')}
+                    onClick={() => setPinning((v) => !v)}
+                  >
+                    <PinIcon size={14} />
+                  </button>
+                )}
+                {canEdit && onEdit && (
+                  <button
+                    type="button"
+                    className="msg-action"
+                    title={t('chat.edit')}
+                    aria-label={t('chat.edit')}
+                    onClick={() => {
+                      setEditing(true)
+                      setEditDraft(message.text)
+                    }}
+                  >
+                    <EditIcon size={14} />
+                  </button>
+                )}
+                {canEdit && onDelete && (
+                  <button
+                    type="button"
+                    className="msg-action msg-action-danger"
+                    title={t('chat.delete')}
+                    aria-label={t('chat.delete')}
+                    onClick={() => message.id && onDelete(message.id, message.seq)}
+                  >
+                    <TrashIcon size={14} />
+                  </button>
+                )}
+                {onReport && !message.outgoing && (
+                  <button
+                    type="button"
+                    className="msg-action"
+                    title={t('chat.report')}
+                    aria-label={t('chat.report')}
+                    onClick={() => {
+                      setReportOpen(true)
+                      setReportReason('inappropriate')
+                      setReportNote('')
+                      setReportError(null)
+                    }}
+                  >
+                    <FlagIcon size={14} />
+                  </button>
+                )}
+                {onModRemove && !message.outgoing && (
+                  <button
+                    type="button"
+                    className="msg-action msg-action-danger"
+                    title={t('chat.modRemove')}
+                    aria-label={t('chat.modRemove')}
+                    onClick={() => setModRemoveConfirm(true)}
+                  >
+                    <TrashIcon size={14} />
+                  </button>
+                )}
+                {onConnect && !message.outgoing && !isFriend && !connectSent && (
+                  <button
+                    type="button"
+                    className="msg-action"
+                    title={t('connect.connect')}
+                    aria-label={t('connect.connect')}
+                    onClick={() => {
+                      setConnectOpen(true)
+                      setConnectDraft('')
+                      setConnectError(null)
+                    }}
+                  >
+                    <ConnectIcon size={14} />
+                  </button>
+                )}
+              </>
+            )}
+
+            <span className="ml-auto pl-2 text-[10px] text-ink-faint">
+              {message.editedAt && !message.deletedAt && `${t('chat.edited')} · `}
+              {new Date(message.sentAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+
+            {/* The one thing that floats: the reaction palette, so picking an emoji
+                doesn't resize the message either. */}
+            {pickerOpen && (
+              <div
+                className={`absolute bottom-full z-20 mb-1 flex w-max items-center gap-1 rounded-full border border-edge bg-raised px-2 py-1 shadow-lg shadow-black/30 ${
+                  alignEnd ? 'right-0' : 'left-0'
+                }`}
+              >
+                {REACTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className="text-base leading-none transition-transform hover:scale-125"
+                    onClick={() => applyReactionEmoji(emoji)}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+                {customOpen ? (
+                  <input
+                    className="w-12 px-1 py-0 text-base"
+                    placeholder="🙂"
+                    aria-label={t('chat.moreEmoji')}
+                    onChange={(e) => {
+                      const emoji = firstEmoji(e.target.value)
+                      if (emoji) applyReactionEmoji(emoji)
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="msg-action"
+                    title={t('chat.moreEmoji')}
+                    aria-label={t('chat.moreEmoji')}
+                    onClick={() => setCustomOpen(true)}
+                  >
+                    <PlusIcon size={14} />
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Thread chip — replies beneath this message (flat channel only). */}
@@ -325,101 +511,6 @@ export function MessageBubble({
           </div>
         )}
 
-        {/* Hover actions */}
-        {canAct && (
-          <div
-            className={`flex gap-2 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${
-              alignEnd ? 'justify-end' : ''
-            }`}
-          >
-            <button
-              type="button"
-              className="text-xs text-ink-faint hover:text-ink"
-              onClick={() => {
-                setPickerOpen((v) => !v)
-                setCustomOpen(false)
-              }}
-            >
-              {t('chat.react')}
-            </button>
-            {onReply && (
-              <button
-                type="button"
-                className="text-xs text-ink-faint hover:text-ink"
-                onClick={() => onReply(message)}
-              >
-                {t('chat.reply')}
-              </button>
-            )}
-            {onPin && !message.once && (
-              <button
-                type="button"
-                className="text-xs text-ink-faint hover:text-ink"
-                onClick={() => setPinning((v) => !v)}
-              >
-                {t('chat.pin')}
-              </button>
-            )}
-            {canEdit && onEdit && (
-              <button
-                type="button"
-                className="text-xs text-ink-faint hover:text-ink"
-                onClick={() => {
-                  setEditing(true)
-                  setEditDraft(message.text)
-                }}
-              >
-                {t('chat.edit')}
-              </button>
-            )}
-            {canEdit && onDelete && (
-              <button
-                type="button"
-                className="text-xs text-danger/80 hover:text-danger"
-                onClick={() => message.id && onDelete(message.id, message.seq)}
-              >
-                {t('chat.delete')}
-              </button>
-            )}
-            {onReport && !message.outgoing && (
-              <button
-                type="button"
-                className="text-xs text-ink-faint hover:text-danger"
-                onClick={() => {
-                  setReportOpen(true)
-                  setReportReason('inappropriate')
-                  setReportNote('')
-                  setReportError(null)
-                }}
-              >
-                {t('chat.report')}
-              </button>
-            )}
-            {onModRemove && !message.outgoing && (
-              <button
-                type="button"
-                className="text-xs text-danger/80 hover:text-danger"
-                onClick={() => setModRemoveConfirm(true)}
-              >
-                {t('chat.modRemove')}
-              </button>
-            )}
-            {onConnect && !message.outgoing && !isFriend && !connectSent && (
-              <button
-                type="button"
-                className="text-xs text-indigo-soft hover:text-ink"
-                onClick={() => {
-                  setConnectOpen(true)
-                  setConnectDraft('')
-                  setConnectError(null)
-                }}
-              >
-                {t('connect.connect')}
-              </button>
-            )}
-          </div>
-        )}
-
         {modRemoveConfirm && onModRemove && (
           <div
             className={`mt-1 flex items-center gap-2 rounded-md border border-danger/40 bg-danger/10 px-2 py-1 ${
@@ -453,42 +544,6 @@ export function MessageBubble({
             >
               {t('common.cancel')}
             </button>
-          </div>
-        )}
-        {pickerOpen && (
-          <div className={`flex items-center gap-1 mt-1 ${alignEnd ? 'justify-end' : ''}`}>
-            {REACTIONS.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                className="text-base hover:scale-125 transition-transform"
-                onClick={() => applyReactionEmoji(emoji)}
-              >
-                {emoji}
-              </button>
-            ))}
-            {customOpen ? (
-              <input
-                // biome-ignore lint/a11y/noAutofocus: focus is required to open the native emoji picker
-                autoFocus
-                className="w-14 text-base px-1 py-0.5"
-                placeholder="🙂"
-                aria-label={t('chat.moreEmoji')}
-                onChange={(e) => {
-                  const emoji = firstEmoji(e.target.value)
-                  if (emoji) applyReactionEmoji(emoji)
-                }}
-              />
-            ) : (
-              <button
-                type="button"
-                className="text-base text-ink-faint hover:text-ink px-1"
-                title={t('chat.moreEmoji')}
-                onClick={() => setCustomOpen(true)}
-              >
-                ＋
-              </button>
-            )}
           </div>
         )}
         {onPin && pinning && (
