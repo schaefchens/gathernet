@@ -524,12 +524,19 @@ button {
   color: var(--color-gold-bright);
 }
 
-/* Elevated centre action in the mobile tab bar. */
+/*
+ * Elevated centre action in the mobile tab bar.
+ *
+ * The disc is 56px but takes up an icon's 22px of layout: the negative margin is the
+ * 34px difference, so all five tabs are the same height and the bar can close to an
+ * even 8px above and below. Every pixel of the disc beyond that slot hangs upward,
+ * over the bar's top edge, which is the point of it.
+ */
 .tab-action {
   @apply grid place-items-center rounded-full;
   width: 3.5rem;
   height: 3.5rem;
-  margin-top: -1.5rem;
+  margin-top: -2.125rem;
   color: var(--color-gold-bright);
   background-color: var(--color-accent-surface);
   border: 2px solid var(--color-gold);

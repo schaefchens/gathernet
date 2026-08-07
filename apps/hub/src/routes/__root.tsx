@@ -198,14 +198,15 @@ function AppShell() {
             Neither variant pads its content: a page owns its own inset, so a header
             bar or a parchment canvas can run to the window edge while the prose
             inside it stays inset. The only padding here is the room the fixed
-            mobile tab bar needs — the shell is the only thing that knows it. The
-            bar is `fixed`, so nothing else reserves space for it; 72px clears the
-            elevated Connect action, which is the tallest thing in it. */}
+            mobile tab bar needs — the shell is the only thing that knows it. The bar
+            is `fixed`, so nothing else reserves space for it: 62px is its 60px plus
+            a hair. Connect's disc hangs above that line by design and is not
+            reserved for. */}
         <main
           className={
             isConversation(pathname)
-              ? 'flex min-h-0 flex-1 flex-col overflow-hidden pb-[calc(72px+env(safe-area-inset-bottom))] md:pb-0'
-              : 'w-full flex-1 overflow-y-auto mx-auto max-w-4xl pb-[calc(72px+env(safe-area-inset-bottom))] md:pb-0'
+              ? 'flex min-h-0 flex-1 flex-col overflow-hidden pb-[calc(62px+env(safe-area-inset-bottom))] md:pb-0'
+              : 'w-full flex-1 overflow-y-auto mx-auto max-w-4xl pb-[calc(62px+env(safe-area-inset-bottom))] md:pb-0'
           }
         >
           <Outlet />
