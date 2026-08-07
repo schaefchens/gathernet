@@ -498,9 +498,21 @@ button {
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-gold) 40%, transparent);
 }
 
+/*
+ * Tab bar item. `min-w-0` is what makes `flex-1` mean equal: without it a flex item
+ * cannot shrink below its content, so "Communities" simply took more room than
+ * "Chats" and the labels ran into each other. The label is sans, not the display
+ * serif — 11px is below where an old-style face holds its shape, and it is the same
+ * job `.section-label` does in sans elsewhere.
+ */
 .tab-item {
-  @apply flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-display transition-colors;
+  @apply flex min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[11px] transition-colors;
   color: var(--color-ink-soft);
+}
+
+/* Ellipsis rather than a collision on the narrowest phones. */
+.tab-label {
+  @apply w-full truncate text-center;
 }
 
 .tab-item[aria-current="page"] {

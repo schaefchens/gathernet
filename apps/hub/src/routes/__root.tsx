@@ -219,7 +219,7 @@ function AppShell() {
           >
             <Link to="/" className="tab-item" aria-current={isCurrent('/') ? 'page' : undefined}>
               <ChatIcon size={22} />
-              {t('nav.chats')}
+              <span className="tab-label">{t('nav.chats')}</span>
             </Link>
             <Link
               to="/communities"
@@ -227,7 +227,7 @@ function AppShell() {
               aria-current={isCurrent('/communities') ? 'page' : undefined}
             >
               <CommunityIcon size={22} />
-              {t('nav.communities')}
+              <span className="tab-label">{t('nav.communities')}</span>
             </Link>
             <Link
               to="/friends/add"
@@ -238,7 +238,9 @@ function AppShell() {
               <span className="tab-action">
                 <ConnectIcon size={24} />
               </span>
-              <span aria-hidden>{t('nav.connect')}</span>
+              <span className="tab-label" aria-hidden>
+                {t('nav.connect')}
+              </span>
             </Link>
             <Link
               to="/catalog"
@@ -246,7 +248,7 @@ function AppShell() {
               aria-current={isCurrent('/catalog') ? 'page' : undefined}
             >
               <CatalogIcon size={22} />
-              {t('nav.catalog')}
+              <span className="tab-label">{t('nav.catalog')}</span>
             </Link>
             <Link
               to="/settings"
@@ -254,7 +256,7 @@ function AppShell() {
               aria-current={isCurrent('/settings') ? 'page' : undefined}
             >
               <SettingsIcon size={22} />
-              {t('settings.title')}
+              <span className="tab-label">{t('settings.title')}</span>
             </Link>
           </nav>
         )}
