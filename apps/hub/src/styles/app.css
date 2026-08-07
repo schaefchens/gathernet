@@ -117,6 +117,33 @@ body {
   border: 1px solid color-mix(in oklab, var(--color-gold) 45%, transparent);
 }
 
+/*
+ * Placeholder shapes for content that is still being fetched or decrypted. MLS
+ * setup and message decryption are genuinely slow on first open, and a shape that
+ * matches the eventual layout reads as progress where a "Loading…" line reads as
+ * a stall.
+ */
+.skeleton {
+  @apply rounded-md;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--color-ink) 6%, transparent),
+    color-mix(in oklab, var(--color-ink) 12%, transparent),
+    color-mix(in oklab, var(--color-ink) 6%, transparent)
+  );
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
 .section-label {
   @apply text-[11px] font-medium uppercase tracking-[0.14em] text-ink-faint;
 }

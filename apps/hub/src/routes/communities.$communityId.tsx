@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { CommunityIcon, LockIcon } from '../components/icons.tsx'
 import { ChannelChat } from '../features/communities/ChannelChat.tsx'
 import { ChannelJoinPanel } from '../features/communities/ChannelJoinPanel.tsx'
+import { ChannelList } from '../features/communities/ChannelList.tsx'
 import { ChannelSettingsForm } from '../features/communities/ChannelSettingsForm.tsx'
 import { ClampedMarkdown } from '../features/communities/ClampedMarkdown.tsx'
 import { AvatarUploader, CommunityAvatar } from '../features/communities/CommunityAvatar.tsx'
@@ -20,6 +21,8 @@ import { ModerationPanel } from '../features/communities/ModerationPanel.tsx'
 import { channelFallbackTitle, useDecryptedMeta } from '../features/communities/meta.ts'
 import { api } from '../lib/api.ts'
 import { type ChannelMeta, type CommunityMeta, getKMeta, sealMeta } from '../lib/community-keys.ts'
+import { DESKTOP_QUERY, useMediaQuery } from '../lib/use-media-query.ts'
+import { selectChannel, useChannelSelection } from '../stores/channel-selection.ts'
 import { communityChatStore } from '../stores/community-chat.ts'
 import { useSession } from '../stores/session.ts'
 
@@ -64,22 +67,25 @@ function CommunityDetailScreen() {
   )
   const communityName = communityMeta?.name ?? t('communities.encryptedName')
 
-  const [selected, setSelected] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const isDesktop = useMediaQuery(DESKTOP_QUERY)
+  // The channel list lives in the sidebar on desktop and in this page on mobile,
+  // so the selection is shared state rather than local to either.
+  const selected = useChannelSelection((s) => s.byCommunity[communityId] ?? null)
 
   const sorted = [...channels].sort((a, b) => a.position - b.position)
 
   // Keep the selection valid as channels appear/disappear (WS-driven refetch).
   useEffect(() => {
     if (sorted.length === 0) {
-      setSelected(null)
+      selectChannel(communityId, null)
       return
     }
     if (!selected || !sorted.some((c) => c.channelId === selected)) {
-      setSelected(sorted[0]?.channelId ?? null)
+      selectChannel(communityId, sorted[0]?.channelId ?? null)
     }
-  }, [sorted, selected])
+  }, [sorted, selected, communityId])
 
   const selectedChannel = sorted.find((c) => c.channelId === selected) ?? null
 
@@ -139,9 +145,7 @@ function CommunityDetailScreen() {
     },
   })
 
-  const onDeleteChannel = (channelId: string) => {
-    if (confirm(t('communities.deleteChannelConfirm'))) deleteChannel.mutate(channelId)
-  }
+  const onDeleteChannel = (channelId: string) => deleteChannel.mutate(channelId)
 
   if (detailQuery.isLoading) {
     return <p className="text-ink-soft">{t('common.loading')}</p>
@@ -205,13 +209,22 @@ function CommunityDetailScreen() {
             </span>
           </div>
           {isLeader && (
-            <button
-              type="button"
-              className="btn-quiet shrink-0 text-xs px-2 py-1"
-              onClick={() => setShowSettings((s) => !s)}
-            >
-              {t('communities.communitySettings')}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-quiet shrink-0 text-xs px-2 py-1"
+                onClick={() => setShowCreate((s) => !s)}
+              >
+                {t('communities.addChannel')}
+              </button>
+              <button
+                type="button"
+                className="btn-quiet shrink-0 text-xs px-2 py-1"
+                onClick={() => setShowSettings((s) => !s)}
+              >
+                {t('communities.communitySettings')}
+              </button>
+            </>
           )}
         </div>
 
@@ -239,67 +252,30 @@ function CommunityDetailScreen() {
         />
       )}
 
-      <div className="grid md:grid-cols-3 gap-4 md:flex-1 md:min-h-0">
-        <div className="md:col-span-1 space-y-4 md:overflow-y-auto md:min-h-0">
-          <section className="card space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="font-medium text-ink-soft">{t('communities.channels')}</h2>
-              {isLeader && (
-                <button
-                  type="button"
-                  className="btn-quiet text-xs px-2 py-1"
-                  onClick={() => setShowCreate((s) => !s)}
-                >
-                  {t('communities.addChannel')}
-                </button>
-              )}
-            </div>
+      {showCreate && isLeader && (
+        <ChannelSettingsForm
+          communityId={communityId}
+          mode="create"
+          onDone={(channelId) => {
+            setShowCreate(false)
+            invalidate()
+            if (channelId) selectChannel(communityId, channelId)
+          }}
+          onCancel={() => setShowCreate(false)}
+        />
+      )}
 
-            {showCreate && isLeader && (
-              <ChannelSettingsForm
-                communityId={communityId}
-                mode="create"
-                onDone={(channelId) => {
-                  setShowCreate(false)
-                  invalidate()
-                  if (channelId) setSelected(channelId)
-                }}
-                onCancel={() => setShowCreate(false)}
-              />
-            )}
+      {/* Below `md` there is no sidebar, so the channel switcher lives here —
+          above the conversation, since that is what you came for. */}
+      {!isDesktop && (
+        <section className="card space-y-2 p-3">
+          <h2 className="section-label">{t('communities.channels')}</h2>
+          <ChannelList communityId={communityId} />
+        </section>
+      )}
 
-            {sorted.length === 0 && (
-              <p className="text-xs text-ink-faint">{t('communities.noChannels')}</p>
-            )}
-            <ul className="space-y-1">
-              {sorted.map((channel) => (
-                <ChannelRow
-                  key={channel.channelId}
-                  communityId={communityId}
-                  channel={channel}
-                  active={channel.channelId === selected}
-                  onSelect={() => setSelected(channel.channelId)}
-                />
-              ))}
-            </ul>
-          </section>
-
-          <MemberPanel
-            communityId={communityId}
-            myRole={detail.myRole}
-            myAccountId={myAccountId}
-            members={detail.members}
-            memberCount={detail.memberCount}
-            memberBucket={detail.memberBucket}
-            channelIds={sorted.map((c) => c.channelId)}
-          />
-
-          {isLeader && <InvitePanel communityId={communityId} />}
-        </div>
-
-        {/* Chat first on mobile — opening a community should land you in the
-            conversation, not above three panels of settings. */}
-        <div className="order-first md:order-none md:col-span-2 md:min-h-0 md:flex md:flex-col">
+      <div className="flex flex-col gap-4 md:flex-1 md:min-h-0 md:flex-row">
+        <div className="min-w-0 flex-1 md:flex md:min-h-0 md:flex-col">
           {selectedChannel ? (
             <ChannelWorkspace
               key={selectedChannel.channelId}
@@ -317,70 +293,23 @@ function CommunityDetailScreen() {
             </div>
           )}
         </div>
+
+        {/* Who is here and how to invite them — a companion panel, not a column
+            the conversation has to share space with. */}
+        <aside className="space-y-4 md:w-[320px] md:shrink-0 md:overflow-y-auto md:min-h-0">
+          <MemberPanel
+            communityId={communityId}
+            myRole={detail.myRole}
+            myAccountId={myAccountId}
+            members={detail.members}
+            memberCount={detail.memberCount}
+            memberBucket={detail.memberBucket}
+            channelIds={sorted.map((c) => c.channelId)}
+          />
+          {isLeader && <InvitePanel communityId={communityId} />}
+        </aside>
       </div>
     </div>
-  )
-}
-
-function ChannelRow({
-  communityId,
-  channel,
-  active,
-  onSelect,
-}: {
-  communityId: string
-  channel: CommunityChannel
-  active: boolean
-  onSelect: () => void
-}) {
-  const { t } = useTranslation()
-  const meta = useDecryptedMeta<ChannelMeta>(communityId, channel.metaCiphertext)
-  const title = meta?.title ?? channelFallbackTitle(channel.channelId)
-
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={onSelect}
-        className={`w-full flex items-center gap-2 text-left rounded-md px-2 py-1.5 text-sm transition-colors ${
-          active ? 'bg-overlay text-gold' : 'text-ink-soft hover:text-ink hover:bg-overlay/50'
-        }`}
-      >
-        {channel.avatarMediaId ? (
-          <CommunityAvatar
-            communityId={communityId}
-            mediaId={channel.avatarMediaId}
-            label={meta?.emoji ?? title}
-            size="sm"
-          />
-        ) : (
-          <span className="h-8 w-8 shrink-0 grid place-items-center rounded-md bg-overlay text-ink-faint">
-            {meta?.emoji ?? '#'}
-          </span>
-        )}
-        <span className="truncate flex-1">{title}</span>
-        {channel.access === 'leaders' && (
-          <span title={t('communities.access.leaders')} aria-hidden>
-            🔒
-          </span>
-        )}
-        {channel.visibility === 'unlisted' && (
-          <span className="text-[10px] text-ink-faint uppercase tracking-wide">
-            {t('communities.visibility.unlisted')}
-          </span>
-        )}
-        {channel.myStatus === 'pending' && (
-          <span className="text-[10px] uppercase tracking-wide text-amber">
-            {t('communities.requested')}
-          </span>
-        )}
-        {channel.myStatus === 'invited' && (
-          <span className="text-[10px] uppercase tracking-wide text-gold">
-            {t('communities.invited')}
-          </span>
-        )}
-      </button>
-    </li>
   )
 }
 

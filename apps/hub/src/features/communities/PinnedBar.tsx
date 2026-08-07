@@ -1,6 +1,7 @@
 import type { ChannelPinPolicy } from '@gathernet/shared'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { PinIcon } from '../../components/icons.tsx'
 import { ApiError } from '../../lib/api.ts'
 import type { ArtifactBody, VerifiedArtifact } from '../../lib/artifacts.ts'
 import { encryptAndUpload } from '../../lib/media.ts'
@@ -252,7 +253,7 @@ export function PinnedBar({
           className="flex flex-1 items-center gap-2 text-left"
           onClick={() => setCollapsed((c) => !c)}
         >
-          <span aria-hidden>📌</span>
+          <PinIcon size={14} />
           <span className="flex-1">{t('pins.title', { count: pins.length + events.length })}</span>
         </button>
         {canCreate && (

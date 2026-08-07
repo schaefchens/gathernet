@@ -226,61 +226,67 @@ export function MessageThread({
           palette from the .parchment scope in app.css. */}
       <div
         ref={listRef}
-        className="parchment flex-1 overflow-y-auto rounded-lg px-3 py-4 space-y-2"
+        className="parchment flex flex-1 flex-col overflow-y-auto rounded-lg px-3 py-4"
         onScroll={() => {
           const el = listRef.current
           if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
         }}
       >
-        {!ready && (
-          <p className="text-center text-sm text-amber py-8">
-            {notReadyLabel ?? t('chat.settingUp')}
-          </p>
-        )}
-        {ready && timeline.length === 0 && (
-          <p className="text-center text-sm text-ink-faint py-8">{t('chat.noMessages')}</p>
-        )}
-        {timeline.map((message, i) => {
-          const prev = timeline[i - 1]
-          const showSender =
-            !message.outgoing &&
-            !!message.senderName &&
-            prev?.senderAccountId !== message.senderAccountId
-          const replyCount =
-            threadIndex && message.id ? (threadIndex.descendantCount.get(message.id) ?? 0) : 0
-          const newDay = !prev || dayKey(prev.sentAt) !== dayKey(message.sentAt)
-          return (
-            <div key={message.seq} className="space-y-2">
-              {newDay && (
-                <p className="rule-orn py-2">
-                  {new Date(message.sentAt).toLocaleDateString(undefined, {
-                    day: 'numeric',
-                    month: 'long',
-                  })}
-                </p>
-              )}
-              <MessageBubble
-                message={message}
-                quoted={!threaded && message.replyTo ? byId.get(message.replyTo) : null}
-                showSender={showSender}
-                myAccountId={myAccountId}
-                onReact={onReact}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                onConsume={onConsume}
-                onPin={onPin}
-                onReport={onReport}
-                onModRemove={onModRemove}
-                onConnect={onConnect}
-                isFriend={friendSet.has(message.senderAccountId)}
-                onReply={onReply}
-                replyCount={replyCount}
-                onOpenThread={threaded ? openThreadFor : undefined}
-              />
-            </div>
-          )
-        })}
-        <div ref={bottomRef} />
+        {/* `mt-auto` sits the conversation on the bottom edge of the page when it is
+            shorter than the canvas, the way a chat should read. Done on the inner
+            wrapper rather than with justify-end, which breaks scrolling once the
+            content overflows. */}
+        <div className="mt-auto space-y-2">
+          {!ready && (
+            <p className="text-center text-sm text-amber py-8">
+              {notReadyLabel ?? t('chat.settingUp')}
+            </p>
+          )}
+          {ready && timeline.length === 0 && (
+            <p className="text-center text-sm text-ink-faint py-8">{t('chat.noMessages')}</p>
+          )}
+          {timeline.map((message, i) => {
+            const prev = timeline[i - 1]
+            const showSender =
+              !message.outgoing &&
+              !!message.senderName &&
+              prev?.senderAccountId !== message.senderAccountId
+            const replyCount =
+              threadIndex && message.id ? (threadIndex.descendantCount.get(message.id) ?? 0) : 0
+            const newDay = !prev || dayKey(prev.sentAt) !== dayKey(message.sentAt)
+            return (
+              <div key={message.seq} className="space-y-2">
+                {newDay && (
+                  <p className="rule-orn py-2">
+                    {new Date(message.sentAt).toLocaleDateString(undefined, {
+                      day: 'numeric',
+                      month: 'long',
+                    })}
+                  </p>
+                )}
+                <MessageBubble
+                  message={message}
+                  quoted={!threaded && message.replyTo ? byId.get(message.replyTo) : null}
+                  showSender={showSender}
+                  myAccountId={myAccountId}
+                  onReact={onReact}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onConsume={onConsume}
+                  onPin={onPin}
+                  onReport={onReport}
+                  onModRemove={onModRemove}
+                  onConnect={onConnect}
+                  isFriend={friendSet.has(message.senderAccountId)}
+                  onReply={onReply}
+                  replyCount={replyCount}
+                  onOpenThread={threaded ? openThreadFor : undefined}
+                />
+              </div>
+            )
+          })}
+          <div ref={bottomRef} />
+        </div>
       </div>
 
       {readOnly ? (

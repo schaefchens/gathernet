@@ -152,13 +152,17 @@ test('communities v2: encrypted metadata, K_meta out-of-band, open + request joi
   await expect(aliceInput).toBeEnabled({ timeout: 40_000 })
   await aliceInput.fill('Peace be with you all')
   await alice.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect(bob.getByText('Peace be with you all')).toBeVisible({ timeout: 40_000 })
+  await expect(bob.getByRole('main').getByText('Peace be with you all')).toBeVisible({
+    timeout: 40_000,
+  })
 
   const bobInput = bob.getByPlaceholder('Message…')
   await expect(bobInput).toBeEnabled({ timeout: 40_000 })
   await bobInput.fill('And also with you')
   await bob.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect(alice.getByText('And also with you')).toBeVisible({ timeout: 40_000 })
+  await expect(alice.getByRole('main').getByText('And also with you')).toBeVisible({
+    timeout: 40_000,
+  })
 
   // A by-request channel: Bob requests, waits, and a moderator (Alice) accepts.
   await addChannel(alice, { title: 'prayer', joinPolicy: 'request' })
@@ -246,7 +250,9 @@ test('mega-communities: group_key channel — scalable channel, bidirectional E2
   await aliceInput.fill('Grace and peace to the whole congregation')
   await alice.getByRole('button', { name: 'Send', exact: true }).click()
   // Bob obtains the grant, verifies the sender, and decrypts — proving group_key E2EE.
-  await expect(bob.getByText('Grace and peace to the whole congregation')).toBeVisible({
+  await expect(
+    bob.getByRole('main').getByText('Grace and peace to the whole congregation'),
+  ).toBeVisible({
     timeout: 60_000,
   })
 
@@ -255,7 +261,9 @@ test('mega-communities: group_key channel — scalable channel, bidirectional E2
   await expect(bobInput).toBeEnabled({ timeout: 40_000 })
   await bobInput.fill('And also with you')
   await bob.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect(alice.getByText('And also with you')).toBeVisible({ timeout: 60_000 })
+  await expect(alice.getByRole('main').getByText('And also with you')).toBeVisible({
+    timeout: 60_000,
+  })
 
   await ctxA.close()
   await ctxB.close()
@@ -333,7 +341,6 @@ test('communities v2: removing a member rotates K_meta; remaining members re-key
   const { page: alice } = await newUser(ctxA, 'Pastor Alice')
   const { page: bob } = await newUser(ctxB, 'Member Bob')
   const { page: carol } = await newUser(ctxC, 'Member Carol')
-  alice.on('dialog', (d) => void d.accept()) // the Remove confirm()
 
   // Alice creates the community and grabs the K_meta invite link.
   await alice.getByRole('link', { name: 'Communities' }).click()
@@ -359,11 +366,10 @@ test('communities v2: removing a member rotates K_meta; remaining members re-key
 
   // Alice removes Carol → the server flags rotation + nudges Alice, whose client
   // rotates K_meta (re-encrypts metadata under a new epoch, re-grants Alice+Bob).
-  await alice
-    .getByRole('listitem')
-    .filter({ hasText: 'Member Carol' })
-    .getByRole('button', { name: 'Remove' })
-    .click()
+  const carolRow = alice.getByRole('listitem').filter({ hasText: 'Member Carol' })
+  // Destructive actions confirm inline: the first click arms, the second commits.
+  await carolRow.getByRole('button', { name: 'Remove' }).click()
+  await carolRow.getByRole('button', { name: 'Remove' }).click()
 
   // Carol loses access to the community.
   await expect(carol.getByRole('heading', { name: 'Grace Fellowship' })).toHaveCount(0, {

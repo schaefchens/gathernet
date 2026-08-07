@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ConfirmButton } from '../components/ConfirmButton.tsx'
 import { AppIcon, SCOPE_CHIP_KEYS } from '../features/apps/ConsentCard.tsx'
 import { PushSettings } from '../features/pwa/PushSettings.tsx'
 import { setLanguage } from '../i18n/index.ts'
@@ -132,17 +133,12 @@ function SettingsScreen() {
                 </p>
               </div>
               {!device.isCurrent && device.status === 'active' && currentDeviceId && (
-                <button
-                  type="button"
+                <ConfirmButton
+                  label={t('settings.revoke')}
+                  question={t('settings.revokeConfirm', { name: device.name })}
                   className="btn-danger text-xs px-2 py-1"
-                  onClick={() => {
-                    if (confirm(t('settings.revokeConfirm', { name: device.name }))) {
-                      revokeDevice.mutate(device.deviceId)
-                    }
-                  }}
-                >
-                  {t('settings.revoke')}
-                </button>
+                  onConfirm={() => revokeDevice.mutate(device.deviceId)}
+                />
               )}
             </li>
           ))}
@@ -177,17 +173,12 @@ function SettingsScreen() {
                   {t('apps.lastUsed', { when: new Date(grant.lastUsedAt).toLocaleDateString() })}
                 </p>
               </div>
-              <button
-                type="button"
+              <ConfirmButton
+                label={t('apps.revoke')}
+                question={t('apps.revokeConfirm', { name: grant.name })}
                 className="btn-danger text-xs px-2 py-1"
-                onClick={() => {
-                  if (confirm(t('apps.revokeConfirm', { name: grant.name }))) {
-                    revokeGrant.mutate(grant.appId)
-                  }
-                }}
-              >
-                {t('apps.revoke')}
-              </button>
+                onConfirm={() => revokeGrant.mutate(grant.appId)}
+              />
             </li>
           ))}
         </ul>
@@ -197,7 +188,7 @@ function SettingsScreen() {
       </section>
 
       <button type="button" className="btn-quiet w-full" onClick={lock}>
-        🔒 {t('unlock.action')}
+        {t('unlock.action')}
       </button>
     </div>
   )

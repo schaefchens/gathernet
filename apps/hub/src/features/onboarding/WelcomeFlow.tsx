@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ShieldIcon } from '../../components/icons.tsx'
 import { ApiError } from '../../lib/api.ts'
 import { loadCrypto } from '../../lib/mls.ts'
 import { useSession } from '../../stores/session.ts'
@@ -199,37 +200,64 @@ function NameStep(props: { onBack(): void; onNext(name: string): void }) {
   )
 }
 
+/**
+ * The highest-stakes screen in the product: these twelve words ARE the account,
+ * and nobody — including us — can reset them.
+ *
+ * Two deliberate choices. The words start blurred behind a reveal, because the
+ * screen may be shared, projected, or overlooked and the phrase should not be
+ * exposed the instant the step opens. And there is NO copy button: putting a
+ * recovery phrase on the system clipboard hands it to every clipboard manager,
+ * sync service, and app that reads it. Paper is the recommended medium, so the
+ * screen says so instead of offering a convenient way to do the wrong thing.
+ */
 function PhraseStep(props: { phrase: string; onBack(): void; onNext(): void }) {
   const { t } = useTranslation()
   const words = useMemo(() => props.phrase.split(' '), [props.phrase])
-  const [copied, setCopied] = useState(false)
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(props.phrase)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // clipboard unavailable (permissions / insecure context) — no-op
-    }
-  }
+  const [revealed, setRevealed] = useState(false)
 
   return (
     <div className="card space-y-4">
-      <h2 className="font-display text-2xl">{t('create.phraseTitle')}</h2>
-      <p className="text-sm text-amber">{t('create.phraseWarning')}</p>
-      <ol className="grid grid-cols-3 gap-2 select-none" aria-label="recovery phrase">
-        {words.map((word, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: static per-render word list
-          <li key={`${i}-${word}`} className="phrase-word">
-            <span className="text-ink-faint mr-1">{i + 1}.</span>
-            {word}
-          </li>
-        ))}
-      </ol>
-      <button type="button" className="btn-quiet text-sm w-full" onClick={copy}>
-        {copied ? t('common.copied') : t('common.copy')}
-      </button>
+      <div className="flex items-center gap-3">
+        <span className="seal h-11 w-11" aria-hidden>
+          <ShieldIcon size={22} />
+        </span>
+        <h2 className="font-display text-2xl text-gold-bright">{t('create.phraseTitle')}</h2>
+      </div>
+
+      <p className="banner-alert text-xs leading-relaxed">{t('create.phraseWarning')}</p>
+
+      <div className="relative">
+        <ol
+          className={`grid grid-cols-3 gap-2 select-none transition-[filter] ${
+            revealed ? '' : 'blur-sm'
+          }`}
+          aria-label="recovery phrase"
+        >
+          {words.map((word, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: static per-render word list
+            <li key={`${i}-${word}`} className="phrase-word">
+              <span className="text-ink-faint mr-1">{i + 1}.</span>
+              {word}
+            </li>
+          ))}
+        </ol>
+        {!revealed && (
+          <button
+            type="button"
+            className="absolute inset-0 grid place-items-center rounded-md bg-overlay/70"
+            onClick={() => setRevealed(true)}
+          >
+            <span className="space-y-1 text-center">
+              <span className="block font-medium text-gold-bright">{t('create.phraseReveal')}</span>
+              <span className="block text-xs text-ink-soft">{t('create.phraseRevealHint')}</span>
+            </span>
+          </button>
+        )}
+      </div>
+
+      <p className="text-xs text-ink-faint leading-relaxed">{t('create.phraseNoCopy')}</p>
+
       <StepButtons
         onBack={props.onBack}
         nextLabel={t('create.phraseWritten')}

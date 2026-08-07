@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ChatIcon } from '../components/icons.tsx'
 import { ChatList } from '../features/chat/ChatList.tsx'
 import { api } from '../lib/api.ts'
 import { openConnectRequest } from '../lib/connect.ts'
@@ -105,7 +106,19 @@ function ChatsScreen() {
       {/* The sidebar owns this list on desktop; rendering it here too would put every
           conversation in the DOM twice. Below `md` there is no sidebar, so it lives here. */}
       {isDesktop ? (
-        <p className="card py-12 text-center text-ink-soft">{t('chats.pickOne')}</p>
+        <div className="card grid min-h-[55vh] place-items-center text-center">
+          <div className="space-y-3">
+            <span className="seal mx-auto h-14 w-14" aria-hidden>
+              <ChatIcon size={26} />
+            </span>
+            <p className="font-display text-xl text-ink-soft">{t('chats.pickOne')}</p>
+            {/* No "Add friend" here — the page header already offers it, and two
+                links with the same name is one too many for anyone navigating by name. */}
+            <Link to="/communities" className="btn-quiet text-sm">
+              {t('chats.browseCommunities')}
+            </Link>
+          </div>
+        </div>
       ) : (
         <ChatList manage />
       )}

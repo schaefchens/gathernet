@@ -59,9 +59,12 @@ export function PersonAvatar({
       >
         {initials(label)}
       </span>
+      {/* Decorative: the row spells the status out in text, so the dot must not
+          repeat it to a screen reader. */}
       {status && (
         <span
           className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-night ${DOT[status]}`}
+          aria-hidden
         />
       )}
     </span>

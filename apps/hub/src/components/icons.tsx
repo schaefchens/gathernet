@@ -116,3 +116,22 @@ export const EyeIcon = (p: IconProps) =>
   )
 
 export const CloseIcon = (p: IconProps) => svg(<path d="m6 6 12 12M18 6 6 18" />, p)
+
+export const MoreIcon = (p: IconProps) =>
+  svg(
+    <>
+      <circle cx="5" cy="12" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1.1" fill="currentColor" stroke="none" />
+    </>,
+    p,
+  )
+
+export const PinIcon = (p: IconProps) =>
+  svg(
+    <>
+      <path d="M9 3h6l-1 5 3.5 3.5H6.5L10 8 9 3Z" />
+      <path d="M12 11.5V21" />
+    </>,
+    p,
+  )

@@ -10,6 +10,7 @@ import type {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ConfirmButton } from '../../components/ConfirmButton.tsx'
 import { ApiError, api } from '../../lib/api.ts'
 import { makeDeviceResolver } from '../../lib/community-keys.ts'
 import { openReport, type ReportBody } from '../../lib/reports.ts'
@@ -395,11 +396,7 @@ export function ModerationPanel({
               isCommunityLeader={communityLeaderIds.has(member.accountId)}
               isLeader={isLeader}
               busy={kick.isPending || setModerator.isPending || setMuted.isPending}
-              onKick={() => {
-                if (confirm(t('communities.kickConfirm', { name: member.displayName }))) {
-                  kick.mutate(member.accountId)
-                }
-              }}
+              onKick={() => kick.mutate(member.accountId)}
               onToggleModerator={() =>
                 setModerator.mutate({
                   accountId: member.accountId,
@@ -526,14 +523,13 @@ function MemberRow({
         </button>
       )}
       {canModerate && (
-        <button
-          type="button"
+        <ConfirmButton
+          label={t('communities.kickFromChannel')}
+          question={t('communities.kickConfirm', { name: member.displayName })}
           className="btn-danger text-xs px-2 py-1"
           disabled={busy}
-          onClick={onKick}
-        >
-          {t('communities.kickFromChannel')}
-        </button>
+          onConfirm={onKick}
+        />
       )}
     </li>
   )

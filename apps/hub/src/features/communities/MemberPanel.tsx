@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ConfirmButton } from '../../components/ConfirmButton.tsx'
 import { api } from '../../lib/api.ts'
 import { useCommunityChat } from '../../stores/community-chat.ts'
 
@@ -206,18 +207,13 @@ export function MemberPanel({
                 </button>
               )}
               {canRemove && (
-                <button
-                  type="button"
+                <ConfirmButton
+                  label={t('communities.remove')}
+                  question={t('communities.removeConfirm', { name: member.displayName })}
                   className="btn-danger text-xs px-2 py-1"
                   disabled={removeMember.isPending}
-                  onClick={() => {
-                    if (confirm(t('communities.removeConfirm', { name: member.displayName }))) {
-                      removeMember.mutate(member.accountId)
-                    }
-                  }}
-                >
-                  {t('communities.remove')}
-                </button>
+                  onConfirm={() => removeMember.mutate(member.accountId)}
+                />
               )}
             </li>
           )
@@ -238,16 +234,13 @@ export function MemberPanel({
       )}
 
       {myRole !== 'owner' && (
-        <button
-          type="button"
+        <ConfirmButton
+          label={t('communities.leave')}
+          question={t('communities.leaveConfirm')}
           className="btn-danger w-full text-sm"
           disabled={leave.isPending}
-          onClick={() => {
-            if (confirm(t('communities.leaveConfirm'))) leave.mutate()
-          }}
-        >
-          {t('communities.leave')}
-        </button>
+          onConfirm={() => leave.mutate()}
+        />
       )}
     </section>
   )

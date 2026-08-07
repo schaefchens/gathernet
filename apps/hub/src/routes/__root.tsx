@@ -52,6 +52,11 @@ function RootComponent() {
   )
 }
 
+/** A 1:1 chat or a single community — the routes that should fill the window. */
+function isConversation(pathname: string): boolean {
+  return pathname.startsWith('/chat/') || /^\/communities\/[^/]+/.test(pathname)
+}
+
 /** Top-level surfaces, shared by the desktop rail and the mobile tab bar. */
 const NAV = [
   { to: '/', labelKey: 'nav.chats', Icon: ChatIcon },
@@ -143,9 +148,6 @@ function AppShell() {
           </div>
           <div className="flex items-center gap-3 border-t border-edge px-4 py-3">
             <PresenceSelector />
-            {wsStatus !== 'connected' && (
-              <span className="ml-auto text-xs text-amber">{t('common.connecting')}</span>
-            )}
           </div>
         </aside>
       )}
@@ -163,17 +165,31 @@ function AppShell() {
                   {t('common.appName')}
                 </span>
               </Link>
-              <div className="flex items-center gap-3">
-                {wsStatus !== 'connected' && (
-                  <span className="text-xs text-amber">{t('common.connecting')}</span>
-                )}
-                <PresenceSelector />
-              </div>
+              <PresenceSelector />
             </div>
           </header>
         )}
 
-        <main className="flex-1 w-full max-w-4xl mx-auto px-4 py-6 pb-24 md:pb-6">
+        {/* An E2EE app has to be honest about not being able to deliver: while the
+            socket is down nothing sends or arrives, and a faint word in a corner is
+            not enough warning for that. */}
+        {wsStatus !== 'connected' && (
+          <div
+            role="status"
+            className="flex items-center justify-center gap-2 border-b border-amber/40 bg-amber/10 px-4 py-1.5 text-xs text-amber"
+          >
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber" />
+            {t('common.connecting')}
+          </div>
+        )}
+
+        {/* Conversations take the whole window; reading and form pages stay in a
+            comfortable measure rather than stretching across an ultrawide display. */}
+        <main
+          className={`flex-1 w-full px-4 py-6 pb-24 md:pb-6 ${
+            isConversation(pathname) ? '' : 'mx-auto max-w-4xl'
+          }`}
+        >
           <Outlet />
         </main>
 

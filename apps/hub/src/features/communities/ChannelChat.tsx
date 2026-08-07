@@ -7,6 +7,7 @@ import { copyMedia } from '../../lib/media.ts'
 import { WsRequestError } from '../../lib/ws-client.ts'
 import { channelArtifactsStore } from '../../stores/channel-artifacts.ts'
 import { communityChatStore, useCommunityChat } from '../../stores/community-chat.ts'
+import { channelKey, markRead } from '../../stores/read-state.ts'
 import { useSession } from '../../stores/session.ts'
 import { MessageThread } from '../chat/MessageThread.tsx'
 import { ClampedMarkdown } from './ClampedMarkdown.tsx'
@@ -70,6 +71,12 @@ export function ChannelChat({
     queryFn: () => api<{ friends: Friend[] }>('GET', '/api/v1/friends'),
   })
   const friendAccountIds = friends.data?.friends.map((f) => f.accountId)
+
+  // An open channel is a read channel: clear its unread mark as messages arrive.
+  const newestSentAt = messages[messages.length - 1]?.sentAt ?? 0
+  useEffect(() => {
+    if (newestSentAt) markRead(channelKey(channelId), newestSentAt)
+  }, [channelId, newestSentAt])
 
   /**
    * A send refused with `not_a_member` means this account was removed while the view was

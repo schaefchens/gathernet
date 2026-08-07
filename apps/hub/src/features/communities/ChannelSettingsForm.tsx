@@ -17,6 +17,7 @@ import {
 } from '@gathernet/shared'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ConfirmButton } from '../../components/ConfirmButton.tsx'
 import { api } from '../../lib/api.ts'
 import { type ChannelMeta, getKMeta, sealMeta } from '../../lib/community-keys.ts'
 import { communityChatStore } from '../../stores/community-chat.ts'
@@ -442,9 +443,12 @@ export function ChannelSettingsForm({
       </div>
 
       {mode === 'edit' && canDelete && onDelete && (
-        <button type="button" className="btn-danger w-full text-sm" onClick={onDelete}>
-          {t('communities.deleteChannel')}
-        </button>
+        <ConfirmButton
+          label={t('communities.deleteChannel')}
+          question={t('communities.deleteChannelConfirm')}
+          className="btn-danger w-full text-sm"
+          onConfirm={onDelete}
+        />
       )}
     </form>
   )

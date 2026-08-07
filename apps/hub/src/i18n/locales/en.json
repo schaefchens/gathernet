@@ -29,7 +29,10 @@
     "people": "People",
     "protectedTitle": "Your messages are protected",
     "protectedBody": "End-to-end encrypted. No one outside the conversation can read them.",
-    "pickOne": "Choose a conversation to start reading."
+    "pickOne": "Choose a conversation to start reading.",
+    "unread": "Unread",
+    "youPrefix": "You:",
+    "browseCommunities": "Find a community"
   },
   "welcome": {
     "title": "Gathernet",
@@ -57,7 +60,10 @@
     "deviceNameTitle": "Name this device",
     "deviceNamePlaceholder": "e.g. Chrome on my laptop",
     "creating": "Creating your account…",
-    "done": "Welcome to Gathernet"
+    "done": "Welcome to Gathernet",
+    "phraseReveal": "Reveal my phrase",
+    "phraseRevealHint": "Make sure no one can see your screen.",
+    "phraseNoCopy": "There is no copy button on purpose: anything on your clipboard can be read by other apps. Write these words on paper and keep them somewhere safe."
   },
   "restore": {
     "title": "Restore your account",

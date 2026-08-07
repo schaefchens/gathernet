@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ConfirmButton } from '../../components/ConfirmButton.tsx'
 import { useSession } from '../../stores/session.ts'
 
 export function UnlockScreen() {
@@ -45,15 +46,12 @@ export function UnlockScreen() {
         <button type="submit" className="btn-gold w-full" disabled={busy || !password}>
           {busy ? t('common.loading') : t('unlock.action')}
         </button>
-        <button
-          type="button"
+        <ConfirmButton
+          label={t('unlock.forget')}
+          question={t('unlock.forgetConfirm')}
           className="text-xs text-ink-faint hover:text-danger"
-          onClick={() => {
-            if (confirm(t('unlock.forgetConfirm'))) void forgetDevice()
-          }}
-        >
-          {t('unlock.forget')}
-        </button>
+          onConfirm={() => void forgetDevice()}
+        />
       </form>
     </div>
   )

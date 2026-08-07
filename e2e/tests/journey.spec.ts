@@ -90,18 +90,22 @@ test('full journey: accounts, invite, presence, E2EE chat, invisible', async ({ 
   await expect(benInput).toBeEnabled({ timeout: 30_000 })
   await benInput.fill('Hello Anna! Grace and peace.')
   await ben.getByRole('button', { name: 'Send' }).click()
-  await expect(ben.getByText('Hello Anna! Grace and peace.')).toBeVisible()
+  await expect(ben.getByRole('main').getByText('Hello Anna! Grace and peace.')).toBeVisible()
 
   // Anna receives it decrypted, live.
   await anna.locator('li', { hasText: 'Ben' }).getByRole('link').click()
-  await expect(anna.getByText('Hello Anna! Grace and peace.')).toBeVisible({ timeout: 30_000 })
+  await expect(anna.getByRole('main').getByText('Hello Anna! Grace and peace.')).toBeVisible({
+    timeout: 30_000,
+  })
 
   // Anna replies; Ben sees it.
   const annaInput = anna.getByPlaceholder('Message…')
   await expect(annaInput).toBeEnabled({ timeout: 30_000 })
   await annaInput.fill('He is risen indeed!')
   await anna.getByRole('button', { name: 'Send' }).click()
-  await expect(ben.getByText('He is risen indeed!')).toBeVisible({ timeout: 30_000 })
+  await expect(ben.getByRole('main').getByText('He is risen indeed!')).toBeVisible({
+    timeout: 30_000,
+  })
 
   // Anna goes invisible; Ben sees her as offline.
   await anna.getByRole('link', { name: 'Gathernet' }).click()

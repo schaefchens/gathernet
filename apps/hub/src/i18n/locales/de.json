@@ -29,7 +29,10 @@
     "people": "Personen",
     "protectedTitle": "Deine Nachrichten sind geschützt",
     "protectedBody": "Ende-zu-Ende-verschlüsselt. Niemand außerhalb der Unterhaltung kann sie lesen.",
-    "pickOne": "Wähle eine Unterhaltung aus, um zu lesen."
+    "pickOne": "Wähle eine Unterhaltung aus, um zu lesen.",
+    "unread": "Ungelesen",
+    "youPrefix": "Du:",
+    "browseCommunities": "Gemeinschaft finden"
   },
   "welcome": {
     "title": "Gathernet",
@@ -57,7 +60,10 @@
     "deviceNameTitle": "Dieses Gerät benennen",
     "deviceNamePlaceholder": "z. B. Chrome auf meinem Laptop",
     "creating": "Konto wird erstellt…",
-    "done": "Willkommen bei Gathernet"
+    "done": "Willkommen bei Gathernet",
+    "phraseReveal": "Wiederherstellungsphrase anzeigen",
+    "phraseRevealHint": "Achte darauf, dass niemand auf deinen Bildschirm sehen kann.",
+    "phraseNoCopy": "Es gibt bewusst keine Kopier-Schaltfläche: Was in der Zwischenablage liegt, können andere Apps mitlesen. Schreibe diese Wörter auf Papier und bewahre sie sicher auf."
   },
   "restore": {
     "title": "Konto wiederherstellen",
