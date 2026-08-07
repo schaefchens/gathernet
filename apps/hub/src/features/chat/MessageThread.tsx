@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
@@ -60,6 +60,9 @@ interface MessageThreadProps {
   readOnly?: boolean
   /** replaces the composer with this hint when `readOnly` */
   readOnlyLabel?: string
+  /** pinned to the top of the page itself — pins belong on the parchment, not in a
+   *  separate dark strip above it */
+  topSlot?: ReactNode
 }
 
 /**
@@ -89,6 +92,7 @@ export function MessageThread({
   notReadyLabel,
   readOnly,
   readOnlyLabel,
+  topSlot,
 }: MessageThreadProps) {
   const { t } = useTranslation()
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
@@ -165,17 +169,24 @@ export function MessageThread({
           palette from the .parchment scope in app.css. */}
       <div
         ref={listRef}
-        className="parchment flex flex-1 flex-col overflow-y-auto rounded-lg px-3 py-4"
+        className="parchment flex flex-1 flex-col overflow-y-auto rounded-lg"
         onScroll={() => {
           const el = listRef.current
           if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
         }}
       >
+        {/* Sticks to the top of the page as it scrolls, so pins read as part of the
+            document rather than a band of app chrome above it. */}
+        {topSlot && (
+          <div className="sticky top-0 z-10 bg-night/95 px-3 pt-3 pb-1 backdrop-blur-[2px]">
+            {topSlot}
+          </div>
+        )}
         {/* `mt-auto` sits the conversation on the bottom edge of the page when it is
             shorter than the canvas, the way a chat should read. Done on the inner
             wrapper rather than with justify-end, which breaks scrolling once the
             content overflows. */}
-        <div className="mt-auto space-y-2">
+        <div className="mt-auto space-y-2 px-3 pt-3 pb-4">
           {!ready && (
             <p className="text-center text-sm text-amber py-8">
               {notReadyLabel ?? t('chat.settingUp')}

@@ -1,4 +1,4 @@
-import type { ChannelAccess, ChannelPinPolicy, ChannelPostPolicy, Friend } from '@gathernet/shared'
+import type { ChannelPinPolicy, Friend } from '@gathernet/shared'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -10,8 +10,6 @@ import { communityChatStore, useCommunityChat } from '../../stores/community-cha
 import { channelKey, markRead } from '../../stores/read-state.ts'
 import { useSession } from '../../stores/session.ts'
 import { MessageThread } from '../chat/MessageThread.tsx'
-import { ClampedMarkdown } from './ClampedMarkdown.tsx'
-import { CommunityAvatar } from './CommunityAvatar.tsx'
 import { PinnedBar } from './PinnedBar.tsx'
 
 const NO_MESSAGES: never[] = []
@@ -19,11 +17,6 @@ const NO_MESSAGES: never[] = []
 interface ChannelChatProps {
   communityId: string
   channelId: string
-  title: string
-  emoji?: string | undefined
-  avatarMediaId: string | null
-  access: ChannelAccess
-  postPolicy: ChannelPostPolicy
   pinPolicy: ChannelPinPolicy
   /** whether the current user may post (mods/leaders in announcement channels) */
   canPost: boolean
@@ -32,7 +25,6 @@ interface ChannelChatProps {
   isManager: boolean
   /** the current user is muted here (distinct read-only reason) */
   muted: boolean
-  description?: string | undefined
   messageTtlDays: number
 }
 
@@ -46,16 +38,10 @@ interface ChannelChatProps {
 export function ChannelChat({
   communityId,
   channelId,
-  title,
-  emoji,
-  avatarMediaId,
-  access,
-  postPolicy,
   pinPolicy,
   canPost,
   isManager,
   muted,
-  description,
   messageTtlDays,
 }: ChannelChatProps) {
   const { t } = useTranslation()
@@ -143,42 +129,7 @@ export function ChannelChat({
     status === 'pending' ? t('communities.channelPending') : t('communities.channelJoining')
 
   return (
-    <div className="card flex min-h-0 flex-1 flex-col p-4">
-      <div className="pb-3 border-b border-edge">
-        <div className="flex items-center gap-2">
-          {avatarMediaId ? (
-            <CommunityAvatar
-              communityId={communityId}
-              mediaId={avatarMediaId}
-              label={emoji ?? title}
-              size="md"
-            />
-          ) : (
-            <span
-              className="h-8 w-8 shrink-0 grid place-items-center rounded-md bg-overlay"
-              aria-hidden
-            >
-              {emoji ?? (access === 'leaders' ? '🔒' : '#')}
-            </span>
-          )}
-          <h2 className="flex-1 font-medium truncate">{title}</h2>
-          {postPolicy === 'moderators' && (
-            <span className="text-xs text-ink-faint" title={t('communities.postPolicy.moderators')}>
-              📢
-            </span>
-          )}
-          <span className="text-xs text-ink-faint" title={t('chat.encrypted')}>
-            🔒 {t(`communities.access.${access}`)}
-          </span>
-        </div>
-        {description && (
-          <ClampedMarkdown
-            text={description}
-            className="mt-1 text-xs text-ink-soft [&_p]:mb-1 [&_a]:break-words"
-          />
-        )}
-      </div>
-
+    <div className="flex min-h-0 flex-1 flex-col">
       {status === 'locked' ? (
         <div className="flex-1 grid place-items-center text-center">
           <div className="space-y-2">
@@ -205,15 +156,6 @@ export function ChannelChat({
               {t('pins.pinFailed')}: {pinError}
             </div>
           )}
-          <PinnedBar
-            communityId={communityId}
-            channelId={channelId}
-            pinPolicy={pinPolicy}
-            isManager={isManager}
-            canCreate={status !== 'untrusted'}
-            myAccountId={myAccountId ?? null}
-            onJump={jumpTo}
-          />
           <div ref={threadRef} className="flex flex-1 flex-col min-h-0">
             <MessageThread
               messages={messages}
@@ -261,6 +203,17 @@ export function ChannelChat({
                 status === 'rotation_pending'
                   ? t('communities.channelRotationPending')
                   : notReadyLabel
+              }
+              topSlot={
+                <PinnedBar
+                  communityId={communityId}
+                  channelId={channelId}
+                  pinPolicy={pinPolicy}
+                  isManager={isManager}
+                  canCreate={status !== 'untrusted'}
+                  myAccountId={myAccountId ?? null}
+                  onJump={jumpTo}
+                />
               }
               readOnly={!canPost || status === 'untrusted'}
               readOnlyLabel={

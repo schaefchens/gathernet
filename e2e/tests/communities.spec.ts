@@ -121,7 +121,7 @@ test('communities v2: encrypted metadata, K_meta out-of-band, open + request joi
   await alice.getByPlaceholder('What is this community about?').fill('**Welcome** to our church')
   await alice.getByRole('button', { name: 'Create community' }).last().click()
   // The creator decrypts the name locally from the K_meta it just generated.
-  await expect(alice.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+  await expect(alice.getByRole('main').getByText('Grace Fellowship')).toBeVisible({
     timeout: 30_000,
   })
 
@@ -139,7 +139,7 @@ test('communities v2: encrypted metadata, K_meta out-of-band, open + request joi
   await bob.getByRole('button', { name: 'Join with a code' }).click()
   await bob.getByPlaceholder('Invite code or link').fill(payload)
   await bob.getByRole('button', { name: 'Join', exact: true }).click()
-  await expect(bob.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+  await expect(bob.getByRole('main').getByText('Grace Fellowship')).toBeVisible({
     timeout: 30_000,
   })
   // Channel title decrypts on the joiner too (proves out-of-band K_meta worked).
@@ -177,7 +177,8 @@ test('communities v2: encrypted metadata, K_meta out-of-band, open + request joi
   // Alice opens the channel's Moderation tab and accepts Bob's pending request
   // (the Accept button is unique to a pending-request row).
   await alice.getByRole('button', { name: /prayer/ }).click()
-  await alice.getByRole('button', { name: 'Moderation' }).click()
+  await alice.getByRole('button', { name: 'More actions' }).click()
+  await alice.getByRole('menuitem', { name: 'Moderation' }).click()
   const acceptBtn = alice.getByRole('button', { name: 'Accept', exact: true })
   await expect(acceptBtn).toBeVisible({ timeout: 20_000 })
   await acceptBtn.click()
@@ -223,7 +224,7 @@ test('mega-communities: group_key channel — scalable channel, bidirectional E2
   await alice.getByRole('button', { name: 'Create community' }).first().click()
   await alice.getByPlaceholder('Community name').fill('Mega Church')
   await alice.getByRole('button', { name: 'Create community' }).last().click()
-  await expect(alice.getByRole('heading', { name: 'Mega Church' })).toBeVisible({ timeout: 30_000 })
+  await expect(alice.getByRole('main').getByText('Mega Church')).toBeVisible({ timeout: 30_000 })
 
   // A SCALABLE (group_key) channel — no MLS group; content sealed under K_channel.
   await addChannel(alice, { emoji: '📣', title: 'general', encryptionMode: 'group_key' })
@@ -238,7 +239,7 @@ test('mega-communities: group_key channel — scalable channel, bidirectional E2
   await bob.getByRole('button', { name: 'Join with a code' }).click()
   await bob.getByPlaceholder('Invite code or link').fill(payload)
   await bob.getByRole('button', { name: 'Join', exact: true }).click()
-  await expect(bob.getByRole('heading', { name: 'Mega Church' })).toBeVisible({ timeout: 30_000 })
+  await expect(bob.getByRole('main').getByText('Mega Church')).toBeVisible({ timeout: 30_000 })
 
   // Bob opens + joins the group_key channel — no external-join; he fetches K_channel.
   await bob.getByRole('button', { name: /general/ }).click()
@@ -286,7 +287,7 @@ test('communities v2: K_meta syncs to a restored second device via receipt-key g
   await alice.getByRole('button', { name: 'Create community' }).first().click()
   await alice.getByPlaceholder('Community name').fill('Grace Fellowship')
   await alice.getByRole('button', { name: 'Create community' }).last().click()
-  await expect(alice.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+  await expect(alice.getByRole('main').getByText('Grace Fellowship')).toBeVisible({
     timeout: 30_000,
   })
   await alice.getByRole('button', { name: 'Copy', exact: true }).click({ timeout: 20_000 })
@@ -297,7 +298,7 @@ test('communities v2: K_meta syncs to a restored second device via receipt-key g
   await bob1.getByRole('button', { name: 'Join with a code' }).click()
   await bob1.getByPlaceholder('Invite code or link').fill(payload)
   await bob1.getByRole('button', { name: 'Join', exact: true }).click()
-  await expect(bob1.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+  await expect(bob1.getByRole('main').getByText('Grace Fellowship')).toBeVisible({
     timeout: 30_000,
   })
 
@@ -312,7 +313,7 @@ test('communities v2: K_meta syncs to a restored second device via receipt-key g
     .getByRole('main')
     .getByRole('link', { name: /Encrypted community/ })
     .click()
-  await expect(bob2.getByRole('heading', { name: 'Encrypted community' })).toBeVisible({
+  await expect(bob2.getByRole('main').getByText('Encrypted community')).toBeVisible({
     timeout: 30_000,
   })
 
@@ -325,7 +326,7 @@ test('communities v2: K_meta syncs to a restored second device via receipt-key g
     .getByRole('main')
     .getByRole('link', { name: /Grace Fellowship/ })
     .click()
-  await expect(bob2.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+  await expect(bob2.getByRole('main').getByText('Grace Fellowship')).toBeVisible({
     timeout: 40_000,
   })
 
@@ -349,7 +350,7 @@ test('communities v2: removing a member rotates K_meta; remaining members re-key
   await alice.getByRole('button', { name: 'Create community' }).first().click()
   await alice.getByPlaceholder('Community name').fill('Grace Fellowship')
   await alice.getByRole('button', { name: 'Create community' }).last().click()
-  await expect(alice.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+  await expect(alice.getByRole('main').getByText('Grace Fellowship')).toBeVisible({
     timeout: 30_000,
   })
   await alice.getByRole('button', { name: 'Copy', exact: true }).click({ timeout: 20_000 })
@@ -361,7 +362,7 @@ test('communities v2: removing a member rotates K_meta; remaining members re-key
     await p.getByRole('button', { name: 'Join with a code' }).click()
     await p.getByPlaceholder('Invite code or link').fill(payload)
     await p.getByRole('button', { name: 'Join', exact: true }).click()
-    await expect(p.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+    await expect(p.getByRole('main').getByText('Grace Fellowship')).toBeVisible({
       timeout: 30_000,
     })
   }
@@ -374,11 +375,11 @@ test('communities v2: removing a member rotates K_meta; remaining members re-key
   await carolRow.getByRole('button', { name: 'Remove' }).click()
 
   // Carol loses access to the community.
-  await expect(carol.getByRole('heading', { name: 'Grace Fellowship' })).toHaveCount(0, {
+  await expect(carol.getByRole('main').getByText('Grace Fellowship')).toHaveCount(0, {
     timeout: 30_000,
   })
   // Bob remains (this also gives the rotation time to complete).
-  await expect(bob.getByRole('heading', { name: 'Grace Fellowship' })).toBeVisible({
+  await expect(bob.getByRole('main').getByText('Grace Fellowship')).toBeVisible({
     timeout: 30_000,
   })
 

@@ -14,7 +14,8 @@
     "retry": "Try again",
     "connecting": "Reconnecting…",
     "showMore": "Show more",
-    "showLess": "Show less"
+    "showLess": "Show less",
+    "details": "Details"
   },
   "nav": {
     "primary": "Main navigation",
@@ -508,7 +509,9 @@
     "memberCount_other": "{{count}} members",
     "channelCount_one": "{{count}} channel",
     "channelCount_other": "{{count}} channels",
-    "backToChat": "Back to chat"
+    "backToChat": "Back to chat",
+    "ttlSummary_one": "Messages kept {{count}} day",
+    "ttlSummary_other": "Messages kept {{count}} days"
   },
   "rollcall": {
     "ask": "Ask who's still here",

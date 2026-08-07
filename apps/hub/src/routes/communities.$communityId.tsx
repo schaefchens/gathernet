@@ -6,16 +6,15 @@ import type {
 import { COMMUNITY_DEVICE_LIMIT_MAX } from '@gathernet/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { type ReactNode, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LockIcon } from '../components/icons.tsx'
 import { MenuButton } from '../components/MenuButton.tsx'
 import { PageHeader } from '../components/PageHeader.tsx'
 import { ChannelChat } from '../features/communities/ChannelChat.tsx'
+import { ChannelInfo } from '../features/communities/ChannelInfo.tsx'
 import { ChannelJoinPanel } from '../features/communities/ChannelJoinPanel.tsx'
-import { ChannelList } from '../features/communities/ChannelList.tsx'
 import { ChannelSettingsForm } from '../features/communities/ChannelSettingsForm.tsx'
-import { ClampedMarkdown } from '../features/communities/ClampedMarkdown.tsx'
 import { AvatarUploader, CommunityAvatar } from '../features/communities/CommunityAvatar.tsx'
 import { InvitePanel } from '../features/communities/InvitePanel.tsx'
 import { MemberPanel } from '../features/communities/MemberPanel.tsx'
@@ -72,6 +71,7 @@ function CommunityDetailScreen() {
   const [showCreate, setShowCreate] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showPeople, setShowPeople] = useState(false)
+  const [showInfo, setShowInfo] = useState(false)
   const isDesktop = useMediaQuery(DESKTOP_QUERY)
   // The channel list lives in the sidebar on desktop and in this page on mobile,
   // so the selection is shared state rather than local to either.
@@ -91,6 +91,25 @@ function CommunityDetailScreen() {
   }, [sorted, selected, communityId])
 
   const selectedChannel = sorted.find((c) => c.channelId === selected) ?? null
+  const channelMeta = useDecryptedMeta<ChannelMeta>(
+    communityId,
+    selectedChannel?.metaCiphertext ?? null,
+  )
+  const channelTitle = selectedChannel
+    ? (channelMeta?.title ?? channelFallbackTitle(selectedChannel.channelId))
+    : null
+  // Manager rights for the open channel — the actions they unlock now live in the
+  // header menu rather than a row of tabs above the conversation.
+  const channelIsManager =
+    !!selectedChannel &&
+    (isLeader || (selectedChannel.myStatus === 'active' && selectedChannel.myRole === 'moderator'))
+  const [view, setView] = useState<WorkspaceView>('chat')
+  // A different channel always opens on its conversation.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the open channel
+  useEffect(() => {
+    setView('chat')
+    setShowInfo(false)
+  }, [selected])
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['community', communityId] })
@@ -181,12 +200,23 @@ function CommunityDetailScreen() {
             size="sm"
           />
         }
-        title={communityName}
-        subtitle={
-          detail.memberCount !== null
-            ? t('communities.memberCount', { count: detail.memberCount })
-            : t(BUCKET_KEY[detail.memberBucket])
+        title={
+          channelTitle
+            ? `${channelMeta?.emoji ? `${channelMeta.emoji} ` : ''}${channelTitle}`
+            : communityName
         }
+        subtitle={
+          // Reading a channel, the community is the only context worth a line: the
+          // member count is noise there, and anyone who isn't a member gets a join
+          // panel instead of a conversation. It still identifies the community itself.
+          channelTitle
+            ? communityName
+            : detail.memberCount !== null
+              ? t('communities.memberCount', { count: detail.memberCount })
+              : t(BUCKET_KEY[detail.memberBucket])
+        }
+        onToggle={selectedChannel ? () => setShowInfo((v) => !v) : undefined}
+        expanded={showInfo}
         meta={
           <span
             className="flex items-center gap-1.5 text-xs text-ink-faint"
@@ -204,8 +234,20 @@ function CommunityDetailScreen() {
               {t(`communities.roles.${detail.myRole}`)}
             </span>
             <MenuButton
-              items={
-                !isDesktop
+              items={[
+                ...(selectedChannel && view !== 'chat'
+                  ? [{ label: t('communities.viewChat'), onSelect: () => setView('chat') }]
+                  : []),
+                ...(selectedChannel && channelIsManager
+                  ? [
+                      { label: t('communities.moderation'), onSelect: () => setView('moderation') },
+                      {
+                        label: t('communities.channelSettings'),
+                        onSelect: () => setView('settings'),
+                      },
+                    ]
+                  : []),
+                ...(!isDesktop
                   ? [
                       { label: t('communities.members'), onSelect: () => setShowPeople(true) },
                       ...(isLeader
@@ -229,12 +271,21 @@ function CommunityDetailScreen() {
                           onSelect: () => setShowSettings((v) => !v),
                         },
                       ]
-                    : []
-              }
+                    : []),
+              ]}
             />
           </>
         }
       />
+
+      {showInfo && selectedChannel && channelTitle && (
+        <ChannelInfo
+          channel={selectedChannel}
+          title={channelTitle}
+          description={channelMeta?.description}
+          communityDescription={communityMeta?.description}
+        />
+      )}
 
       {showSettings && isLeader && (
         <CommunitySettingsForm
@@ -249,13 +300,6 @@ function CommunityDetailScreen() {
             invalidate()
           }}
           onCancel={() => setShowSettings(false)}
-        />
-      )}
-
-      {communityMeta?.description && !showSettings && (
-        <ClampedMarkdown
-          text={communityMeta.description}
-          className="shrink-0 text-xs text-ink-soft [&_p]:mb-1"
         />
       )}
 
@@ -306,6 +350,8 @@ function CommunityDetailScreen() {
             members={detail.members}
             onChanged={invalidate}
             onDeleteChannel={onDeleteChannel}
+            view={view}
+            onCloseView={() => setView('chat')}
           />
         ) : (
           <div className="card grid flex-1 place-items-center text-ink-soft">
@@ -327,6 +373,8 @@ function ChannelWorkspace({
   members,
   onChanged,
   onDeleteChannel,
+  view,
+  onCloseView,
 }: {
   communityId: string
   channel: CommunityChannel
@@ -335,8 +383,10 @@ function ChannelWorkspace({
   members: CommunityDetailResponse['members']
   onChanged: () => void
   onDeleteChannel: (channelId: string) => void
+  /** which pane the header menu selected */
+  view: WorkspaceView
+  onCloseView: () => void
 }) {
-  const { t } = useTranslation()
   const meta = useDecryptedMeta<ChannelMeta>(communityId, channel.metaCiphertext)
   const title = meta?.title ?? channelFallbackTitle(channel.channelId)
   const emoji = meta?.emoji
@@ -347,7 +397,6 @@ function ChannelWorkspace({
   // Announcement channels are read-only for everyone but managers; a muted
   // member is read-only regardless.
   const canPost = (channel.postPolicy === 'everyone' || isManager) && !channel.muted
-  const [view, setView] = useState<WorkspaceView>('chat')
 
   if (!isActive) {
     return (
@@ -363,38 +412,14 @@ function ChannelWorkspace({
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      {(isManager || canEdit) && (
-        <div className="flex gap-2">
-          <TabButton active={view === 'chat'} onClick={() => setView('chat')}>
-            {t('communities.viewChat')}
-          </TabButton>
-          {isManager && (
-            <TabButton active={view === 'moderation'} onClick={() => setView('moderation')}>
-              {t('communities.moderation')}
-            </TabButton>
-          )}
-          {canEdit && (
-            <TabButton active={view === 'settings'} onClick={() => setView('settings')}>
-              {t('communities.channelSettings')}
-            </TabButton>
-          )}
-        </div>
-      )}
-
       {view === 'chat' && (
         <ChannelChat
           communityId={communityId}
           channelId={channel.channelId}
-          title={title}
-          emoji={emoji}
-          avatarMediaId={channel.avatarMediaId}
-          access={channel.access}
-          postPolicy={channel.postPolicy}
           pinPolicy={channel.pinPolicy}
           canPost={canPost}
           isManager={isManager}
           muted={channel.muted}
-          description={meta?.description}
           messageTtlDays={channel.messageTtlDays}
         />
       )}
@@ -412,7 +437,7 @@ function ChannelWorkspace({
       )}
 
       {view === 'settings' && canEdit && (
-        <div className="card overflow-y-auto h-[calc(100dvh-13rem)] md:h-auto md:flex-1 md:min-h-0">
+        <div className="card min-h-0 flex-1 overflow-y-auto">
           <ChannelSettingsForm
             key={meta ? 'loaded' : 'empty'}
             communityId={communityId}
@@ -420,38 +445,16 @@ function ChannelWorkspace({
             channel={channel}
             initialMeta={meta}
             onDone={() => {
-              setView('chat')
+              onCloseView()
               onChanged()
             }}
-            onCancel={() => setView('chat')}
+            onCancel={onCloseView}
             canDelete={isLeader}
             onDelete={() => onDeleteChannel(channel.channelId)}
           />
         </div>
       )}
     </div>
-  )
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`text-xs px-3 py-1.5 rounded-md border transition-colors ${
-        active ? 'border-gold text-gold' : 'border-edge text-ink-soft hover:text-ink'
-      }`}
-    >
-      {children}
-    </button>
   )
 }
 

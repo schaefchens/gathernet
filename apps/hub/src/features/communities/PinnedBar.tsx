@@ -1,7 +1,7 @@
 import type { ChannelPinPolicy } from '@gathernet/shared'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { PinIcon } from '../../components/icons.tsx'
+import { ChevronIcon, PinIcon } from '../../components/icons.tsx'
 import { ApiError } from '../../lib/api.ts'
 import type { ArtifactBody, VerifiedArtifact } from '../../lib/artifacts.ts'
 import { encryptAndUpload } from '../../lib/media.ts'
@@ -74,7 +74,8 @@ export function PinnedBar({
 }) {
   const { t, i18n } = useTranslation()
   const artifacts = useChannelArtifacts((s) => s.byChannel[channelId] ?? EMPTY)
-  const [collapsed, setCollapsed] = useState(false)
+  // Collapsed by default — the bar already shows the newest pin on its one line.
+  const [collapsed, setCollapsed] = useState(true)
   const [composeMode, setComposeMode] = useState<'none' | 'link' | 'event'>('none')
   const [linkUrl, setLinkUrl] = useState('')
   const [linkTitle, setLinkTitle] = useState('')
@@ -245,21 +246,41 @@ export function PinnedBar({
     }
   }
 
+  // Nothing pinned and nothing you could pin → no bar at all. An empty "Pinned (0)"
+  // strip is pure furniture, and this sits directly above the conversation.
+  const headline = pins[0] ?? events[0]
+  const count = pins.length + events.length
+  if (count === 0 && rollcalls.length === 0 && suggested.length === 0 && !canCreate && !composing) {
+    return null
+  }
+
   return (
-    <div className="mt-3 rounded-md border border-edge bg-overlay/40 text-sm">
-      <div className="flex w-full items-center gap-2 px-3 py-2 text-xs text-ink-soft">
-        <button
-          type="button"
-          className="flex flex-1 items-center gap-2 text-left"
-          onClick={() => setCollapsed((c) => !c)}
-        >
-          <PinIcon size={14} />
-          <span className="flex-1">{t('pins.title', { count: pins.length + events.length })}</span>
-        </button>
+    <div className="shrink-0 rounded-md border border-edge bg-overlay/70 text-sm shadow-sm">
+      {/* One line: the pin itself, not a header announcing that pins exist. The rest
+          expand underneath. */}
+      <div className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-ink-soft">
+        <PinIcon size={13} />
+        {headline ? (
+          <button
+            type="button"
+            className="min-w-0 flex-1 truncate text-left hover:text-ink"
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed((c) => !c)}
+          >
+            {summarize(headline.body, attachmentLabel)}
+          </button>
+        ) : (
+          <span className="min-w-0 flex-1 truncate">{t('pins.title', { count })}</span>
+        )}
+        {count > 1 && (
+          <span className="shrink-0 rounded-full border border-edge px-1.5 text-[10px]">
+            {count}
+          </span>
+        )}
         {canCreate && (
           <button
             type="button"
-            className="text-ink-faint hover:text-ink"
+            className="shrink-0 text-ink-faint hover:text-ink"
             title={t('pins.add')}
             aria-label={t('pins.add')}
             onClick={() => {
@@ -270,13 +291,20 @@ export function PinnedBar({
             ＋
           </button>
         )}
-        <button
-          type="button"
-          aria-label={t('pins.title', { count: pins.length + events.length })}
-          onClick={() => setCollapsed((c) => !c)}
-        >
-          <span aria-hidden>{collapsed ? '▸' : '▾'}</span>
-        </button>
+        {(count > 0 || suggested.length > 0) && (
+          <button
+            type="button"
+            className="shrink-0"
+            aria-label={t('pins.title', { count })}
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed((c) => !c)}
+          >
+            <ChevronIcon
+              size={13}
+              className={`transition-transform ${collapsed ? '' : 'rotate-90'}`}
+            />
+          </button>
+        )}
       </div>
 
       <input
@@ -421,96 +449,97 @@ export function PinnedBar({
         </div>
       )}
 
-      {!collapsed &&
-        (pins.length > 0 || events.length > 0 || rollcalls.length > 0 || suggested.length > 0) && (
-          <div className="space-y-1 border-t border-edge px-3 py-2">
-            {/* Roll-calls: confirm you're still here / manager sweeps the silent. */}
-            {rollcalls.map((a) => {
-              const deadline = a.artifact.expiresAt
-                ? new Date(a.artifact.expiresAt).toLocaleString(i18n.language, {
-                    dateStyle: 'short',
-                    timeStyle: 'short',
-                  })
-                : ''
-              return (
-                <div
-                  key={a.artifact.artifactId}
-                  className="mb-1 space-y-1 rounded-md border border-gold/40 bg-gold/10 px-2 py-1.5"
+      {(rollcalls.length > 0 ||
+        (!collapsed && (pins.length > 0 || events.length > 0 || suggested.length > 0))) && (
+        <div className="space-y-1 border-t border-edge px-3 py-2">
+          {/* Roll-calls: confirm you're still here / manager sweeps the silent. */}
+          {rollcalls.map((a) => {
+            const deadline = a.artifact.expiresAt
+              ? new Date(a.artifact.expiresAt).toLocaleString(i18n.language, {
+                  dateStyle: 'short',
+                  timeStyle: 'short',
+                })
+              : ''
+            return (
+              <div
+                key={a.artifact.artifactId}
+                className="mb-1 space-y-1 rounded-md border border-gold/40 bg-gold/10 px-2 py-1.5"
+              >
+                <p className="text-xs text-ink">
+                  <span aria-hidden>🙋 </span>
+                  {t('rollcall.open', { deadline })}
+                </p>
+                <button
+                  type="button"
+                  className="btn-gold text-xs px-2 py-0.5"
+                  onClick={() => respondRollcall(a.artifact.artifactId)}
                 >
-                  <p className="text-xs text-ink">
-                    <span aria-hidden>🙋 </span>
-                    {t('rollcall.open', { deadline })}
-                  </p>
-                  <button
-                    type="button"
-                    className="btn-gold text-xs px-2 py-0.5"
-                    onClick={() => respondRollcall(a.artifact.artifactId)}
-                  >
-                    {t('rollcall.confirm')}
-                  </button>
-                </div>
-              )
-            })}
-            {events.length > 0 && (
-              <div className="mb-1 space-y-1">
-                {events.map((a) => {
-                  const startRel = relativeExpiry(a.body.startsAt, i18n.language)
-                  const when = new Date(a.body.startsAt).toLocaleString(i18n.language, {
-                    dateStyle: 'medium',
-                    timeStyle: 'short',
-                  })
-                  return (
-                    <div key={a.artifact.artifactId} className="flex items-center gap-2">
-                      <span aria-hidden>{KIND_ICON.event}</span>
-                      <span className="flex-1 truncate">
-                        {a.body.url ? (
-                          <a
-                            href={a.body.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-indigo-soft hover:underline"
-                          >
-                            {a.body.title}
-                          </a>
-                        ) : (
-                          <span className="text-ink">{a.body.title}</span>
-                        )}
-                        <span className="ml-1 text-[11px] text-ink-faint">
-                          · {when}
-                          {startRel ? ` · ${startRel}` : ''}
-                          {a.body.location ? ` · 📍 ${a.body.location}` : ''}
-                        </span>
+                  {t('rollcall.confirm')}
+                </button>
+              </div>
+            )
+          })}
+          {!collapsed && events.length > 0 && (
+            <div className="mb-1 space-y-1">
+              {events.map((a) => {
+                const startRel = relativeExpiry(a.body.startsAt, i18n.language)
+                const when = new Date(a.body.startsAt).toLocaleString(i18n.language, {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })
+                return (
+                  <div key={a.artifact.artifactId} className="flex items-center gap-2">
+                    <span aria-hidden>{KIND_ICON.event}</span>
+                    <span className="flex-1 truncate">
+                      {a.body.url ? (
+                        <a
+                          href={a.body.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-soft hover:underline"
+                        >
+                          {a.body.title}
+                        </a>
+                      ) : (
+                        <span className="text-ink">{a.body.title}</span>
+                      )}
+                      <span className="ml-1 text-[11px] text-ink-faint">
+                        · {when}
+                        {startRel ? ` · ${startRel}` : ''}
+                        {a.body.location ? ` · 📍 ${a.body.location}` : ''}
                       </span>
+                    </span>
+                    <button
+                      type="button"
+                      aria-pressed={a.tally.mine}
+                      className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
+                        a.tally.mine
+                          ? 'border-indigo-soft bg-indigo/20 text-ink'
+                          : 'border-edge text-ink-faint hover:text-ink'
+                      }`}
+                      onClick={() => toggleGoing(a)}
+                      title={t('pins.goingHint')}
+                    >
+                      {t('pins.going', { count: a.tally.count })}
+                    </button>
+                    {canRemove(a) && (
                       <button
                         type="button"
-                        aria-pressed={a.tally.mine}
-                        className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
-                          a.tally.mine
-                            ? 'border-indigo-soft bg-indigo/20 text-ink'
-                            : 'border-edge text-ink-faint hover:text-ink'
-                        }`}
-                        onClick={() => toggleGoing(a)}
-                        title={t('pins.goingHint')}
+                        className="text-xs text-ink-faint hover:text-danger"
+                        onClick={() => unpin(a.artifact.artifactId)}
+                        aria-label={t('pins.unpin')}
+                        title={t('pins.unpin')}
                       >
-                        {t('pins.going', { count: a.tally.count })}
+                        ✕
                       </button>
-                      {canRemove(a) && (
-                        <button
-                          type="button"
-                          className="text-xs text-ink-faint hover:text-danger"
-                          onClick={() => unpin(a.artifact.artifactId)}
-                          aria-label={t('pins.unpin')}
-                          title={t('pins.unpin')}
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-            {pins.map((a) => {
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {!collapsed &&
+            pins.map((a) => {
               const expiry = relativeExpiry(a.artifact.expiresAt, i18n.language)
               const media =
                 a.body.kind === 'media' ? a.body.media : a.body.kind === 'pin' ? a.body.media : null
@@ -572,46 +601,44 @@ export function PinnedBar({
               )
             })}
 
-            {suggested.length > 0 && (
-              <div className="mt-2 border-t border-edge pt-2">
-                <p className="mb-1 text-[11px] uppercase tracking-wide text-ink-faint">
-                  {t('pins.suggested', { count: suggested.length })}
-                </p>
-                {suggested.map((a) => (
-                  <div key={a.artifact.artifactId} className="flex items-center gap-2">
-                    <span aria-hidden>{KIND_ICON[a.body.kind]}</span>
-                    <span className="flex-1 truncate text-ink-soft">
-                      {summarize(a.body, attachmentLabel) || t('pins.untitled')}
-                      {!isManager && (
-                        <span className="ml-1 text-[11px] text-ink-faint">
-                          · {t('pins.pending')}
-                        </span>
-                      )}
-                    </span>
-                    {isManager && (
-                      <button
-                        type="button"
-                        className="text-xs text-olive hover:underline"
-                        onClick={() => approve(a.artifact.artifactId)}
-                      >
-                        {t('pins.approve')}
-                      </button>
+          {!collapsed && suggested.length > 0 && (
+            <div className="mt-2 border-t border-edge pt-2">
+              <p className="mb-1 text-[11px] uppercase tracking-wide text-ink-faint">
+                {t('pins.suggested', { count: suggested.length })}
+              </p>
+              {suggested.map((a) => (
+                <div key={a.artifact.artifactId} className="flex items-center gap-2">
+                  <span aria-hidden>{KIND_ICON[a.body.kind]}</span>
+                  <span className="flex-1 truncate text-ink-soft">
+                    {summarize(a.body, attachmentLabel) || t('pins.untitled')}
+                    {!isManager && (
+                      <span className="ml-1 text-[11px] text-ink-faint">· {t('pins.pending')}</span>
                     )}
-                    {canRemove(a) && (
-                      <button
-                        type="button"
-                        className="text-xs text-ink-faint hover:text-danger"
-                        onClick={() => unpin(a.artifact.artifactId)}
-                      >
-                        {t('pins.dismiss')}
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+                  </span>
+                  {isManager && (
+                    <button
+                      type="button"
+                      className="text-xs text-olive hover:underline"
+                      onClick={() => approve(a.artifact.artifactId)}
+                    >
+                      {t('pins.approve')}
+                    </button>
+                  )}
+                  {canRemove(a) && (
+                    <button
+                      type="button"
+                      className="text-xs text-ink-faint hover:text-danger"
+                      onClick={() => unpin(a.artifact.artifactId)}
+                    >
+                      {t('pins.dismiss')}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

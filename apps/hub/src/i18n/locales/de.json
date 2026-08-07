@@ -14,7 +14,8 @@
     "retry": "Erneut versuchen",
     "connecting": "Verbindung wird wiederhergestellt…",
     "showMore": "Mehr anzeigen",
-    "showLess": "Weniger anzeigen"
+    "showLess": "Weniger anzeigen",
+    "details": "Details"
   },
   "nav": {
     "primary": "Hauptnavigation",
@@ -508,7 +509,9 @@
     "memberCount_other": "{{count}} Mitglieder",
     "channelCount_one": "{{count}} Kanal",
     "channelCount_other": "{{count}} Kanäle",
-    "backToChat": "Zurück zum Chat"
+    "backToChat": "Zurück zum Chat",
+    "ttlSummary_one": "Nachrichten {{count}} Tag lang",
+    "ttlSummary_other": "Nachrichten {{count}} Tage lang"
   },
   "rollcall": {
     "ask": "Fragen, wer noch dabei ist",

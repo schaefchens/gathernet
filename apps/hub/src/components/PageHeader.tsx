@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ChevronIcon } from './icons.tsx'
 
 /**
  * The one-line bar at the top of a screen: where you came from, what you are
@@ -17,6 +18,8 @@ export function PageHeader({
   subtitle,
   meta,
   actions,
+  onToggle,
+  expanded,
 }: {
   /** shows a back affordance pointing here */
   backTo?: string
@@ -29,6 +32,9 @@ export function PageHeader({
   meta?: ReactNode
   /** right-aligned controls, typically buttons and the overflow menu */
   actions?: ReactNode
+  /** makes the title area a disclosure for a details panel below the bar */
+  onToggle?: (() => void) | undefined
+  expanded?: boolean | undefined
 }) {
   const { t } = useTranslation()
 
@@ -48,6 +54,22 @@ export function PageHeader({
         <h1 className="truncate font-display text-2xl text-gold-bright leading-tight">{title}</h1>
         {subtitle && <div className="truncate text-xs text-ink-faint">{subtitle}</div>}
       </div>
+      {/* A distinct control rather than wrapping the title: a button named after the
+          thing it is about would be indistinguishable from the item in the sidebar. */}
+      {onToggle && (
+        <button
+          type="button"
+          className="shrink-0 rounded px-1 py-1 text-ink-soft hover:text-gold-bright"
+          aria-label={t('common.details')}
+          aria-expanded={expanded}
+          onClick={onToggle}
+        >
+          <ChevronIcon
+            size={16}
+            className={`transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
+        </button>
+      )}
       {meta && <div className="hidden shrink-0 sm:block">{meta}</div>}
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
