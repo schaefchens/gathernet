@@ -116,7 +116,10 @@ function ChannelRow({
             size="sm"
           />
         ) : (
-          <span className="h-6 w-6 shrink-0 grid place-items-center text-ink-faint">
+          // The same seal an uploaded avatar gets, at the same size. A bare 24px glyph
+          // next to a 40px sealed one left the rows on two different grids, and read as
+          // the emoji channels having no mark rather than a different one.
+          <span className="seal h-10 w-10 text-lg" aria-hidden>
             {meta?.emoji ?? '#'}
           </span>
         )}
