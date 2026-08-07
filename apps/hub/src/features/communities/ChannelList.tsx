@@ -7,6 +7,7 @@ import { LockIcon } from '../../components/icons.tsx'
 import { api } from '../../lib/api.ts'
 import type { ChannelMeta } from '../../lib/community-keys.ts'
 import { selectChannel, useChannelSelection } from '../../stores/channel-selection.ts'
+import { rememberChannelTitle } from '../../stores/channel-titles.ts'
 import { useCommunityChat } from '../../stores/community-chat.ts'
 import { channelKey, rememberCommunityChannels, useReadState } from '../../stores/read-state.ts'
 import { CommunityAvatar } from './CommunityAvatar.tsx'
@@ -19,7 +20,14 @@ import { channelFallbackTitle, useDecryptedMeta } from './meta.ts'
  * `['community', id]` query the route uses, so it shares the cache rather than
  * fetching again.
  */
-export function ChannelList({ communityId }: { communityId: string }) {
+export function ChannelList({
+  communityId,
+  query,
+}: {
+  communityId: string
+  /** when searching, only channels whose title matches are listed */
+  query?: string | undefined
+}) {
   const { t } = useTranslation()
   const detail = useQuery({
     queryKey: ['community', communityId],
@@ -48,6 +56,7 @@ export function ChannelList({ communityId }: { communityId: string }) {
           key={channel.channelId}
           communityId={communityId}
           channel={channel}
+          query={query}
           active={channel.channelId === selected}
           onSelect={() => {
             selectChannel(communityId, channel.channelId)
@@ -66,11 +75,13 @@ function ChannelRow({
   channel,
   active,
   onSelect,
+  query,
 }: {
   communityId: string
   channel: CommunityChannel
   active: boolean
   onSelect: () => void
+  query?: string | undefined
 }) {
   const { t } = useTranslation()
   const meta = useDecryptedMeta<ChannelMeta>(communityId, channel.metaCiphertext)
@@ -78,6 +89,13 @@ function ChannelRow({
   const lastRead = useReadState((s) => s.lastRead[channelKey(channel.channelId)] ?? 0)
   const last = useCommunityChat((s) => s.messages[channel.channelId]?.at(-1))
   const unread = !active && !!last && !last.outgoing && last.sentAt > lastRead
+
+  // Publish the title so the conversation list can filter by channel name.
+  useEffect(() => {
+    rememberChannelTitle(channel.channelId, title)
+  }, [channel.channelId, title])
+
+  if (query && !title.toLowerCase().includes(query)) return null
 
   return (
     <li>

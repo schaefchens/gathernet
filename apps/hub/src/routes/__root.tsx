@@ -2,6 +2,7 @@ import { createRootRoute, Link, Outlet, useRouterState } from '@tanstack/react-r
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
+  CatalogIcon,
   ChatIcon,
   CommunityIcon,
   ConnectIcon,
@@ -63,6 +64,7 @@ const NAV = [
   { to: '/', labelKey: 'nav.chats', Icon: ChatIcon },
   { to: '/communities', labelKey: 'nav.communities', Icon: CommunityIcon },
   { to: '/friends/add', labelKey: 'nav.connect', Icon: ConnectIcon },
+  { to: '/catalog', labelKey: 'nav.catalog', Icon: CatalogIcon },
 ] as const
 
 /**
@@ -130,6 +132,16 @@ function AppShell() {
               {t('common.appName')}
             </Link>
             <p className="mt-1 text-xs italic text-ink-faint">{t('nav.tagline')}</p>
+          </div>
+          {/* Both ways of starting something live above the list, so the list itself
+              is only conversations. */}
+          <div className="flex gap-2 px-3 pb-3">
+            <Link to="/friends/add" className="btn-quiet flex-1 text-center text-xs">
+              {t('friends.add')}
+            </Link>
+            <Link to="/communities" className="btn-quiet flex-1 text-center text-xs">
+              {t('chats.joinCommunity')}
+            </Link>
           </div>
           <p className="section-label px-4 pb-2">{t('chats.title')}</p>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -216,6 +228,14 @@ function AppShell() {
                 <ConnectIcon size={24} />
               </span>
               <span aria-hidden>{t('nav.connect')}</span>
+            </Link>
+            <Link
+              to="/catalog"
+              className="tab-item"
+              aria-current={isCurrent('/catalog') ? 'page' : undefined}
+            >
+              <CatalogIcon size={22} />
+              {t('nav.catalog')}
             </Link>
             <Link
               to="/settings"

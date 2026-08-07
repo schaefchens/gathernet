@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as CatalogRouteImport } from './routes/catalog'
 import { Route as AuthorizeRouteImport } from './routes/authorize'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CommunitiesIndexRouteImport } from './routes/communities.index'
@@ -21,6 +22,11 @@ import { Route as AppsConnectRouteImport } from './routes/apps.connect'
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CatalogRoute = CatalogRouteImport.update({
+  id: '/catalog',
+  path: '/catalog',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthorizeRoute = AuthorizeRouteImport.update({
@@ -62,6 +68,7 @@ const AppsConnectRoute = AppsConnectRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/authorize': typeof AuthorizeRoute
+  '/catalog': typeof CatalogRoute
   '/settings': typeof SettingsRoute
   '/apps/connect': typeof AppsConnectRoute
   '/chat/$friendId': typeof ChatFriendIdRoute
@@ -72,6 +79,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/authorize': typeof AuthorizeRoute
+  '/catalog': typeof CatalogRoute
   '/settings': typeof SettingsRoute
   '/apps/connect': typeof AppsConnectRoute
   '/chat/$friendId': typeof ChatFriendIdRoute
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/authorize': typeof AuthorizeRoute
+  '/catalog': typeof CatalogRoute
   '/settings': typeof SettingsRoute
   '/apps/connect': typeof AppsConnectRoute
   '/chat/$friendId': typeof ChatFriendIdRoute
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/authorize'
+    | '/catalog'
     | '/settings'
     | '/apps/connect'
     | '/chat/$friendId'
@@ -105,6 +115,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/authorize'
+    | '/catalog'
     | '/settings'
     | '/apps/connect'
     | '/chat/$friendId'
@@ -115,6 +126,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/authorize'
+    | '/catalog'
     | '/settings'
     | '/apps/connect'
     | '/chat/$friendId'
@@ -126,6 +138,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthorizeRoute: typeof AuthorizeRoute
+  CatalogRoute: typeof CatalogRoute
   SettingsRoute: typeof SettingsRoute
   AppsConnectRoute: typeof AppsConnectRoute
   ChatFriendIdRoute: typeof ChatFriendIdRoute
@@ -141,6 +154,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/catalog': {
+      id: '/catalog'
+      path: '/catalog'
+      fullPath: '/catalog'
+      preLoaderRoute: typeof CatalogRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/authorize': {
@@ -198,6 +218,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthorizeRoute: AuthorizeRoute,
+  CatalogRoute: CatalogRoute,
   SettingsRoute: SettingsRoute,
   AppsConnectRoute: AppsConnectRoute,
   ChatFriendIdRoute: ChatFriendIdRoute,

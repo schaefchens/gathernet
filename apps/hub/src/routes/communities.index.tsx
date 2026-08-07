@@ -8,6 +8,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { MenuButton } from '../components/MenuButton.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
 import { QrScanner } from '../components/QrScanner.tsx'
 import { CommunityAvatar } from '../features/communities/CommunityAvatar.tsx'
 import { useDecryptedMeta } from '../features/communities/meta.ts'
@@ -20,6 +22,8 @@ import {
   rememberKMeta,
   sealMeta,
 } from '../lib/community-keys.ts'
+import { DESKTOP_QUERY, useMediaQuery } from '../lib/use-media-query.ts'
+import { selectChannel } from '../stores/channel-selection.ts'
 import { communityChatStore } from '../stores/community-chat.ts'
 
 export const Route = createFileRoute('/communities/')({ component: CommunitiesScreen })
@@ -36,6 +40,7 @@ function CommunitiesScreen() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [panel, setPanel] = useState<Panel>('none')
+  const isDesktop = useMediaQuery(DESKTOP_QUERY)
 
   const communities = useQuery({
     queryKey: ['communities'],
@@ -64,25 +69,45 @@ function CommunitiesScreen() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl">{t('communities.title')}</h1>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className="btn-quiet text-sm"
-            onClick={() => setPanel(panel === 'join' ? 'none' : 'join')}
-          >
-            {t('communities.joinWithCode')}
-          </button>
-          <button
-            type="button"
-            className="btn-gold text-sm"
-            onClick={() => setPanel(panel === 'create' ? 'none' : 'create')}
-          >
-            {t('communities.create')}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        backTo="/"
+        title={t('communities.title')}
+        actions={
+          // Side by side these two wrap to four lines and run off an iPhone SE, so
+          // below md they fold into the overflow menu instead.
+          isDesktop ? (
+            <>
+              <button
+                type="button"
+                className="btn-quiet text-sm"
+                onClick={() => setPanel(panel === 'join' ? 'none' : 'join')}
+              >
+                {t('communities.joinWithCode')}
+              </button>
+              <button
+                type="button"
+                className="btn-gold text-sm"
+                onClick={() => setPanel(panel === 'create' ? 'none' : 'create')}
+              >
+                {t('communities.create')}
+              </button>
+            </>
+          ) : (
+            <MenuButton
+              items={[
+                {
+                  label: t('communities.joinWithCode'),
+                  onSelect: () => setPanel(panel === 'join' ? 'none' : 'join'),
+                },
+                {
+                  label: t('communities.create'),
+                  onSelect: () => setPanel(panel === 'create' ? 'none' : 'create'),
+                },
+              ]}
+            />
+          )
+        }
+      />
 
       {panel === 'create' && <CreatePanel onDone={() => setPanel('none')} />}
       {panel === 'join' && <JoinPanel onDone={() => setPanel('none')} />}
@@ -119,6 +144,9 @@ function CommunityCard({
       to="/communities/$communityId"
       params={{ communityId: community.communityId }}
       className="card flex items-center gap-3 py-3 transition-colors hover:border-gold"
+      // Opening a community means the community, not whichever channel you were last
+      // reading in it — same rule as the row in the conversation list.
+      onClick={() => selectChannel(community.communityId, null)}
     >
       <CommunityAvatar
         communityId={community.communityId}
@@ -186,12 +214,19 @@ function CreatePanel({ onDone }: { onDone: () => void }) {
         maxLength={80}
         autoFocus
       />
-      <input
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        placeholder={t('communities.descriptionPlaceholder')}
-        maxLength={500}
-      />
+      {/* A textarea, matching the settings form: a single-line input silently ate
+          newlines, so a description written with paragraphs and bullets arrived as
+          one run-on line and rendered that way forever after. */}
+      <div className="space-y-1">
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder={t('communities.descriptionPlaceholder')}
+          maxLength={2000}
+          rows={3}
+        />
+        <p className="text-[11px] text-ink-faint">{t('communities.markdownHint')}</p>
+      </div>
       <button type="submit" className="btn-gold w-full" disabled={!name.trim() || create.isPending}>
         {t('communities.create')}
       </button>

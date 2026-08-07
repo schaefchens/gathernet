@@ -137,3 +137,16 @@ export const PinIcon = (p: IconProps) =>
   )
 
 export const ChevronIcon = (p: IconProps) => svg(<path d="m9 5 7 7-7 7" />, p)
+
+export const PlusIcon = (p: IconProps) => svg(<path d="M12 5v14M5 12h14" />, p)
+
+export const CatalogIcon = (p: IconProps) =>
+  svg(
+    <>
+      <rect x="3.5" y="4" width="7" height="7" rx="1.5" />
+      <rect x="13.5" y="4" width="7" height="7" rx="1.5" />
+      <rect x="3.5" y="14" width="7" height="6" rx="1.5" />
+      <rect x="13.5" y="14" width="7" height="6" rx="1.5" />
+    </>,
+    p,
+  )

@@ -117,7 +117,7 @@ export function VoiceRecorder({
   return (
     <button
       type="button"
-      className="btn-icon"
+      className="btn-mic"
       disabled={disabled}
       title={t('chat.recordVoice')}
       aria-label={t('chat.recordVoice')}

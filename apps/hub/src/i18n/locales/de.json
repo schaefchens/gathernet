@@ -23,7 +23,8 @@
     "communities": "Gemeinschaften",
     "connect": "Verbinden",
     "tagline": "Sicher. Treu. Gemeinsam.",
-    "more": "Weitere Aktionen"
+    "more": "Weitere Aktionen",
+    "catalog": "Katalog"
   },
   "chats": {
     "title": "Chats",
@@ -35,9 +36,19 @@
     "unread": "Ungelesen",
     "youPrefix": "Du:",
     "browseCommunities": "Gemeinschaft finden",
-    "newCommunity": "Gemeinschaften & Beitreten",
     "expand": "Kanäle anzeigen",
-    "collapse": "Kanäle ausblenden"
+    "collapse": "Kanäle ausblenden",
+    "joinCommunity": "Gemeinschaft beitreten",
+    "searchPlaceholder": "Unterhaltungen durchsuchen",
+    "filterAll": "Alle",
+    "filterUnread": "Ungelesen",
+    "filterCommunities": "Gemeinschaften",
+    "noMatches": "Keine Treffer."
+  },
+  "catalog": {
+    "title": "Katalog",
+    "soon": "Noch nicht verfügbar",
+    "soonBody": "Apps, Spiele, Bücher und Videos werden von hier gestartet — mit dem, was deine Freunde nutzen, sofern sie es erlauben."
   },
   "welcome": {
     "title": "Gathernet",
@@ -511,7 +522,8 @@
     "channelCount_other": "{{count}} Kanäle",
     "backToChat": "Zurück zum Chat",
     "ttlSummary_one": "Nachrichten {{count}} Tag lang",
-    "ttlSummary_other": "Nachrichten {{count}} Tage lang"
+    "ttlSummary_other": "Nachrichten {{count}} Tage lang",
+    "viewCommunity": "Gemeinschaft"
   },
   "rollcall": {
     "ask": "Fragen, wer noch dabei ist",

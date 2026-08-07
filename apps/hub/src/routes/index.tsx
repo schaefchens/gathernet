@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ChatIcon } from '../components/icons.tsx'
+import { ChatIcon, CommunityIcon, ConnectIcon } from '../components/icons.tsx'
 import { MenuButton } from '../components/MenuButton.tsx'
 import { PageHeader } from '../components/PageHeader.tsx'
 import { ChatList } from '../features/chat/ChatList.tsx'
@@ -67,14 +67,34 @@ function ChatsScreen() {
         title={t('chats.title')}
         actions={
           <>
-            <Link to="/friends/add" className="btn-gold text-sm">
-              {t('friends.add')}
-            </Link>
+            {/* The sidebar carries these on desktop; below md this screen is the
+                sidebar, so they sit in its bar rather than one being buried in a menu. */}
+            {!isDesktop && (
+              <>
+                {/* Icons, not labels: "Freund hinzufügen" and "Gemeinschaft beitreten"
+                    fill the whole bar and squeeze the title out of existence. These are
+                    the same two glyphs the rail and tab bar already use for these
+                    destinations. */}
+                <Link
+                  to="/friends/add"
+                  className="btn-icon h-9 w-9"
+                  aria-label={t('friends.add')}
+                  title={t('friends.add')}
+                >
+                  <ConnectIcon size={18} />
+                </Link>
+                <Link
+                  to="/communities"
+                  className="btn-icon h-9 w-9"
+                  aria-label={t('chats.joinCommunity')}
+                  title={t('chats.joinCommunity')}
+                >
+                  <CommunityIcon size={18} />
+                </Link>
+              </>
+            )}
             <MenuButton
-              items={[
-                { label: t('chats.newCommunity'), to: '/communities' },
-                { label: t('settings.title'), to: '/settings' },
-              ]}
+              items={[{ label: t('settings.title'), to: '/settings' }]}
               footer={!isDesktop ? <PresenceSelector /> : undefined}
             />
           </>

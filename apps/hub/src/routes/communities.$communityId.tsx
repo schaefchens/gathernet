@@ -16,6 +16,7 @@ import { ChannelInfo } from '../features/communities/ChannelInfo.tsx'
 import { ChannelJoinPanel } from '../features/communities/ChannelJoinPanel.tsx'
 import { ChannelSettingsForm } from '../features/communities/ChannelSettingsForm.tsx'
 import { AvatarUploader, CommunityAvatar } from '../features/communities/CommunityAvatar.tsx'
+import { CommunityOverview } from '../features/communities/CommunityOverview.tsx'
 import { InvitePanel } from '../features/communities/InvitePanel.tsx'
 import { MemberPanel } from '../features/communities/MemberPanel.tsx'
 import { ModerationPanel } from '../features/communities/ModerationPanel.tsx'
@@ -26,6 +27,7 @@ import { DESKTOP_QUERY, useMediaQuery } from '../lib/use-media-query.ts'
 import { selectChannel, useChannelSelection } from '../stores/channel-selection.ts'
 import { communityChatStore } from '../stores/community-chat.ts'
 import { useSession } from '../stores/session.ts'
+import { setCommunityExpanded } from '../stores/sidebar-state.ts'
 
 export const Route = createFileRoute('/communities/$communityId')({
   component: CommunityDetailScreen,
@@ -35,17 +37,6 @@ const ROLE_BADGE = {
   owner: 'text-gold border-gold',
   leader: 'text-indigo-soft border-indigo-soft',
   member: 'text-ink-soft border-edge',
-} as const
-
-/** Coarse size bands, shown instead of a count when a community is too large for a
- *  roster. Mirrors MemberPanel — the typed t() needs literal keys. */
-const BUCKET_KEY = {
-  few: 'communities.sizeFew',
-  dozens: 'communities.sizeDozens',
-  hundreds: 'communities.sizeHundreds',
-  thousands: 'communities.sizeThousands',
-  tensOfThousands: 'communities.sizeTensOfThousands',
-  hundredsOfThousands: 'communities.sizeHundredsOfThousands',
 } as const
 
 function CommunityDetailScreen() {
@@ -79,14 +70,16 @@ function CommunityDetailScreen() {
 
   const sorted = [...channels].sort((a, b) => a.position - b.position)
 
-  // Keep the selection valid as channels appear/disappear (WS-driven refetch).
+  // Opening a community expands it in the conversation list and keeps it that way.
   useEffect(() => {
-    if (sorted.length === 0) {
+    setCommunityExpanded(communityId, true)
+  }, [communityId])
+
+  // Drop a selection that no longer exists (WS-driven refetch, deleted channel), but
+  // never auto-pick one: opening a community should show the community.
+  useEffect(() => {
+    if (selected && !sorted.some((c) => c.channelId === selected)) {
       selectChannel(communityId, null)
-      return
-    }
-    if (!selected || !sorted.some((c) => c.channelId === selected)) {
-      selectChannel(communityId, sorted[0]?.channelId ?? null)
     }
   }, [sorted, selected, communityId])
 
@@ -98,6 +91,7 @@ function CommunityDetailScreen() {
   const channelTitle = selectedChannel
     ? (channelMeta?.title ?? channelFallbackTitle(selectedChannel.channelId))
     : null
+  const channelDisplay = `${channelMeta?.emoji ? `${channelMeta.emoji} ` : ''}${channelTitle ?? ''}`
   // Manager rights for the open channel — the actions they unlock now live in the
   // header menu rather than a row of tabs above the conversation.
   const channelIsManager =
@@ -193,39 +187,30 @@ function CommunityDetailScreen() {
         // channels, so that is where "back" should land you.
         backTo={isDesktop ? '/communities' : '/'}
         avatar={
-          <CommunityAvatar
-            communityId={communityId}
-            mediaId={detail.community.avatarMediaId}
-            label={communityName}
-            size="sm"
-          />
+          selectedChannel ? (
+            <CommunityAvatar
+              communityId={communityId}
+              mediaId={detail.community.avatarMediaId}
+              label={communityName}
+              size="sm"
+            />
+          ) : undefined
         }
-        title={
-          channelTitle
-            ? `${channelMeta?.emoji ? `${channelMeta.emoji} ` : ''}${channelTitle}`
-            : communityName
-        }
-        subtitle={
-          // Reading a channel, the community is the only context worth a line: the
-          // member count is noise there, and anyone who isn't a member gets a join
-          // panel instead of a conversation. It still identifies the community itself.
-          channelTitle
-            ? communityName
-            : detail.memberCount !== null
-              ? t('communities.memberCount', { count: detail.memberCount })
-              : t(BUCKET_KEY[detail.memberBucket])
+        title={selectedChannel && channelTitle ? channelDisplay : ''}
+        subtitle={selectedChannel ? communityName : undefined}
+        meta={
+          selectedChannel ? (
+            <span
+              className="flex items-center gap-1.5 text-xs text-ink-faint"
+              title={t('chat.encrypted')}
+            >
+              <LockIcon size={13} />
+              {t('chat.encrypted')}
+            </span>
+          ) : undefined
         }
         onToggle={selectedChannel ? () => setShowInfo((v) => !v) : undefined}
         expanded={showInfo}
-        meta={
-          <span
-            className="flex items-center gap-1.5 text-xs text-ink-faint"
-            title={t('chat.encrypted')}
-          >
-            <LockIcon size={13} />
-            {t('chat.encrypted')}
-          </span>
-        }
         actions={
           <>
             <span
@@ -237,6 +222,14 @@ function CommunityDetailScreen() {
               items={[
                 ...(selectedChannel && view !== 'chat'
                   ? [{ label: t('communities.viewChat'), onSelect: () => setView('chat') }]
+                  : []),
+                ...(selectedChannel
+                  ? [
+                      {
+                        label: t('communities.viewCommunity'),
+                        onSelect: () => selectChannel(communityId, null),
+                      },
+                    ]
                   : []),
                 ...(selectedChannel && channelIsManager
                   ? [
@@ -354,9 +347,7 @@ function CommunityDetailScreen() {
             onCloseView={() => setView('chat')}
           />
         ) : (
-          <div className="card grid flex-1 place-items-center text-ink-soft">
-            {t('communities.selectChannel')}
-          </div>
+          <CommunityOverview communityId={communityId} detail={detail} meta={communityMeta} />
         )}
       </div>
     </div>

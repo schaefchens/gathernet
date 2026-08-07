@@ -4,6 +4,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { PageHeader } from '../components/PageHeader.tsx'
 import { QrScanner } from '../components/QrScanner.tsx'
 import { ApiError, api } from '../lib/api.ts'
 
@@ -17,7 +18,7 @@ function AddFriendScreen() {
 
   return (
     <div className="space-y-4 max-w-md mx-auto">
-      <h1 className="font-display text-3xl">{t('addFriend.title')}</h1>
+      <PageHeader backTo="/" title={t('addFriend.title')} />
       <div className="flex gap-1 bg-raised border border-edge rounded-md p-1">
         {(['invite', 'code', 'scan'] as const).map((name) => (
           <button

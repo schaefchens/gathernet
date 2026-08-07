@@ -161,6 +161,13 @@ select:focus {
   border-color: color-mix(in oklab, var(--color-gold) 60%, transparent);
 }
 
+/* Slightly tighter than a form field, but keeping the app's corner radius — a full
+   pill reads as a chip, which this isn't. Defined here rather than as utilities in
+   the markup: the element rule above is unlayered and would win over them. */
+.input-compact {
+  @apply rounded-md px-3 py-1.5 text-sm;
+}
+
 button {
   @apply cursor-pointer;
 }
@@ -251,11 +258,87 @@ button {
   @apply opacity-40 cursor-not-allowed;
 }
 
-/* Pill text field for the composer. */
+/*
+ * The composer pill. The field is a container, not the input: the view-once toggle
+ * and the send button live inside it, the way every modern chat app arranges them,
+ * with attach outside on the left and the recorder outside on the right.
+ */
 .composer-field {
-  @apply flex-1 min-w-0 rounded-full px-4 py-2.5 text-sm;
+  @apply flex min-w-0 flex-1 items-center gap-2 rounded-full py-1.5 pl-2 pr-1.5;
   background-color: color-mix(in oklab, var(--color-night) 70%, black);
   border: 1px solid color-mix(in oklab, var(--color-gold) 32%, transparent);
+}
+
+.composer-field:focus-within {
+  border-color: color-mix(in oklab, var(--color-gold) 60%, transparent);
+}
+
+/* Beats the global input rule — inside the pill there is no second box. */
+.composer-input {
+  @apply min-w-0 flex-1 border-0 bg-transparent px-1 py-1 text-sm;
+}
+
+.composer-input:focus {
+  @apply outline-none;
+  border-color: transparent;
+}
+
+/* Small round controls seated inside the pill. */
+.btn-inline {
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors;
+  color: var(--color-ink-faint);
+}
+
+.btn-inline:hover:not(:disabled) {
+  color: var(--color-gold-bright);
+}
+
+.btn-inline:disabled {
+  @apply cursor-not-allowed opacity-40;
+}
+
+/* The view-once toggle, lit when armed. */
+.btn-inline[aria-pressed="true"] {
+  color: #16110a;
+  background-color: var(--color-gold-bright);
+}
+
+/* Send: gold, inside the pill on the right. */
+.btn-inline-send {
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-full transition-transform;
+  color: #16110a;
+  background-image: linear-gradient(
+    160deg,
+    var(--color-gold-bright) 0%,
+    var(--color-gold) 50%,
+    var(--color-gold-deep) 100%
+  );
+}
+
+.btn-inline-send:hover:not(:disabled) {
+  transform: scale(1.06);
+}
+
+.btn-inline-send:disabled {
+  @apply cursor-not-allowed opacity-35;
+}
+
+/* The recorder sits outside the pill and reads as a separate mode, not a sibling
+   of send — a filled surface rather than a gold action. */
+.btn-mic {
+  @apply grid h-10 w-10 shrink-0 place-items-center rounded-full transition-colors;
+  color: var(--color-ink-soft);
+  background-color: var(--color-overlay);
+  border: 1px solid var(--color-edge);
+}
+
+.btn-mic:hover:not(:disabled) {
+  color: var(--color-gold-bright);
+  border-color: color-mix(in oklab, var(--color-gold) 45%, transparent);
+}
+
+.btn-mic:disabled {
+  @apply cursor-not-allowed opacity-40;
 }
 
 /* ------------------------------------------------------------- messages */

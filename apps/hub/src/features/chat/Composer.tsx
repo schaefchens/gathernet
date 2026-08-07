@@ -1,6 +1,6 @@
 import { type ReactNode, type RefObject, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AttachIcon, EyeIcon, SendIcon } from '../../components/icons.tsx'
+import { EyeIcon, PlusIcon, SendIcon } from '../../components/icons.tsx'
 import { VoiceRecorder } from './VoiceRecorder.tsx'
 
 interface ComposerProps {
@@ -128,49 +128,48 @@ export function Composer({
               aria-label={t('chat.attach')}
               onClick={() => fileInputRef.current?.click()}
             >
-              <AttachIcon />
+              <PlusIcon />
             </button>
           </>
         )}
+
+        <div className="composer-field">
+          {supportsViewOnce && (
+            <button
+              type="button"
+              className="btn-inline"
+              disabled={!ready}
+              aria-pressed={viewOnce}
+              title={t('chat.viewOnce')}
+              aria-label={t('chat.viewOnce')}
+              onClick={() => setViewOnce((v) => !v)}
+            >
+              <EyeIcon size={17} />
+            </button>
+          )}
+          <input
+            ref={inputRef}
+            className="composer-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={ready ? placeholder : t('chat.cannotSend')}
+            disabled={!ready}
+            autoFocus={autoFocus}
+          />
+          <button
+            type="submit"
+            className="btn-inline-send"
+            aria-label={t('chat.send')}
+            title={t('chat.send')}
+            disabled={!ready || !draft.trim() || sending}
+          >
+            <SendIcon size={16} />
+          </button>
+        </div>
+
         {onSendVoice && (
           <VoiceRecorder disabled={!ready} onRecorded={(b, d) => void sendVoiceNote(b, d)} />
         )}
-        {supportsViewOnce && (
-          <button
-            type="button"
-            className="btn-icon"
-            disabled={!ready}
-            aria-pressed={viewOnce}
-            title={t('chat.viewOnce')}
-            aria-label={t('chat.viewOnce')}
-            style={
-              viewOnce
-                ? { color: '#16110a', backgroundColor: 'var(--color-gold-bright)' }
-                : undefined
-            }
-            onClick={() => setViewOnce((v) => !v)}
-          >
-            <EyeIcon />
-          </button>
-        )}
-        <input
-          ref={inputRef}
-          className="composer-field"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={ready ? placeholder : t('chat.cannotSend')}
-          disabled={!ready}
-          autoFocus={autoFocus}
-        />
-        <button
-          type="submit"
-          className="btn-send"
-          aria-label={t('chat.send')}
-          title={t('chat.send')}
-          disabled={!ready || !draft.trim() || sending}
-        >
-          <SendIcon />
-        </button>
       </form>
     </div>
   )

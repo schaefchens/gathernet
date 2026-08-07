@@ -23,7 +23,8 @@
     "communities": "Communities",
     "connect": "Connect",
     "tagline": "Secure. Faithful. Together.",
-    "more": "More actions"
+    "more": "More actions",
+    "catalog": "Catalog"
   },
   "chats": {
     "title": "Chats",
@@ -35,9 +36,19 @@
     "unread": "Unread",
     "youPrefix": "You:",
     "browseCommunities": "Find a community",
-    "newCommunity": "Communities & joining",
     "expand": "Show channels",
-    "collapse": "Hide channels"
+    "collapse": "Hide channels",
+    "joinCommunity": "Join a community",
+    "searchPlaceholder": "Search conversations",
+    "filterAll": "All",
+    "filterUnread": "Unread",
+    "filterCommunities": "Communities",
+    "noMatches": "Nothing matches that."
+  },
+  "catalog": {
+    "title": "Catalog",
+    "soon": "Not here yet",
+    "soonBody": "Apps, games, books and videos will be launched from here, with what your friends are using when they allow it."
   },
   "welcome": {
     "title": "Gathernet",
@@ -511,7 +522,8 @@
     "channelCount_other": "{{count}} channels",
     "backToChat": "Back to chat",
     "ttlSummary_one": "Messages kept {{count}} day",
-    "ttlSummary_other": "Messages kept {{count}} days"
+    "ttlSummary_other": "Messages kept {{count}} days",
+    "viewCommunity": "Community home"
   },
   "rollcall": {
     "ask": "Ask who's still here",
