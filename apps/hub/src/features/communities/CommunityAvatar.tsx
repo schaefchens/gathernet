@@ -11,9 +11,9 @@ const MAX_CIPHERTEXT_B64 = 350 * 1024
 const MAX_EDGE = 256
 
 const SIZE_CLASS = {
-  sm: 'h-8 w-8 text-[10px]',
+  sm: 'h-10 w-10 text-xs',
   md: 'h-12 w-12 text-sm',
-  lg: 'h-16 w-16 text-base',
+  lg: 'h-24 w-24 text-2xl',
 } as const
 
 type AvatarSize = keyof typeof SIZE_CLASS

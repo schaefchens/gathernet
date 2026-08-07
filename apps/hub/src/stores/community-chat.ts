@@ -225,6 +225,11 @@ class CommunityChatStore {
   /** MLS channels whose current leaf set failed capability verification (an
    *  unauthorised/injected member) — sending is refused to contain the leak. */
   private untrustedChannels = new Set<string>()
+  /** Channels this device manages, as told by the UI. Listing a channel's devices is
+   *  manager-only, so without this a plain member fires a 403 on every group_key
+   *  channel they open — swallowed, but noisy in the console and pointless traffic.
+   *  Unknown (absent) still attempts, so nothing regresses when the hint is missing. */
+  private channelManager = new Map<string, boolean>()
   /** group_key channels this device tracks: channelId → {communityId, keyEpoch}. */
   private groupKey = new Map<string, { communityId: string; keyEpoch: number }>()
   /** Verified sender certs, per community: communityId → deviceId → identity (or null). */
@@ -395,10 +400,15 @@ class CommunityChatStore {
    * (e.g. a new member joined). Idempotent + best-effort; a non-manager 403s. Only
    * acts on channels this device tracks (has opened/created).
    */
+  setChannelManager(channelId: string, isManager: boolean): void {
+    this.channelManager.set(channelId, isManager)
+  }
+
   async syncChannelGrants(communityId: string, channelId: string): Promise<void> {
     const gk = this.groupKey.get(channelId)
     const record = this.record
     if (!gk || !record) return
+    if (this.channelManager.get(channelId) === false) return // members can't grant
     const epoch = (await latestHeldEpoch(channelId)) ?? gk.keyEpoch
     const key = await getKChannel(channelId, epoch)
     if (key) await grantChannelKey(communityId, channelId, record, key, epoch).catch(() => {})
@@ -720,7 +730,7 @@ class CommunityChatStore {
     }))
     await fetchChannelKeyGrant(info.communityId, info.channelId, record).catch(() => {})
     const key = await getKChannel(info.channelId, info.keyEpoch)
-    if (key) {
+    if (key && this.channelManager.get(info.channelId) !== false) {
       // Best-effort: a manager tops up member grants; a non-manager's POST 403s.
       await grantChannelKey(info.communityId, info.channelId, record, key, info.keyEpoch).catch(
         () => {},

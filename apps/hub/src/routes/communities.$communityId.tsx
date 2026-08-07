@@ -91,7 +91,6 @@ function CommunityDetailScreen() {
   const channelTitle = selectedChannel
     ? (channelMeta?.title ?? channelFallbackTitle(selectedChannel.channelId))
     : null
-  const channelDisplay = `${channelMeta?.emoji ? `${channelMeta.emoji} ` : ''}${channelTitle ?? ''}`
   // Manager rights for the open channel — the actions they unlock now live in the
   // header menu rather than a row of tabs above the conversation.
   const channelIsManager =
@@ -188,15 +187,23 @@ function CommunityDetailScreen() {
         backTo={isDesktop ? '/communities' : '/'}
         avatar={
           selectedChannel ? (
-            <CommunityAvatar
-              communityId={communityId}
-              mediaId={detail.community.avatarMediaId}
-              label={communityName}
-              size="sm"
-            />
+            // The channel's own mark — its image if it has one, otherwise its emoji.
+            // Showing the community's here made every channel look identical.
+            selectedChannel.avatarMediaId ? (
+              <CommunityAvatar
+                communityId={communityId}
+                mediaId={selectedChannel.avatarMediaId}
+                label={channelTitle ?? ''}
+                size="md"
+              />
+            ) : (
+              <span className="seal h-12 w-12 text-xl" aria-hidden>
+                {channelMeta?.emoji ?? '#'}
+              </span>
+            )
           ) : undefined
         }
-        title={selectedChannel && channelTitle ? channelDisplay : ''}
+        title={selectedChannel && channelTitle ? channelTitle : ''}
         subtitle={selectedChannel ? communityName : undefined}
         meta={
           selectedChannel ? (

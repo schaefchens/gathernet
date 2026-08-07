@@ -1,9 +1,9 @@
 import type { FriendStatus } from '../../stores/presence.ts'
 
 const SIZE_CLASS = {
-  sm: 'h-8 w-8 text-[10px]',
-  md: 'h-11 w-11 text-sm',
-  lg: 'h-16 w-16 text-base',
+  sm: 'h-10 w-10 text-xs',
+  md: 'h-12 w-12 text-sm',
+  lg: 'h-20 w-20 text-lg',
 } as const
 
 /** Jewel-tone fields, matched by `tintIndex` to the sender-name tints in app.css. */

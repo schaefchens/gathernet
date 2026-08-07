@@ -21,6 +21,8 @@ interface ComposerProps {
   onError?: ((err: unknown) => void) | undefined
   autoFocus?: boolean
   inputRef?: RefObject<HTMLInputElement | null> | undefined
+  /** preload the field — used when editing an existing message */
+  seed?: string
 }
 
 /**
@@ -44,9 +46,17 @@ export function Composer({
   onError,
   autoFocus,
   inputRef,
+  seed,
 }: ComposerProps) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState('')
+  // Loading a message to edit replaces whatever was half-typed; clearing the edit
+  // leaves the field alone so nothing is lost on cancel.
+  const [seeded, setSeeded] = useState('')
+  if (seed && seed !== seeded) {
+    setSeeded(seed)
+    setDraft(seed)
+  }
   const [sending, setSending] = useState(false)
   const [viewOnce, setViewOnce] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)

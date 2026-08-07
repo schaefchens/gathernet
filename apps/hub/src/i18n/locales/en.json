@@ -210,7 +210,9 @@
     "viewOnceSeen": "View once — opened by recipient",
     "pin": "Pin",
     "sendFailedNotMember": "You're no longer a member of this channel, so your message wasn't sent. Reload to see the channel's current state.",
-    "messageActions": "Message actions"
+    "messageActions": "Message actions",
+    "editing": "Editing message",
+    "editPlaceholder": "Edit your message…"
   },
   "pins": {
     "title": "Pinned ({{count}})",

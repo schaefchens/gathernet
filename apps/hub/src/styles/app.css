@@ -305,18 +305,14 @@ button {
 
 /* Send: gold, inside the pill on the right. */
 .btn-inline-send {
-  @apply grid h-8 w-8 shrink-0 place-items-center rounded-full transition-transform;
-  color: #16110a;
-  background-image: linear-gradient(
-    160deg,
-    var(--color-gold-bright) 0%,
-    var(--color-gold) 50%,
-    var(--color-gold-deep) 100%
-  );
+  @apply grid h-8 w-8 shrink-0 place-items-center rounded-full transition-colors;
+  color: var(--color-ink-soft);
+  background-color: color-mix(in oklab, var(--color-ink) 10%, transparent);
 }
 
 .btn-inline-send:hover:not(:disabled) {
-  transform: scale(1.06);
+  color: var(--color-gold-bright);
+  background-color: color-mix(in oklab, var(--color-gold) 18%, transparent);
 }
 
 .btn-inline-send:disabled {
@@ -326,15 +322,19 @@ button {
 /* The recorder sits outside the pill and reads as a separate mode, not a sibling
    of send — a filled surface rather than a gold action. */
 .btn-mic {
-  @apply grid h-10 w-10 shrink-0 place-items-center rounded-full transition-colors;
-  color: var(--color-ink-soft);
-  background-color: var(--color-overlay);
-  border: 1px solid var(--color-edge);
+  @apply grid h-10 w-10 shrink-0 place-items-center rounded-full transition-transform;
+  color: #16110a;
+  background-image: linear-gradient(
+    160deg,
+    var(--color-gold-bright) 0%,
+    var(--color-gold) 50%,
+    var(--color-gold-deep) 100%
+  );
+  border: 1px solid color-mix(in oklab, var(--color-gold-bright) 70%, transparent);
 }
 
 .btn-mic:hover:not(:disabled) {
-  color: var(--color-gold-bright);
-  border-color: color-mix(in oklab, var(--color-gold) 45%, transparent);
+  transform: scale(1.05);
 }
 
 .btn-mic:disabled {

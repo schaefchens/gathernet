@@ -101,6 +101,8 @@ export function MessageThread({
   const [sendError, setSendError] = useState<string | null>(null)
   /** open thread's root message id (threaded channels only) */
   const [openThreadRoot, setOpenThreadRoot] = useState<string | null>(null)
+  /** the message being edited — the composer holds its text until sent or cancelled */
+  const [editing, setEditing] = useState<StoredMessage | null>(null)
   const composerRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -221,6 +223,7 @@ export function MessageThread({
                   myAccountId={myAccountId}
                   onReact={onReact}
                   onEdit={onEdit}
+                  onEditRequest={setEditing}
                   onDelete={onDelete}
                   onConsume={onConsume}
                   onPin={onPin}
@@ -246,14 +249,29 @@ export function MessageThread({
       ) : (
         <Composer
           ready={ready}
-          placeholder={t('chat.placeholder')}
+          placeholder={editing ? t('chat.editPlaceholder') : t('chat.placeholder')}
+          seed={editing?.text ?? ''}
           inputRef={composerRef}
           autoFocus
           error={sendError}
           onError={reportSendError}
           supportsViewOnce={supportsViewOnce}
           replyStrip={
-            replyPreview ? (
+            editing ? (
+              <div className="flex items-center gap-2 mb-2 text-xs text-ink-soft">
+                <span className="flex-1 min-w-0 truncate border-l-2 border-gold/60 pl-2">
+                  {t('chat.editing')}
+                </span>
+                <button
+                  type="button"
+                  className="text-ink-faint hover:text-ink"
+                  onClick={() => setEditing(null)}
+                  aria-label={t('common.cancel')}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : replyPreview ? (
               <div className="flex items-center gap-2 mb-2 text-xs text-ink-soft">
                 <span className="flex-1 min-w-0 truncate border-l-2 border-indigo-soft/60 pl-2">
                   {t('chat.replyingTo')}: {replyPreview.text || t('chat.attachment')}
@@ -271,6 +289,13 @@ export function MessageThread({
           }
           onSend={async (text, once) => {
             setSendError(null)
+            // Sending while editing commits the edit — the composer is the one place
+            // people expect to change what they wrote.
+            if (editing?.id) {
+              onEdit?.(editing.id, text)
+              setEditing(null)
+              return
+            }
             const replyTo = replyingTo ?? undefined
             await onSend(text, replyTo, once)
             setReplyingTo(null)

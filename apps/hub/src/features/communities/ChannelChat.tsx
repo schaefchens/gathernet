@@ -58,6 +58,12 @@ export function ChannelChat({
   })
   const friendAccountIds = friends.data?.friends.map((f) => f.accountId)
 
+  // Tell the store whether we may grant keys here, so a plain member stops firing a
+  // manager-only request (and a console 403) on every group_key channel they open.
+  useEffect(() => {
+    communityChatStore.setChannelManager(channelId, isManager)
+  }, [channelId, isManager])
+
   // An open channel is a read channel: clear its unread mark as messages arrive.
   const newestSentAt = messages[messages.length - 1]?.sentAt ?? 0
   useEffect(() => {

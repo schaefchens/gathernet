@@ -48,7 +48,7 @@ function ChatScreen() {
           <PersonAvatar
             accountId={friendId}
             label={friend?.displayName ?? '?'}
-            size="sm"
+            size="md"
             status={status}
           />
         }
