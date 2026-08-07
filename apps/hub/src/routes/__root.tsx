@@ -30,25 +30,26 @@ function RootComponent() {
 
   // The /authorize popup drives the session phases itself (minimal chrome,
   // no AppShell) — always render the route there instead of gating on phase.
-  if (pathname.startsWith('/authorize')) {
-    return (
-      <>
-        <Outlet />
-        <UpdatePrompt />
-      </>
-    )
-  }
+  const content = pathname.startsWith('/authorize') ? (
+    <Outlet />
+  ) : phase === 'loading' ? (
+    <div className="min-h-screen grid place-items-center text-ink-soft">{t('common.loading')}</div>
+  ) : phase === 'welcome' ? (
+    <WelcomeFlow />
+  ) : phase === 'locked' ? (
+    <UnlockScreen />
+  ) : (
+    <AppShell />
+  )
 
-  if (phase === 'loading') {
-    return (
-      <div className="min-h-screen grid place-items-center text-ink-soft">
-        {t('common.loading')}
-      </div>
-    )
-  }
+  // Kept at a fixed position outside the branch, because mounting this is what
+  // registers the service worker and every remount registers it again. The `loading`
+  // branch used to return a bare <div> with no prompt in it, so the first phase
+  // transition of every page load tore the registration down and built another —
+  // two registrations, two update checks, for one visit.
   return (
     <>
-      {phase === 'welcome' ? <WelcomeFlow /> : phase === 'locked' ? <UnlockScreen /> : <AppShell />}
+      {content}
       <UpdatePrompt />
     </>
   )
