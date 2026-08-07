@@ -1,10 +1,12 @@
 import type { Friend } from '@gathernet/shared'
 import { useQuery } from '@tanstack/react-query'
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LockIcon } from '../components/icons.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
 import { MessageThread } from '../features/chat/MessageThread.tsx'
+import { PersonAvatar } from '../features/chat/PersonAvatar.tsx'
 import { api } from '../lib/api.ts'
 import { chatStore, useChat } from '../stores/chat.ts'
 import { usePresence } from '../stores/presence.ts'
@@ -39,20 +41,29 @@ function ChatScreen() {
   }, [friendId, newestSentAt])
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8.5rem)]">
-      <div className="flex items-center gap-3 pb-3 border-b border-edge">
-        <Link to="/" className="text-ink-soft hover:text-ink" aria-label={t('common.back')}>
-          ←
-        </Link>
-        <div className="flex-1">
-          <h1 className="font-medium">{friend?.displayName ?? '…'}</h1>
-          <p className="text-xs text-ink-faint">{t(`friends.presence.${status}`)}</p>
-        </div>
-        <p className="flex items-center gap-1.5 text-xs text-ink-faint" title={t('chat.encrypted')}>
-          <LockIcon size={13} />
-          {t('chat.encrypted')}
-        </p>
-      </div>
+    <div className="flex h-full min-h-0 flex-col">
+      <PageHeader
+        backTo="/"
+        avatar={
+          <PersonAvatar
+            accountId={friendId}
+            label={friend?.displayName ?? '?'}
+            size="sm"
+            status={status}
+          />
+        }
+        title={friend?.displayName ?? '…'}
+        subtitle={t(`friends.presence.${status}`)}
+        meta={
+          <span
+            className="flex items-center gap-1.5 text-xs text-ink-faint"
+            title={t('chat.encrypted')}
+          >
+            <LockIcon size={13} />
+            {t('chat.encrypted')}
+          </span>
+        }
+      />
 
       <MessageThread
         messages={messages}

@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AttachIcon, EyeIcon, SendIcon } from '../../components/icons.tsx'
 import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
 import { buildThreadIndex } from '../../lib/thread-index.ts'
 import { WsRequestError } from '../../lib/ws-client.ts'
+import { Composer } from './Composer.tsx'
 import { MessageBubble } from './MessageBubble.tsx'
 import { ThreadView } from './ThreadView.tsx'
-import { VoiceRecorder } from './VoiceRecorder.tsx'
 
 /** True when a send failed because this account is no longer a member of the channel — the
  *  important case: the view was stale and the message would otherwise vanish silently. */
@@ -92,16 +91,12 @@ export function MessageThread({
   readOnlyLabel,
 }: MessageThreadProps) {
   const { t } = useTranslation()
-  const [draft, setDraft] = useState('')
-  const [sending, setSending] = useState(false)
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
-  const [viewOnce, setViewOnce] = useState(false)
   /** last send failure, shown above the composer — a silently dropped message is worse than
    *  an error (a removed member would otherwise type into the void) */
   const [sendError, setSendError] = useState<string | null>(null)
   /** open thread's root message id (threaded channels only) */
   const [openThreadRoot, setOpenThreadRoot] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const composerRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -139,73 +134,17 @@ export function MessageThread({
     if (replyingTo) composerRef.current?.focus()
   }, [replyingTo])
 
-  const pickFile = async (file: File | undefined) => {
-    if (!file || !onSendMedia) return
-    const caption = draft.trim() || undefined
-    const once = viewOnce
-    setDraft('')
-    setViewOnce(false)
-    try {
-      await onSendMedia(file, caption, replyingTo ?? undefined, once)
-      setReplyingTo(null)
-    } catch (err) {
-      console.error('media send failed', err)
-      setSendError(
-        isNotAMemberError(err)
-          ? t('chat.sendFailedNotMember')
-          : err instanceof Error
-            ? err.message
-            : String(err),
-      )
-    }
-  }
-
-  const sendVoiceNote = async (blob: Blob, durationMs: number) => {
-    if (!onSendVoice) return
-    const replyTo = replyingTo ?? undefined
-    const once = viewOnce
-    setReplyingTo(null)
-    setViewOnce(false)
-    try {
-      await onSendVoice(blob, durationMs, replyTo, once)
-    } catch (err) {
-      console.error('voice send failed', err)
-      setSendError(
-        isNotAMemberError(err)
-          ? t('chat.sendFailedNotMember')
-          : err instanceof Error
-            ? err.message
-            : String(err),
-      )
-    }
-  }
-
-  const send = async () => {
-    const text = draft.trim()
-    if (!text || !ready || sending) return
-    setSending(true)
-    setDraft('')
-    const replyTo = replyingTo ?? undefined
-    const once = viewOnce
-    setReplyingTo(null)
-    setViewOnce(false)
-    try {
-      setSendError(null)
-      await onSend(text, replyTo, once)
-    } catch (err) {
-      console.error('send failed', err)
-      setSendError(
-        isNotAMemberError(err)
-          ? t('chat.sendFailedNotMember')
-          : err instanceof Error
-            ? err.message
-            : String(err),
-      )
-      setDraft(text)
-      setViewOnce(once)
-    } finally {
-      setSending(false)
-    }
+  /** Phrase a send failure. A silently dropped message is worse than an error — a
+   *  removed member would otherwise type into the void. */
+  const reportSendError = (err: unknown) => {
+    console.error('send failed', err)
+    setSendError(
+      isNotAMemberError(err)
+        ? t('chat.sendFailedNotMember')
+        : err instanceof Error
+          ? err.message
+          : String(err),
+    )
   }
 
   const replyPreview = replyingTo ? byId.get(replyingTo) : null
@@ -294,98 +233,56 @@ export function MessageThread({
           {readOnlyLabel ?? t('chat.readOnly')}
         </p>
       ) : (
-        <div className="pt-3 border-t border-edge">
-          {sendError && (
-            <p className="mb-2 rounded-md border border-danger/50 bg-danger/10 px-2 py-1 text-xs text-danger">
-              {sendError}
-            </p>
-          )}
-          {replyPreview && (
-            <div className="flex items-center gap-2 mb-2 text-xs text-ink-soft">
-              <span className="flex-1 min-w-0 truncate border-l-2 border-indigo-soft/60 pl-2">
-                {t('chat.replyingTo')}: {replyPreview.text || t('chat.attachment')}
-              </span>
-              <button
-                type="button"
-                className="text-ink-faint hover:text-ink"
-                onClick={() => setReplyingTo(null)}
-                aria-label={t('common.cancel')}
-              >
-                ✕
-              </button>
-            </div>
-          )}
-          <form
-            className="flex items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void send()
-            }}
-          >
-            {onSendMedia && (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  className="hidden"
-                  onChange={(e) => {
-                    void pickFile(e.target.files?.[0])
-                    e.target.value = '' // allow re-picking the same file
-                  }}
-                />
+        <Composer
+          ready={ready}
+          placeholder={t('chat.placeholder')}
+          inputRef={composerRef}
+          autoFocus
+          error={sendError}
+          onError={reportSendError}
+          supportsViewOnce={supportsViewOnce}
+          replyStrip={
+            replyPreview ? (
+              <div className="flex items-center gap-2 mb-2 text-xs text-ink-soft">
+                <span className="flex-1 min-w-0 truncate border-l-2 border-indigo-soft/60 pl-2">
+                  {t('chat.replyingTo')}: {replyPreview.text || t('chat.attachment')}
+                </span>
                 <button
                   type="button"
-                  className="btn-icon"
-                  disabled={!ready}
-                  title={t('chat.attach')}
-                  aria-label={t('chat.attach')}
-                  onClick={() => fileInputRef.current?.click()}
+                  className="text-ink-faint hover:text-ink"
+                  onClick={() => setReplyingTo(null)}
+                  aria-label={t('common.cancel')}
                 >
-                  <AttachIcon />
+                  ✕
                 </button>
-              </>
-            )}
-            {onSendVoice && (
-              <VoiceRecorder disabled={!ready} onRecorded={(b, d) => void sendVoiceNote(b, d)} />
-            )}
-            {supportsViewOnce && (
-              <button
-                type="button"
-                className="btn-icon"
-                disabled={!ready}
-                aria-pressed={viewOnce}
-                title={t('chat.viewOnce')}
-                aria-label={t('chat.viewOnce')}
-                style={
-                  viewOnce
-                    ? { color: '#16110a', backgroundColor: 'var(--color-gold-bright)' }
-                    : undefined
+              </div>
+            ) : null
+          }
+          onSend={async (text, once) => {
+            setSendError(null)
+            const replyTo = replyingTo ?? undefined
+            await onSend(text, replyTo, once)
+            setReplyingTo(null)
+          }}
+          onSendMedia={
+            onSendMedia
+              ? async (file, caption, once) => {
+                  setSendError(null)
+                  await onSendMedia(file, caption, replyingTo ?? undefined, once)
+                  setReplyingTo(null)
                 }
-                onClick={() => setViewOnce((v) => !v)}
-              >
-                <EyeIcon />
-              </button>
-            )}
-            <input
-              ref={composerRef}
-              className="composer-field"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={ready ? t('chat.placeholder') : t('chat.cannotSend')}
-              disabled={!ready}
-              autoFocus
-            />
-            <button
-              type="submit"
-              className="btn-send"
-              aria-label={t('chat.send')}
-              title={t('chat.send')}
-              disabled={!ready || !draft.trim() || sending}
-            >
-              <SendIcon />
-            </button>
-          </form>
-        </div>
+              : undefined
+          }
+          onSendVoice={
+            onSendVoice
+              ? async (blob, durationMs, once) => {
+                  setSendError(null)
+                  await onSendVoice(blob, durationMs, replyingTo ?? undefined, once)
+                  setReplyingTo(null)
+                }
+              : undefined
+          }
+        />
       )}
 
       {threaded && threadIndex && openThreadRoot && (
@@ -396,6 +293,16 @@ export function MessageThread({
           ready={ready}
           onClose={() => setOpenThreadRoot(null)}
           onSend={onSend}
+          onSendMedia={
+            onSendMedia
+              ? (file, caption, replyTo, once) => onSendMedia(file, caption, replyTo, once)
+              : undefined
+          }
+          onSendVoice={
+            onSendVoice
+              ? (blob, durationMs, replyTo, once) => onSendVoice(blob, durationMs, replyTo, once)
+              : undefined
+          }
           myAccountId={myAccountId}
           friendAccountIds={friendAccountIds}
           onReact={onReact}

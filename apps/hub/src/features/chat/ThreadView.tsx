@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { ReportReason } from '../../lib/reports.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
 import type { ThreadIndex } from '../../lib/thread-index.ts'
+import { Composer } from './Composer.tsx'
 import { MessageBubble } from './MessageBubble.tsx'
 
 /** How deep replies visually nest before flattening (with a "↳ replying to X" marker). */
@@ -48,6 +49,13 @@ export interface ThreadViewProps {
   ready: boolean
   onClose: () => void
   onSend: (text: string, replyTo?: string, once?: boolean) => Promise<void>
+  /** attachments + voice, so a thread reply is a full message like any other */
+  onSendMedia?:
+    | ((file: File, caption: string | undefined, replyTo: string, once: boolean) => Promise<void>)
+    | undefined
+  onSendVoice?:
+    | ((blob: Blob, durationMs: number, replyTo: string, once: boolean) => Promise<void>)
+    | undefined
   myAccountId?: string | undefined
   friendAccountIds?: string[] | undefined
   onReact?: ((targetId: string, emoji: string, remove: boolean) => void) | undefined
@@ -75,6 +83,8 @@ export function ThreadView({
   ready,
   onClose,
   onSend,
+  onSendMedia,
+  onSendVoice,
   myAccountId,
   friendAccountIds,
   onReact,
@@ -97,8 +107,7 @@ export function ThreadView({
 
   // Reply target within the thread — defaults to the root.
   const [replyTargetId, setReplyTargetId] = useState(rootId)
-  const [draft, setDraft] = useState('')
-  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
   const replyTarget = byId.get(replyTargetId)
   const detachedRoot = index.detached.has(rootId)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -117,22 +126,6 @@ export function ThreadView({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [lastSeq])
-
-  const send = async () => {
-    const text = draft.trim()
-    if (!text || !ready || sending) return
-    setSending(true)
-    setDraft('')
-    try {
-      await onSend(text, replyTargetId, false)
-      setReplyTargetId(rootId) // back to root after sending
-    } catch (err) {
-      console.error('thread reply failed', err)
-      setDraft(text)
-    } finally {
-      setSending(false)
-    }
-  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
@@ -181,44 +174,61 @@ export function ThreadView({
           <div ref={bottomRef} />
         </div>
 
-        <div className="border-t border-edge px-4 py-3">
-          {replyTarget && replyTargetId !== rootId && (
-            <div className="flex items-center gap-2 mb-2 text-xs text-ink-soft">
-              <span className="flex-1 min-w-0 truncate border-l-2 border-indigo-soft/60 pl-2">
-                {t('chat.replyingTo')}: {replyTarget.text || t('chat.attachment')}
-              </span>
-              <button
-                type="button"
-                className="text-ink-faint hover:text-ink"
-                aria-label={t('common.cancel')}
-                onClick={() => setReplyTargetId(rootId)}
-              >
-                ✕
-              </button>
-            </div>
-          )}
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void send()
+        <div className="px-4 pb-3">
+          {/* The same composer as the conversation: a reply is a message, so it gets
+              attachments and voice too, not a cut-down input. */}
+          <Composer
+            ready={ready}
+            placeholder={t('chat.threadReplyPlaceholder')}
+            inputRef={inputRef}
+            autoFocus
+            error={sendError}
+            onError={(err) => {
+              console.error('thread reply failed', err)
+              setSendError(err instanceof Error ? err.message : String(err))
             }}
-          >
-            <input
-              ref={inputRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={ready ? t('chat.threadReplyPlaceholder') : t('chat.cannotSend')}
-              disabled={!ready}
-            />
-            <button
-              type="submit"
-              className="btn-gold"
-              disabled={!ready || !draft.trim() || sending}
-            >
-              {t('chat.send')}
-            </button>
-          </form>
+            supportsViewOnce={!!onConsume}
+            replyStrip={
+              replyTarget && replyTargetId !== rootId ? (
+                <div className="flex items-center gap-2 mb-2 text-xs text-ink-soft">
+                  <span className="flex-1 min-w-0 truncate border-l-2 border-indigo-soft/60 pl-2">
+                    {t('chat.replyingTo')}: {replyTarget.text || t('chat.attachment')}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-ink-faint hover:text-ink"
+                    aria-label={t('common.cancel')}
+                    onClick={() => setReplyTargetId(rootId)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : null
+            }
+            onSend={async (text, once) => {
+              setSendError(null)
+              await onSend(text, replyTargetId, once)
+              setReplyTargetId(rootId) // back to root after sending
+            }}
+            onSendMedia={
+              onSendMedia
+                ? async (file, caption, once) => {
+                    setSendError(null)
+                    await onSendMedia(file, caption, replyTargetId, once)
+                    setReplyTargetId(rootId)
+                  }
+                : undefined
+            }
+            onSendVoice={
+              onSendVoice
+                ? async (blob, durationMs, once) => {
+                    setSendError(null)
+                    await onSendVoice(blob, durationMs, replyTargetId, once)
+                    setReplyTargetId(rootId)
+                  }
+                : undefined
+            }
+          />
         </div>
       </div>
     </div>

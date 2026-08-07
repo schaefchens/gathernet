@@ -80,7 +80,9 @@ async function addChannel(
     encryptionMode?: 'mls' | 'group_key'
   },
 ): Promise<void> {
-  await page.getByRole('button', { name: 'Add channel' }).click()
+  // Community actions live behind the top bar's overflow menu now.
+  await page.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Add channel' }).click()
   if (opts.emoji) await page.getByPlaceholder('Emoji').fill(opts.emoji)
   await page.getByPlaceholder('Channel title').fill(opts.title)
   if (opts.encryptionMode) {
@@ -382,7 +384,8 @@ test('communities v2: removing a member rotates K_meta; remaining members re-key
 
   // Alice renames the community. The new name is sealed under the NEW (post-
   // rotation) key — so Bob can only read it if he re-keyed to the new epoch.
-  await alice.getByRole('button', { name: 'Community settings' }).click()
+  await alice.getByRole('button', { name: 'More actions' }).click()
+  await alice.getByRole('menuitem', { name: 'Community settings' }).click()
   await alice.getByPlaceholder('Community name').fill('Rekeyed Fellowship')
   await alice.getByRole('button', { name: 'Save' }).click()
   await expect(bob.getByRole('heading', { name: 'Rekeyed Fellowship' })).toBeVisible({

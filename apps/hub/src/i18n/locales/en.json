@@ -21,7 +21,8 @@
     "chats": "Chats",
     "communities": "Communities",
     "connect": "Connect",
-    "tagline": "Secure. Faithful. Together."
+    "tagline": "Secure. Faithful. Together.",
+    "more": "More actions"
   },
   "chats": {
     "title": "Chats",
@@ -32,7 +33,10 @@
     "pickOne": "Choose a conversation to start reading.",
     "unread": "Unread",
     "youPrefix": "You:",
-    "browseCommunities": "Find a community"
+    "browseCommunities": "Find a community",
+    "newCommunity": "Communities & joining",
+    "expand": "Show channels",
+    "collapse": "Hide channels"
   },
   "welcome": {
     "title": "Gathernet",
@@ -503,7 +507,8 @@
     "memberCount_one": "{{count}} member",
     "memberCount_other": "{{count}} members",
     "channelCount_one": "{{count}} channel",
-    "channelCount_other": "{{count}} channels"
+    "channelCount_other": "{{count}} channels",
+    "backToChat": "Back to chat"
   },
   "rollcall": {
     "ask": "Ask who's still here",

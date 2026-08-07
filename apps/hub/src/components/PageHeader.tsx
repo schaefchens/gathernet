@@ -1,0 +1,55 @@
+import { Link } from '@tanstack/react-router'
+import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+
+/**
+ * The one-line bar at the top of a screen: where you came from, what you are
+ * looking at, and what you can do about it.
+ *
+ * Replaces the app-wide mobile header. A logo and an online-status control on
+ * every screen cost a whole band of vertical space and told you nothing you
+ * needed on that screen; a title, the primary action, and an overflow menu do.
+ */
+export function PageHeader({
+  backTo,
+  avatar,
+  title,
+  subtitle,
+  meta,
+  actions,
+}: {
+  /** shows a back affordance pointing here */
+  backTo?: string
+  /** leading avatar or seal */
+  avatar?: ReactNode
+  title: ReactNode
+  /** second line — presence, channel count, whatever identifies the thing */
+  subtitle?: ReactNode
+  /** right-aligned status, e.g. the encryption note */
+  meta?: ReactNode
+  /** right-aligned controls, typically buttons and the overflow menu */
+  actions?: ReactNode
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="flex items-center gap-3 border-b border-edge pb-3">
+      {backTo && (
+        <Link
+          to={backTo}
+          className="shrink-0 text-ink-soft hover:text-gold-bright"
+          aria-label={t('common.back')}
+        >
+          ←
+        </Link>
+      )}
+      {avatar}
+      <div className="min-w-0 flex-1">
+        <h1 className="truncate font-display text-2xl text-gold-bright leading-tight">{title}</h1>
+        {subtitle && <div className="truncate text-xs text-ink-faint">{subtitle}</div>}
+      </div>
+      {meta && <div className="hidden shrink-0 sm:block">{meta}</div>}
+      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+    </div>
+  )
+}

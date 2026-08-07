@@ -8,7 +8,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CommunityIcon, LockIcon } from '../components/icons.tsx'
+import { LockIcon } from '../components/icons.tsx'
+import { MenuButton } from '../components/MenuButton.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
 import { ChannelChat } from '../features/communities/ChannelChat.tsx'
 import { ChannelJoinPanel } from '../features/communities/ChannelJoinPanel.tsx'
 import { ChannelList } from '../features/communities/ChannelList.tsx'
@@ -69,6 +71,7 @@ function CommunityDetailScreen() {
 
   const [showCreate, setShowCreate] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showPeople, setShowPeople] = useState(false)
   const isDesktop = useMediaQuery(DESKTOP_QUERY)
   // The channel list lives in the sidebar on desktop and in this page on mobile,
   // so the selection is shared state rather than local to either.
@@ -165,76 +168,73 @@ function CommunityDetailScreen() {
     // On md+ the page fills the viewport and the channel pane flexes to the remaining
     // space (no magic-number height that overruns when a description / tab row is present).
     // On mobile it's normal document flow; the pane uses a dvh-based fallback height.
-    <div className="space-y-4 md:h-[calc(100dvh-7rem)] md:flex md:flex-col md:gap-4 md:space-y-0">
-      <div className="card space-y-3 p-4">
-        <div className="flex items-center gap-3">
-          <Link
-            to="/communities"
-            className="text-ink-soft hover:text-gold-bright"
-            aria-label={t('common.back')}
-          >
-            ←
-          </Link>
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <PageHeader
+        // On a phone the Chats list is the sidebar: it expands a community into its
+        // channels, so that is where "back" should land you.
+        backTo={isDesktop ? '/communities' : '/'}
+        avatar={
           <CommunityAvatar
             communityId={communityId}
             mediaId={detail.community.avatarMediaId}
             label={communityName}
-            size="md"
+            size="sm"
           />
-          <h1 className="flex-1 font-display text-2xl truncate text-gold-bright">
-            {communityName}
-          </h1>
+        }
+        title={communityName}
+        subtitle={
+          detail.memberCount !== null
+            ? t('communities.memberCount', { count: detail.memberCount })
+            : t(BUCKET_KEY[detail.memberBucket])
+        }
+        meta={
           <span
-            className={`shrink-0 text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5 ${ROLE_BADGE[detail.myRole]}`}
+            className="flex items-center gap-1.5 text-xs text-ink-faint"
+            title={t('chat.encrypted')}
           >
-            {t(`communities.roles.${detail.myRole}`)}
+            <LockIcon size={13} />
+            {t('chat.encrypted')}
           </span>
-        </div>
-
-        {/* Trust chips. Only claims that are actually true: the transport really is
-            end-to-end encrypted, and the size is the exact roster count for small
-            communities or the coarse band for large ones — large communities expose
-            no roster at all, so there is no number to show. */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="chip-row flex-1">
-            <span className="chip">
-              <LockIcon size={16} />
-              {t('chat.encrypted')}
+        }
+        actions={
+          <>
+            <span
+              className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${ROLE_BADGE[detail.myRole]}`}
+            >
+              {t(`communities.roles.${detail.myRole}`)}
             </span>
-            <span className="chip">
-              <CommunityIcon size={16} />
-              {detail.memberCount !== null
-                ? t('communities.memberCount', { count: detail.memberCount })
-                : t(BUCKET_KEY[detail.memberBucket])}
-            </span>
-          </div>
-          {isLeader && (
-            <>
-              <button
-                type="button"
-                className="btn-quiet shrink-0 text-xs px-2 py-1"
-                onClick={() => setShowCreate((s) => !s)}
-              >
-                {t('communities.addChannel')}
-              </button>
-              <button
-                type="button"
-                className="btn-quiet shrink-0 text-xs px-2 py-1"
-                onClick={() => setShowSettings((s) => !s)}
-              >
-                {t('communities.communitySettings')}
-              </button>
-            </>
-          )}
-        </div>
-
-        {communityMeta?.description && !showSettings && (
-          <ClampedMarkdown
-            text={communityMeta.description}
-            className="text-sm text-ink-soft [&_p]:mb-2 [&_ul]:mb-2"
-          />
-        )}
-      </div>
+            <MenuButton
+              items={
+                !isDesktop
+                  ? [
+                      { label: t('communities.members'), onSelect: () => setShowPeople(true) },
+                      ...(isLeader
+                        ? [
+                            {
+                              label: t('communities.addChannel'),
+                              onSelect: () => setShowCreate(true),
+                            },
+                            {
+                              label: t('communities.communitySettings'),
+                              onSelect: () => setShowSettings((v) => !v),
+                            },
+                          ]
+                        : []),
+                    ]
+                  : isLeader
+                    ? [
+                        { label: t('communities.addChannel'), onSelect: () => setShowCreate(true) },
+                        {
+                          label: t('communities.communitySettings'),
+                          onSelect: () => setShowSettings((v) => !v),
+                        },
+                      ]
+                    : []
+              }
+            />
+          </>
+        }
+      />
 
       {showSettings && isLeader && (
         <CommunitySettingsForm
@@ -252,6 +252,13 @@ function CommunityDetailScreen() {
         />
       )}
 
+      {communityMeta?.description && !showSettings && (
+        <ClampedMarkdown
+          text={communityMeta.description}
+          className="shrink-0 text-xs text-ink-soft [&_p]:mb-1"
+        />
+      )}
+
       {showCreate && isLeader && (
         <ChannelSettingsForm
           communityId={communityId}
@@ -265,49 +272,46 @@ function CommunityDetailScreen() {
         />
       )}
 
-      {/* Below `md` there is no sidebar, so the channel switcher lives here —
-          above the conversation, since that is what you came for. */}
-      {!isDesktop && (
-        <section className="card space-y-2 p-3">
-          <h2 className="section-label">{t('communities.channels')}</h2>
-          <ChannelList communityId={communityId} />
-        </section>
-      )}
-
-      <div className="flex flex-col gap-4 md:flex-1 md:min-h-0 md:flex-row">
-        <div className="min-w-0 flex-1 md:flex md:min-h-0 md:flex-col">
-          {selectedChannel ? (
-            <ChannelWorkspace
-              key={selectedChannel.channelId}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* One pane at a time on mobile: the conversation, or the people behind it.
+            Channels are reached from the Chats list, which expands a community into
+            its channels — the phone's equivalent of the desktop sidebar. */}
+        {!isDesktop && showPeople ? (
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+            <button
+              type="button"
+              className="btn-quiet text-xs"
+              onClick={() => setShowPeople(false)}
+            >
+              ← {t('communities.backToChat')}
+            </button>
+            <MemberPanel
               communityId={communityId}
-              channel={selectedChannel}
-              isLeader={isLeader}
+              myRole={detail.myRole}
               myAccountId={myAccountId}
               members={detail.members}
-              onChanged={invalidate}
-              onDeleteChannel={onDeleteChannel}
+              memberCount={detail.memberCount}
+              memberBucket={detail.memberBucket}
+              channelIds={sorted.map((c) => c.channelId)}
             />
-          ) : (
-            <div className="card grid place-items-center h-[50vh] md:h-auto md:flex-1 text-ink-soft">
-              {t('communities.selectChannel')}
-            </div>
-          )}
-        </div>
-
-        {/* Who is here and how to invite them — a companion panel, not a column
-            the conversation has to share space with. */}
-        <aside className="space-y-4 md:w-[320px] md:shrink-0 md:overflow-y-auto md:min-h-0">
-          <MemberPanel
+            {isLeader && <InvitePanel communityId={communityId} />}
+          </div>
+        ) : selectedChannel ? (
+          <ChannelWorkspace
+            key={selectedChannel.channelId}
             communityId={communityId}
-            myRole={detail.myRole}
+            channel={selectedChannel}
+            isLeader={isLeader}
             myAccountId={myAccountId}
             members={detail.members}
-            memberCount={detail.memberCount}
-            memberBucket={detail.memberBucket}
-            channelIds={sorted.map((c) => c.channelId)}
+            onChanged={invalidate}
+            onDeleteChannel={onDeleteChannel}
           />
-          {isLeader && <InvitePanel communityId={communityId} />}
-        </aside>
+        ) : (
+          <div className="card grid flex-1 place-items-center text-ink-soft">
+            {t('communities.selectChannel')}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -358,7 +362,7 @@ function ChannelWorkspace({
   }
 
   return (
-    <div className="space-y-3 md:h-full md:flex md:flex-col md:gap-3 md:space-y-0 md:min-h-0">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       {(isManager || canEdit) && (
         <div className="flex gap-2">
           <TabButton active={view === 'chat'} onClick={() => setView('chat')}>

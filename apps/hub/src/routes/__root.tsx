@@ -10,6 +10,7 @@ import {
   ShieldIcon,
 } from '../components/icons.tsx'
 import { ChatList } from '../features/chat/ChatList.tsx'
+import { CommunitySidebarPanels } from '../features/communities/CommunitySidebarPanels.tsx'
 import { WelcomeFlow } from '../features/onboarding/WelcomeFlow.tsx'
 import { PresenceSelector } from '../features/presence/PresenceSelector.tsx'
 import { UpdatePrompt } from '../features/pwa/UpdatePrompt.tsx'
@@ -75,6 +76,7 @@ function AppShell() {
   const [wsStatus, setWsStatus] = useState<WsStatus>(wsClient.status)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const isDesktop = useMediaQuery(DESKTOP_QUERY)
+  const communityId = /^\/communities\/([^/]+)/.exec(pathname)?.[1] ?? null
 
   useEffect(() => wsClient.onStatus(setWsStatus), [])
   // Peer-triggered event reminders run while the authenticated shell is mounted.
@@ -83,7 +85,7 @@ function AppShell() {
   const isCurrent = (to: string) => (to === '/' ? pathname === '/' : pathname.startsWith(to))
 
   return (
-    <div className="min-h-screen flex">
+    <div className="flex h-[100dvh] overflow-hidden">
       {/* Icon rail — desktop only. The whole rail/sidebar/tab-bar split is mounted
           conditionally rather than toggled with `hidden`, so only one copy of the
           navigation, wordmark, and presence control is ever in the DOM. */}
@@ -130,8 +132,16 @@ function AppShell() {
             <p className="mt-1 text-xs italic text-ink-faint">{t('nav.tagline')}</p>
           </div>
           <p className="section-label px-4 pb-2">{t('chats.title')}</p>
-          <div className="flex-1 overflow-y-auto px-2 pb-2">
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
             <ChatList compact manage />
+            {/* Inside a community the sidebar also carries its people, so the
+                community view reads like the chat screen rather than a page with
+                panels bolted to the side. */}
+            {communityId && (
+              <div className="mt-4 border-t border-edge pt-3">
+                <CommunitySidebarPanels communityId={communityId} />
+              </div>
+            )}
           </div>
           <div className="px-3 pb-3">
             <div className="card-gold flex gap-3">
@@ -152,24 +162,7 @@ function AppShell() {
         </aside>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile header. */}
-        {!isDesktop && (
-          <header className="border-b border-edge bg-raised">
-            <div className="flex items-center justify-between px-4 py-3">
-              <Link to="/" className="flex items-center gap-2">
-                <span className="seal h-8 w-8" aria-hidden>
-                  <ShieldIcon size={16} />
-                </span>
-                <span className="font-display text-2xl text-gold-bright">
-                  {t('common.appName')}
-                </span>
-              </Link>
-              <PresenceSelector />
-            </div>
-          </header>
-        )}
-
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* An E2EE app has to be honest about not being able to deliver: while the
             socket is down nothing sends or arrives, and a faint word in a corner is
             not enough warning for that. */}
@@ -186,9 +179,11 @@ function AppShell() {
         {/* Conversations take the whole window; reading and form pages stay in a
             comfortable measure rather than stretching across an ultrawide display. */}
         <main
-          className={`flex-1 w-full px-4 py-6 pb-24 md:pb-6 ${
-            isConversation(pathname) ? '' : 'mx-auto max-w-4xl'
-          }`}
+          className={
+            isConversation(pathname)
+              ? 'flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3 pb-20 md:pb-3'
+              : 'w-full flex-1 overflow-y-auto mx-auto max-w-4xl px-4 py-6 pb-24 md:pb-6'
+          }
         >
           <Outlet />
         </main>

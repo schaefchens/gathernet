@@ -4,7 +4,10 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChatIcon } from '../components/icons.tsx'
+import { MenuButton } from '../components/MenuButton.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
 import { ChatList } from '../features/chat/ChatList.tsx'
+import { PresenceSelector } from '../features/presence/PresenceSelector.tsx'
 import { api } from '../lib/api.ts'
 import { openConnectRequest } from '../lib/connect.ts'
 import { secureStore } from '../lib/storage.ts'
@@ -60,12 +63,23 @@ function ChatsScreen() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-3xl">{t('chats.title')}</h1>
-        <Link to="/friends/add" className="btn-gold">
-          {t('friends.add')}
-        </Link>
-      </div>
+      <PageHeader
+        title={t('chats.title')}
+        actions={
+          <>
+            <Link to="/friends/add" className="btn-gold text-sm">
+              {t('friends.add')}
+            </Link>
+            <MenuButton
+              items={[
+                { label: t('chats.newCommunity'), to: '/communities' },
+                { label: t('settings.title'), to: '/settings' },
+              ]}
+              footer={!isDesktop ? <PresenceSelector /> : undefined}
+            />
+          </>
+        }
+      />
 
       {requests.data?.incoming.length || requests.data?.outgoing.length ? (
         <section className="space-y-2">

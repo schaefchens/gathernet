@@ -1,5 +1,6 @@
 import type { CommunityChannel, CommunityDetailResponse } from '@gathernet/shared'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LockIcon } from '../../components/icons.tsx'
@@ -25,6 +26,7 @@ export function ChannelList({ communityId }: { communityId: string }) {
     queryFn: () => api<CommunityDetailResponse>('GET', `/api/v1/communities/${communityId}`),
   })
   const selected = useChannelSelection((s) => s.byCommunity[communityId] ?? null)
+  const navigate = useNavigate()
 
   const channels = [...(detail.data?.channels ?? [])].sort((a, b) => a.position - b.position)
 
@@ -47,7 +49,12 @@ export function ChannelList({ communityId }: { communityId: string }) {
           communityId={communityId}
           channel={channel}
           active={channel.channelId === selected}
-          onSelect={() => selectChannel(communityId, channel.channelId)}
+          onSelect={() => {
+            selectChannel(communityId, channel.channelId)
+            // From the conversation list, picking a channel should land you in that
+            // channel's conversation, not just mark it selected somewhere else.
+            void navigate({ to: '/communities/$communityId', params: { communityId } })
+          }}
         />
       ))}
     </ul>

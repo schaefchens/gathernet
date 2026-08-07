@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { MoreIcon } from '../../components/icons.tsx'
+import { ChevronIcon, MoreIcon } from '../../components/icons.tsx'
 import { api } from '../../lib/api.ts'
 import type { CommunityMeta } from '../../lib/community-keys.ts'
 import type { StoredMessage } from '../../lib/storage.ts'
@@ -66,6 +66,7 @@ export function ChatList({ compact, manage }: { compact?: boolean; manage?: bool
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const statuses = usePresence((s) => s.statuses)
   const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({})
   // Previews and unread marks come from what this device has already decrypted —
   // no extra requests, and nothing about read state leaves the device.
   const dmGroups = useChat((s) => s.groups)
@@ -140,13 +141,21 @@ export function ChatList({ compact, manage }: { compact?: boolean; manage?: bool
   return (
     <ul className="space-y-1">
       {list.map((community) => {
-        const open = pathname.includes(community.communityId)
+        const viewing = pathname.includes(community.communityId)
+        // Expanded by default for the community you're looking at; otherwise the
+        // user's own choice. Same behaviour on both mobile and desktop.
+        const expanded = expandedIds[community.communityId] ?? viewing
         return (
           <li key={community.communityId}>
-            <CommunityRow community={community} active={open} />
-            {/* Channels of the community you're in, nested under it — the sidebar is
-                where you switch channels on desktop. */}
-            {open && compact && (
+            <CommunityRow
+              community={community}
+              active={viewing}
+              expanded={expanded}
+              onToggle={() =>
+                setExpandedIds((prev) => ({ ...prev, [community.communityId]: !expanded }))
+              }
+            />
+            {expanded && (
               <div className="mt-0.5 mb-1 ml-5 border-l border-edge pl-2">
                 <ChannelList communityId={community.communityId} />
               </div>
@@ -269,7 +278,17 @@ export function ChatList({ compact, manage }: { compact?: boolean; manage?: bool
   )
 }
 
-function CommunityRow({ community, active }: { community: CommunityListItem; active: boolean }) {
+function CommunityRow({
+  community,
+  active,
+  expanded,
+  onToggle,
+}: {
+  community: CommunityListItem
+  active: boolean
+  expanded: boolean
+  onToggle: () => void
+}) {
   const { t } = useTranslation()
   const meta = useDecryptedMeta<CommunityMeta>(community.communityId, community.metaCiphertext)
   const name = meta?.name ?? t('communities.encryptedName')
@@ -284,34 +303,50 @@ function CommunityRow({ community, active }: { community: CommunityListItem; act
   })
 
   return (
-    <Link
-      to="/communities/$communityId"
-      params={{ communityId: community.communityId }}
-      className="list-row"
-      data-active={active}
-    >
-      <CommunityAvatar
-        communityId={community.communityId}
-        mediaId={community.avatarMediaId}
-        label={name}
-        size="sm"
-      />
-      <span className="min-w-0 flex-1">
-        <span
-          className={`block truncate font-display ${unread ? 'font-semibold text-ink' : 'font-medium'}`}
-        >
-          {name}
+    <div className="flex items-center">
+      {/* Collapse the community's channels without leaving where you are — the row
+          itself still opens the community. */}
+      <button
+        type="button"
+        className="shrink-0 rounded px-1 py-1 text-ink-faint hover:text-gold-bright"
+        aria-expanded={expanded}
+        aria-label={expanded ? t('chats.collapse') : t('chats.expand')}
+        onClick={onToggle}
+      >
+        <ChevronIcon
+          size={14}
+          className={expanded ? 'rotate-90 transition-transform' : 'transition-transform'}
+        />
+      </button>
+      <Link
+        to="/communities/$communityId"
+        params={{ communityId: community.communityId }}
+        className="list-row min-w-0 flex-1"
+        data-active={active}
+      >
+        <CommunityAvatar
+          communityId={community.communityId}
+          mediaId={community.avatarMediaId}
+          label={name}
+          size="sm"
+        />
+        <span className="min-w-0 flex-1">
+          <span
+            className={`block truncate font-display ${unread ? 'font-semibold text-ink' : 'font-medium'}`}
+          >
+            {name}
+          </span>
+          <span className="block truncate text-xs text-ink-faint">
+            {t('communities.channelCount', { count: community.channelCount })}
+          </span>
         </span>
-        <span className="block truncate text-xs text-ink-faint">
-          {t('communities.channelCount', { count: community.channelCount })}
-        </span>
-      </span>
-      {unread && (
-        <>
-          <span className="sr-only">{t('chats.unread')}</span>
-          <span className="h-2 w-2 shrink-0 rounded-full bg-gold-bright" aria-hidden />
-        </>
-      )}
-    </Link>
+        {unread && (
+          <>
+            <span className="sr-only">{t('chats.unread')}</span>
+            <span className="h-2 w-2 shrink-0 rounded-full bg-gold-bright" aria-hidden />
+          </>
+        )}
+      </Link>
+    </div>
   )
 }
