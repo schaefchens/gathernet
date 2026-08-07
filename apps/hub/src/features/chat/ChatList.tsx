@@ -419,7 +419,7 @@ function CommunityRow({
       >
         <span className="min-w-0 flex-1">
           <span
-            className={`block truncate font-display ${unread ? 'font-semibold text-ink' : 'font-medium'}`}
+            className={`block truncate ${unread ? 'font-semibold text-ink' : 'font-medium'}`}
           >
             {name}
           </span>
